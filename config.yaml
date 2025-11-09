@@ -1,0 +1,204 @@
+# PersonalAgent Configuration File
+
+# ========================
+# LLM Configuration
+# ========================
+llm:
+  # Chat模型配置（主模型，用于复杂推理任务）
+  chat:
+    base_url: "${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}"
+    api_key: "${LLM_API_KEY:sk-da598e8ebde449dfbb3d4578854b0502}"
+    model: "${LLM_MODEL:qwen3-max}"
+    timeout: 60
+    temperature: 0.7
+
+  # Embedding模型配置
+  embedding:
+    base_url: "${EMBEDDING_BASE_URL:https://api.siliconflow.cn/v1}"
+    api_key: "${EMBEDDING_API_KEY:sk-tpnnprwtipwwbtojamuccbosjlezyhlqhvplyxnqmqyfiqyg}"
+    model: "${EMBEDDING_MODEL:BAAI/bge-m3}"
+    timeout: 30
+    output_dim: 1024  # bge-m3的向量维度
+
+  # Fast模型配置（轻量快速模型，用于简单任务如摘要、翻译等）
+  fast:
+    base_url: "${FAST_LLM_BASE_URL:https://api.siliconflow.cn/v1}"
+    api_key: "${FAST_LLM_API_KEY:sk-tpnnprwtipwwbtojamuccbosjlezyhlqhvplyxnqmqyfiqyg}"
+    model: "${FAST_LLM_MODEL:Qwen/Qwen3-8B}"
+    timeout: 30
+    temperature: 0.7
+
+# ========================
+# Database Configuration
+# ========================
+database:
+  # MySQL配置
+  mysql:
+    host: "${MYSQL_HOST:localhost}"
+    port: "${MYSQL_PORT:3306}"
+    user: "${MYSQL_USER:root}"
+    password: "${MYSQL_PASSWORD}"
+    database: "${MYSQL_DATABASE:personal_agent}"
+    charset: "utf8mb4"
+    pool_size: 10
+    max_overflow: 20
+
+  # ChromaDB配置
+  chromadb:
+    mode: "local"  # local 或 server
+    path: "${CHROMADB_PATH:./data/chromadb}"
+    # collection_prefix: 已移除，直接使用collection名称
+
+  # Redis配置
+  redis:
+    host: "${REDIS_HOST:localhost}"
+    port: "${REDIS_PORT:6379}"
+    password: "${REDIS_PASSWORD:}"
+    db: 0
+    max_connections: 50
+
+# ========================
+# Web Server Configuration
+# ========================
+web:
+  host: "0.0.0.0"
+  port: 11528
+  reload: false  # Windows下禁用reload避免模块加载问题
+  workers: 1
+
+# ========================
+# Chat Service Configuration
+# ========================
+chat:
+  # 活跃历史窗口（动态Token预算）
+  active_history:
+    max_tokens: 15000  # 最大Token数
+    reserve_tokens: 5000  # 为回复预留的Token数
+
+  # 意图补全
+  intent_completion:
+    enabled: true
+    min_length: 10  # 最小触发长度
+
+  # 召回工具
+  recall_tools:
+    enabled: true
+    max_results: 10  # 每次召回最大结果数
+
+# ========================
+# News Service Configuration
+# ========================
+news:
+  # RSS抓取
+  rss_crawler:
+    enabled: true
+    interval: 300  # 抓取间隔（秒）
+    sources: []  # RSS源列表，可在运行时配置
+
+  # 去重配置
+  deduplication:
+    bloom_filter_size: 100000
+    similarity_threshold: 0.85
+
+  # 自动摘要
+  auto_summary:
+    enabled: true
+    max_length: 200  # 摘要最大长度
+
+# ========================
+# Agent Configuration
+# ========================
+agent:
+  max_iterations: null  # 最大推理轮次（null表示不限制）
+  tool_timeout: 30  # 工具执行超时（秒）
+
+# ========================
+# Retrieval Configuration
+# ========================
+retrieval:
+  similarity_threshold: 0.4  # 向量检索相似度阈值
+  rrf_k: 60  # RRF融合参数
+
+# ========================
+# Prompts Configuration
+# ========================
+prompts:
+  language: "zh"  # zh 或 en
+  file: "prompts_zh.yaml"
+
+# ========================
+# Logging Configuration
+# ========================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "json"  # text 或 json
+  file: "./logs/app.log"
+
+# ========================
+# Vector Sync Configuration
+# ========================
+vector_sync:
+  enabled: true
+  mode: "full"
+  incremental_limit: 1000
+  async_mode: true
+
+# ========================
+# File Parsing Configuration
+# ========================
+file_parsing:
+  # 缓存配置
+  cache:
+    enabled: true
+    l1_ttl_days: 30  # L1缓存（原始解析结果）过期时间
+    l2_ttl_days: 7   # L2缓存（提取结果）过期时间
+    l3_ttl_days: 14  # L3缓存（翻译结果）过期时间
+
+  # 引擎配置
+  engines:
+    # PDF引擎配置（优先级从高到低）
+    pdf:
+      default: "local"  # 默认PDF引擎：marker/paddleocr/local
+      local:
+        enabled: true  # 本地引擎，速度快
+        priority: 1  # 最高优先级
+      marker:
+        enabled: true
+        priority: 2  # 备用，质量高但慢
+      paddleocr:
+        enabled: false  # 跳过PaddleOCR（Windows不支持或性能问题）
+        priority: 3
+
+    # Office文档引擎
+    docx:
+      enabled: true
+    pptx:
+      enabled: true
+    xlsx:
+      enabled: true
+
+  # PaddleOCR-VL模型预热配置
+  model_warmup:
+    enabled: true  # 是否在启动时检查模型状态
+    auto_download: false  # 是否在启动时主动下载缺失模型（设为true会在启动时下载，耗时较长）
+
+  # 提取服务配置
+  extraction:
+    enabled: true
+    model: "${LLM_MODEL:qwen3-max}"  # 使用主LLM模型（需要强推理能力）
+    max_tokens: 95000   # 最大Token限制
+    degradation_ratios: [1.0, 0.7, 0.49]  # 降级策略比例
+    final_char_limit: 25000  # 最终字符限制
+
+  # 翻译服务配置
+  translation:
+    enabled: true
+    model: "${LLM_MODEL:qwen3-max}"  # 暂时使用主模型（后续可改为FAST_LLM_MODEL）
+    batch_size: 3000  # 批量翻译的批次大小（字符数）
+    default_target_lang: "Chinese"
+
+  # 文件限制
+  limits:
+    max_file_size_mb: 100  # 最大文件大小（MB）
+    max_pages: 200         # 最大页数
+    token_limit: 150000    # Token总限制
