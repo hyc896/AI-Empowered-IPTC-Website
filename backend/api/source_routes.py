@@ -29,7 +29,7 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=List[MessageSourceResponse])
+@router.get("", response_model=List[MessageSourceResponse])
 async def get_sources(
     is_active: Optional[bool] = Query(None, description="是否启用"),
     category: Optional[str] = Query(None, description="消息源类别")
