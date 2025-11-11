@@ -299,3 +299,73 @@ class ChromaDBStorage:
         except Exception as e:
             logger.error(f"Failed to create collection {collection_name}: {e}")
             return False
+
+    def delete_collection(self, collection_name: str) -> bool:
+        """
+        删除指定Collection
+
+        Args:
+            collection_name: Collection名称
+
+        Returns:
+            是否删除成功
+        """
+        if not self._initialized:
+            logger.error("【ChromaDB】向量数据库未初始化")
+            return False
+
+        try:
+            # 从_client中删除collection
+            self._client.delete_collection(name=collection_name)
+
+            # 从本地缓存中移除
+            if collection_name in self._collections:
+                del self._collections[collection_name]
+
+            logger.info(f"✓ Collection已删除: {collection_name}")
+            return True
+        except Exception as e:
+            # 如果collection不存在，认为成功
+            if "does not exist" in str(e) or "not found" in str(e).lower():
+                logger.warning(f"Collection不存在，无需删除: {collection_name}")
+                return True
+            logger.error(f"删除Collection失败 {collection_name}: {e}")
+            return False
+
+    def collection_exists(self, collection_name: str) -> bool:
+        """
+        检查Collection是否存在
+
+        Args:
+            collection_name: Collection名称
+
+        Returns:
+            是否存在
+        """
+        if not self._initialized:
+            return False
+
+        try:
+            self._client.get_collection(name=collection_name)
+            return True
+        except Exception:
+            return False
+
+    def get_collection_count(self, collection_name: str) -> int:
+        """
+        获取Collection中的文档数量（先检查是否存在）
+
+        Args:
+            collection_name: Collection名称
+
+        Returns:
+            文档数量，不存在返回0
+        """
+        if not self._initialized:
+            return 0
+
+        try:
+            collection = self._client.get_collection(name=collection_name)
+            return collection.count()
+        except Exception:
+            return 0
