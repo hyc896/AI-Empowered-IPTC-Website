@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
 """
-PersonalAgent LLM Client
-Simplified from MineContext, removed Doubao-specific code
+LLM Client
+OpenAI-compatible LLM client for embedding and text generation
 """
 
 from enum import Enum

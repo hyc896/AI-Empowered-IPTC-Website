@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE/Editor
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Database files
+data/chromadb_mp/
+*.sqlite3
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Frontend build outputs
+global-news-dashboard/node_modules/
+global-news-dashboard/dist/
+global-news-dashboard/.vite/
+global-news-dashboard/.env.local
+
+# Build/Distribution
+build/
+dist/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints

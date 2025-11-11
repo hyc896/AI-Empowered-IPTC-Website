@@ -9,7 +9,7 @@ import logging
 from typing import List
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Response
 from fastapi.responses import JSONResponse
 
 from ..services.search_service import search_service
@@ -38,7 +38,7 @@ async def search_messages(request: SearchRequest):
         start_time = datetime.now()
 
         # 执行搜索
-        results = await search_service.search(
+        results, total = await search_service.search(
             source_type=request.source_type,
             query=request.query,
             time_range=request.time_range,
@@ -55,7 +55,7 @@ async def search_messages(request: SearchRequest):
 
         return SearchResponse(
             results=message_responses,
-            total=len(message_responses),
+            total=total,
             query=request.query,
             search_time=search_time
         )
@@ -70,26 +70,44 @@ async def search_messages(request: SearchRequest):
 
 @router.get("/messages", response_model=List[MessageResponse])
 async def get_recent_messages(
+    response: Response,
     source_type: str = None,
+    source_id: str = None,
     limit: int = 20,
-    hours: int = 24
+    offset: int = 0,
+    hours: int = 0
 ):
     """
     获取最近消息
 
-    获取指定时间范围内的最新消息
+    支持分页和消息源筛选
+
+    Args:
+        source_type: 消息源类别（news/academic等）
+        source_id: 具体消息源UUID
+        limit: 返回数量
+        offset: 分页偏移量
+        hours: 时间范围（小时数，0表示不限制）
+
+    Response Headers:
+        X-Total-Count: 符合筛选条件的消息总数
     """
     try:
         # 构建搜索请求
         time_range = {"hours": hours} if hours > 0 else None
 
         # 执行搜索（使用空查询获取所有消息）
-        results = await search_service.search(
+        results, total = await search_service.search(
             source_type=source_type,
-            query="",  # 空查询表示获取所有消息
+            source_id=source_id,
+            query="",
             time_range=time_range,
-            limit=limit
+            limit=limit,
+            offset=offset
         )
+
+        # 设置响应头返回总数
+        response.headers["X-Total-Count"] = str(total)
 
         # 转换结果格式
         message_responses = []
@@ -164,7 +182,7 @@ async def search_health_check():
     """
     try:
         # 执行简单的搜索测试
-        test_results = await search_service.search(
+        test_results, _ = await search_service.search(
             query="test",
             limit=1
         )

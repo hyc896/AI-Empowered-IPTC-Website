@@ -2,7 +2,7 @@
 
 """
 ChromaDB Vector Storage
-Simplified from MineContext, focuses on PersonalAgent use cases
+Vector database for semantic message search
 """
 
 import chromadb
@@ -33,14 +33,12 @@ class ChromaDBStorage:
             config: 配置字典，包含：
                 - mode: "local" 或 "server"
                 - path: 本地模式的存储路径
-                - collection_prefix: Collection名称前缀
 
         Returns:
             是否初始化成功
         """
         try:
             mode = config.get('mode', 'local')
-            # 移除collection_prefix，直接使用collection名称
 
             if mode == 'server':
                 # 服务器模式
@@ -49,24 +47,54 @@ class ChromaDBStorage:
                 logger.info(f"【ChromaDB】服务器模式初始化: {host}:{port}")
                 self._client = chromadb.HttpClient(host=host, port=port)
             else:
-                # 本地持久化模式
-                path = config.get('path', './data/chromadb')
+                # 本地持久化模式（支持环境变量CHROMADB_PATH）
+                import os
+                path = config.get('path') or os.getenv('CHROMADB_PATH', './data/chromadb')
                 logger.info(f"【ChromaDB】本地模式初始化: {path}")
                 self._client = chromadb.PersistentClient(path=path)
 
-            # 创建消息平台专用Collections
-            collection_names = ['tonghuashun', 'kr36', 'arxiv']
+            # 动态从数据库读取所有激活消息源的collection配置（配置驱动，零硬编码）
+            collection_names = []
+            try:
+                from backend.database.connection import create_session
+                from backend.database.entities import MessageSource
+
+                with create_session() as db:
+                    active_sources = db.query(MessageSource).filter(
+                        MessageSource.is_active == True
+                    ).all()
+
+                    if not active_sources:
+                        raise RuntimeError("【ChromaDB】未找到激活的消息源，无法初始化collection")
+
+                    for source in active_sources:
+                        source_config = source.config or {}
+                        chroma_collection = source_config.get('chroma_collection')
+
+                        if chroma_collection:
+                            collection_names.append(chroma_collection)
+                        else:
+                            logger.warning(f"【ChromaDB】消息源 '{source.name}' 缺少chroma_collection配置")
+
+            except Exception as e:
+                # Fail Fast：配置错误时拒绝启动，而非降级
+                logger.error(f"【ChromaDB】读取消息源配置失败: {e}")
+                logger.error("【ChromaDB】请检查：")
+                logger.error("  1. 数据库连接是否正常")
+                logger.error("  2. mp_message_sources表是否存在")
+                logger.error("  3. 消息源是否正确配置chroma_collection字段")
+                raise RuntimeError(f"ChromaDB初始化失败，无法读取消息源配置: {e}") from e
+
+            # 创建所有配置的Collections
             for name in collection_names:
-                # 直接使用collection名称，不加前缀
                 collection = self._client.get_or_create_collection(
                     name=name,
                     metadata={"hnsw:space": "cosine"}  # 余弦相似度
                 )
                 self._collections[name] = collection
-                logger.info(f"【ChromaDB】Collection 已创建: {name}")
 
             self._initialized = True
-            logger.info("【ChromaDB】向量数据库初始化成功")
+            logger.info(f"✓ ChromaDB初始化成功 ({', '.join(collection_names)})")
             return True
 
         except Exception as e:
@@ -258,7 +286,6 @@ class ChromaDBStorage:
             return False
 
         if collection_name in self._collections:
-            logger.warning(f"Collection '{collection_name}' already exists")
             return True
 
         try:
@@ -267,7 +294,7 @@ class ChromaDBStorage:
                 metadata={"hnsw:space": "cosine"}
             )
             self._collections[collection_name] = collection
-            logger.info(f"Collection created: {collection_name}")
+            logger.info(f"✓ Collection创建: {collection_name}")
             return True
         except Exception as e:
             logger.error(f"Failed to create collection {collection_name}: {e}")

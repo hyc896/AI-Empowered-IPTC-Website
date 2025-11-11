@@ -12,8 +12,9 @@ from typing import Dict, Any, List, Optional, Set
 from datetime import datetime
 from sqlalchemy import desc
 
-from backend.database.entities import TongHuaShunMessage, Kr36Message, ArxivMessage, MessageSource
+from backend.database.entities import MessageSource
 from backend.database.connection import create_session
+from backend.database.orm_registry import get_orm_registry
 from backend.storage import get_chromadb_storage
 from backend.llm import get_embedding_client
 
@@ -39,31 +40,15 @@ async def check_missing_records(
     chroma_collection = source_config['chroma_collection']  # 直接使用，无前缀处理
 
     try:
-        logger.info(f"[向量同步] 检查消息源: {source_name} (全量模式: {full_sync})")
-
-        # message_platform的表名映射（mp_前缀）
-        model_map = {
-            "mp_tonghuashun_messages": TongHuaShunMessage,
-            "mp_kr36_messages": Kr36Message,
-            "mp_arxiv_messages": ArxivMessage,
-            # 兼容旧配置（无mp_前缀）
-            "tonghuashun_messages": TongHuaShunMessage,
-            "kr36_messages": Kr36Message,
-            "arxiv_messages": ArxivMessage
-        }
-
-        model = model_map.get(mysql_table)
+        # 从ORM Registry获取模型（自动注册，零硬编码）
+        registry = get_orm_registry()
+        model = registry.get_model(mysql_table)
         if not model:
-            logger.warning(f"[向量同步] 未找到表 {mysql_table} 的ORM模型")
+            logger.warning(f"【向量同步】{source_name}: 未找到ORM模型")
             return []
 
-        # 确定唯一ID字段
-        if 'tonghuashun' in mysql_table:
-            id_field = 'seq'
-        elif 'kr36' in mysql_table:
-            id_field = 'item_id'
-        else:  # arxiv
-            id_field = 'arxiv_id'
+        # 使用统一的external_id字段（通过@hybrid_property映射，旧表自动适配）
+        id_field = 'external_id'
 
         # 第一阶段：查询MySQL所有记录的ID（只查ID列，减少内存占用）
         with create_session() as db:
@@ -79,17 +64,15 @@ async def check_missing_records(
             results = query.all()
 
             if not results:
-                logger.info(f"[向量同步] {source_name} - MySQL表为空")
+                logger.info(f"【向量同步】{source_name}: MySQL表为空")
                 return []
 
             # 提取ID列表
             mysql_ids = [str(row[0]) for row in results if row[0] is not None]
 
             if not mysql_ids:
-                logger.warning(f"[向量同步] {source_name} - 未找到有效唯一ID")
+                logger.warning(f"【向量同步】{source_name}: 未找到有效ID")
                 return []
-
-            logger.info(f"[向量同步] {source_name} - MySQL共有{len(mysql_ids)}条记录")
 
         # 第二阶段：批量查询ChromaDB现有ID
         chroma_storage = get_chromadb_storage()
@@ -99,7 +82,7 @@ async def check_missing_records(
                 # 创建新collection（无前缀）
                 chroma_storage._client.get_or_create_collection(
                     name=chroma_collection,
-                    metadata={{"hnsw:space": "cosine"}}
+                    metadata={"hnsw:space": "cosine"}
                 )
                 chroma_storage._collections[chroma_collection] = chroma_storage._client.get_collection(
                     name=chroma_collection
@@ -110,58 +93,44 @@ async def check_missing_records(
             existing_data = chroma_result.get(ids=mysql_ids)
             existing_ids = set(existing_data.get('ids', []))
 
-            logger.info(f"[向量同步] {source_name} - ChromaDB现有{len(existing_ids)}条")
-
         except Exception as e:
-            logger.warning(f"[向量同步] {source_name} - ChromaDB查询失败: {e}")
+            logger.warning(f"【向量同步】{source_name}: ChromaDB查询失败 - {e}")
             existing_ids = set()
 
         # 第三阶段：计算差集（缺失的ID）
         missing_ids = set(mysql_ids) - existing_ids
 
         if not missing_ids:
-            logger.info(f"[向量同步] {source_name} - ✓ 数据完整，无需同步 (MySQL={len(mysql_ids)}, ChromaDB={len(existing_ids)})")
+            logger.info(f"【向量同步】{source_name}: {len(mysql_ids)}条完整 ✓")
             return []
 
-        logger.info(f"[向量同步] {source_name} - 发现缺失 {len(missing_ids)}/{len(mysql_ids)} 条")
+        logger.info(f"【向量同步】{source_name}: 缺失{len(missing_ids)}条，开始同步...")
 
-        # 第四阶段：批量查询缺失记录的完整数据
+        # 第四阶段：批量查询缺失记录的完整数据（使用动态模型和统一字段）
         with create_session() as db:
-            if 'tonghuashun' in mysql_table:
-                missing_records = db.query(TongHuaShunMessage).filter(
-                    TongHuaShunMessage.seq.in_(missing_ids)
-                ).all()
-            elif 'kr36' in mysql_table:
-                missing_records = db.query(Kr36Message).filter(
-                    Kr36Message.item_id.in_(missing_ids)
-                ).all()
-            else:  # arxiv
-                missing_records = db.query(ArxivMessage).filter(
-                    ArxivMessage.arxiv_id.in_(missing_ids)
-                ).all()
+            # 动态获取external_id字段（通过Registry和@hybrid_property统一访问）
+            id_column = getattr(model, id_field)
+            missing_records = db.query(model).filter(
+                id_column.in_(missing_ids)
+            ).all()
 
             result = []
             for record in missing_records:
                 item = {
-                    'id': getattr(record, id_field),
+                    'id': record.external_id,  # 统一使用external_id（旧表自动映射）
                     'title': record.title,
                     'content': record.content,
                     'summary': record.summary,
                     'published_at': record.published_at
                 }
 
+                # 可选字段（防御式检查）
                 if hasattr(record, 'url'):
                     item['url'] = record.url
                 if hasattr(record, 'source_url'):
                     item['source_url'] = record.source_url
                 if hasattr(record, 'provider'):
                     item['provider'] = record.provider
-                if hasattr(record, 'seq'):
-                    item['seq'] = record.seq
-                if hasattr(record, 'item_id'):
-                    item['item_id'] = record.item_id
-                if hasattr(record, 'arxiv_id'):
-                    item['arxiv_id'] = record.arxiv_id
                 if hasattr(record, 'primary_category'):
                     item['primary_category'] = record.primary_category
 
@@ -201,9 +170,11 @@ async def sync_to_chromadb(
 
         batch_size = 50
         success_count = 0
+        total_batches = (len(records) + batch_size - 1) // batch_size
 
         for i in range(0, len(records), batch_size):
             batch = records[i:i + batch_size]
+            batch_num = i // batch_size + 1
 
             try:
                 texts = []
@@ -215,7 +186,8 @@ async def sync_to_chromadb(
                     document_text = f"{record['title']} {summary}"
                     texts.append(document_text)
 
-                    record_id = record.get('seq') or record.get('item_id') or record.get('arxiv_id') or record.get('url')
+                    # 统一使用'id'字段（已在check_missing_records中填充为external_id）
+                    record_id = record.get('id') or record.get('url')
                     ids.append(str(record_id))
 
                     metadata = {
@@ -224,18 +196,13 @@ async def sync_to_chromadb(
                         "published_at": record['published_at'].isoformat() if record.get('published_at') else ''
                     }
 
+                    # 可选字段（统一处理，不再区分旧字段）
                     if 'url' in record:
                         metadata['url'] = record['url']
                     if 'source_url' in record:
                         metadata['source_url'] = record['source_url']
                     if 'provider' in record:
                         metadata['provider'] = record['provider']
-                    if 'item_id' in record:
-                        metadata['item_id'] = record['item_id']
-                    if 'kr_route' in record:
-                        metadata['kr_route'] = record['kr_route']
-                    if 'arxiv_id' in record:
-                        metadata['arxiv_id'] = record['arxiv_id']
                     if 'primary_category' in record:
                         metadata['primary_category'] = record['primary_category']
 
@@ -255,13 +222,13 @@ async def sync_to_chromadb(
                 )
 
                 success_count += len(batch)
-                logger.debug(f"[向量同步] {source_name} - 批次同步完成: {len(batch)}条")
+                logger.info(f"【向量同步】{source_name}: 批次{batch_num}/{total_batches} ({len(batch)}条向量化) ✓")
 
             except Exception as e:
-                logger.error(f"[向量同步] {source_name} - 批次同步失败: {e}")
+                logger.error(f"【向量同步】{source_name}: 批次{batch_num}失败 - {e}")
                 continue
 
-        logger.info(f"[向量同步] {source_name} - ✓ 同步完成: {success_count}条")
+        logger.info(f"【向量同步】{source_name}: 同步完成 {success_count}条 ✓")
         return success_count
 
     except Exception as e:
@@ -288,15 +255,12 @@ async def startup_vector_sync(full_sync: bool = None):
             mode = vector_sync_config.get("mode", "incremental")
             full_sync = (mode == "full")
 
-        sync_mode = "全量同步" if full_sync else "增量同步"
-        logger.info(f"[向量同步] 后台检查启动（{sync_mode}）...")
-
         # 从数据库读取激活的消息源（而非registry）
         with create_session() as db:
             sources_db = db.query(MessageSource).filter(MessageSource.is_active == True).all()
 
             if not sources_db:
-                logger.warning("[向量同步] 未找到激活的消息源")
+                logger.warning("【向量同步】未找到激活的消息源")
                 return
 
             # 构造source_config格式
@@ -329,13 +293,13 @@ async def startup_vector_sync(full_sync: bool = None):
 
             except Exception as e:
                 source_name = source.get('display_name', source.get('name', 'unknown'))
-                logger.error(f"[向量同步] {source_name} - 处理失败: {e}")
+                logger.error(f"【向量同步】{source_name}: 处理失败 - {e}")
                 continue
 
         if total_synced > 0:
-            logger.info(f"[向量同步] ✓ 全部同步完成，总计 {total_synced} 条")
+            logger.info(f"【向量同步】全部完成，总计{total_synced}条 ✓")
         else:
-            logger.info("[向量同步] ✓ 检查完成，数据完整")
+            logger.info("【向量同步】检查完成，数据完整 ✓")
 
     except Exception as e:
-        logger.error(f"[向量同步] 启动检查失败: {e}")
+        logger.error(f"【向量同步】启动失败: {e}")

@@ -2,15 +2,75 @@
 
 """
 消息平台数据库实体定义
-基于原PersonalAgent的消息相关实体，适配消息平台独立运行
+定义所有数据库表结构和ORM映射
 """
 
 from datetime import datetime
 from sqlalchemy import Column, String, Text, DateTime, Integer, BigInteger, Float, Boolean, ForeignKey, Index, JSON, Enum
 from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.ext.hybrid import hybrid_property
 import enum
 
 Base = declarative_base()
+
+
+"""
+===================================================================================
+消息源表统一字段标准（所有新建消息表必须遵循此结构）
+===================================================================================
+
+核心必备字段（不准增删改）：
+
+class StandardMessageTable(Base):
+    __tablename__ = "mp_{source_name}_messages"
+
+    # 核心必备字段
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(100), comment="外部唯一标识（post_id/article_id/event_id等）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要（优先从网页提取，无则用content，content>1000字时取前1000字）")
+    provider = Column(String(500), comment="作者或信息提供方（多个用逗号分隔）")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 扩展字段（可选，根据业务需求添加）
+    region = Column(String(50), comment="地区（US/EU/UK/GLOBAL等）")
+    category = Column(String(100), comment="分类")
+    language = Column(String(10), comment="语言（en/zh/fr等）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象，注意：属性名为extra_metadata）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="{source_name}_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+    )
+
+字段映射规则：
+- 网页的post_id/article_id/event_id → 数据库的external_id
+- 网页的authors/author/by → 数据库的provider（逗号分隔）
+- 网页的permalink/link/href → 数据库的url
+- 网页的excerpt/abstract/description → 数据库的summary或content
+
+禁止字段：
+- 不准添加image_url字段
+- 不准使用source_url命名（统一用url）
+- 不准使用author命名（统一用provider）
+- 不准使用seq/item_id/arxiv_id等（统一用external_id）
+
+旧表（同花顺、Kr36、arXiv）保持现状不动，仅供参考。
+===================================================================================
+"""
 
 
 class MessageSource(Base):
@@ -30,40 +90,15 @@ class MessageSource(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False, comment="更新时间")
 
     # 关系
-    external_messages = relationship("ExternalMessage", back_populates="source", cascade="all, delete-orphan")
     tonghuashun_messages = relationship("TongHuaShunMessage", back_populates="source", cascade="all, delete-orphan")
     kr36_messages = relationship("Kr36Message", back_populates="source", cascade="all, delete-orphan")
     arxiv_messages = relationship("ArxivMessage", back_populates="source", cascade="all, delete-orphan")
+    partnership_ai_messages = relationship("PartnershipAIMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
         Index("idx_created_at", "created_at"),
         Index("idx_category", "category"),
-    )
-
-
-class ExternalMessage(Base):
-    """外部消息表（通用表，未来可能弃用）"""
-    __tablename__ = "mp_external_messages"
-
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容")
-    summary = Column(Text, comment="摘要（LLM生成）")
-    url = Column(String(255), unique=True, comment="原文链接")
-    author = Column(String(200), comment="作者")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="external_messages")
-
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
     )
 
 
@@ -86,6 +121,12 @@ class TongHuaShunMessage(Base):
 
     # 关系
     source = relationship("MessageSource", back_populates="tonghuashun_messages")
+
+    # 统一的外部ID访问接口（映射到seq字段，用于代码层面统一）
+    @hybrid_property
+    def external_id(self):
+        """外部唯一标识（映射到seq字段）"""
+        return self.seq
 
     __table_args__ = (
         Index("idx_source_id", "source_id"),
@@ -118,6 +159,12 @@ class Kr36Message(Base):
 
     # 关系
     source = relationship("MessageSource", back_populates="kr36_messages")
+
+    # 统一的外部ID访问接口（映射到item_id字段，用于代码层面统一）
+    @hybrid_property
+    def external_id(self):
+        """外部唯一标识（映射到item_id字段）"""
+        return self.item_id
 
     __table_args__ = (
         Index("idx_source_id", "source_id"),
@@ -153,6 +200,12 @@ class ArxivMessage(Base):
     # 关系
     source = relationship("MessageSource", back_populates="arxiv_messages")
 
+    # 统一的外部ID访问接口（映射到arxiv_id字段，用于代码层面统一）
+    @hybrid_property
+    def external_id(self):
+        """外部唯一标识（映射到arxiv_id字段）"""
+        return self.arxiv_id
+
     __table_args__ = (
         Index("idx_source_id", "source_id"),
         Index("idx_published_at", "published_at"),
@@ -162,6 +215,44 @@ class ArxivMessage(Base):
         Index("idx_primary_category", "primary_category"),
         Index("idx_doi", "doi"),
         Index("idx_updated_at", "updated_at"),
+    )
+
+
+class PartnershipAIMessage(Base):
+    """Partnership on AI消息表（2025统一字段标准）"""
+    __tablename__ = "mp_partnership_ai_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（文章slug）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要（优先从网页提取，无则用content，content>1000字时取前1000字）")
+    provider = Column(String(500), comment="作者或信息提供方（多个用逗号分隔）")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 扩展字段
+    region = Column(String(50), comment="地区（US/EU/UK/GLOBAL等）")
+    category = Column(String(100), comment="分类（AI Governance/Policy/Research等）")
+    language = Column(String(10), comment="语言（en/zh/fr等）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="partnership_ai_messages")
+
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_region", "region"),
+        Index("idx_category", "category"),
     )
 
 
@@ -181,12 +272,6 @@ def get_table_info():
             "description": "消息源配置表",
             "primary_key": "id",
             "foreign_keys": ["被所有消息表引用"]
-        },
-        {
-            "name": "mp_external_messages",
-            "description": "通用外部消息表",
-            "primary_key": "id",
-            "foreign_key": "source_id → mp_message_sources.id"
         },
         {
             "name": "mp_tonghuashun_messages",

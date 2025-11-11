@@ -43,26 +43,29 @@ class CollectorService:
 
         self._running = True
         self._startup_time = datetime.now()
-        logger.info("=== 启动消息采集器服务 ===")
 
         try:
             # 从数据库加载消息源
             sources = await self._load_active_sources()
 
             if not sources:
-                logger.warning("【采集器服务】未找到激活的消息源")
+                logger.warning("【采集器】未找到激活的消息源")
                 self._running = False
                 return
 
             # 启动每个采集器
+            started_collectors = []
             for source in sources:
-                await self._start_collector(source)
+                success = await self._start_collector(source)
+                if success:
+                    interval = source.get('interval', 60)
+                    started_collectors.append(f"{source['display_name']}({interval}s)")
 
             if not self._tasks:
-                logger.error("【采集器服务】未启动任何采集器")
+                logger.error("【采集器】未启动任何采集器")
                 self._running = False
             else:
-                logger.info(f"【采集器服务】已启动 {len(self._tasks)} 个采集器")
+                logger.info(f"✓ 采集器启动成功: {', '.join(started_collectors)}")
 
         except Exception as e:
             logger.error(f"【采集器服务】启动失败: {e}")
@@ -95,11 +98,10 @@ class CollectorService:
                         "schedule": source.schedule
                     })
 
-                logger.info(f"【采集器服务】从数据库加载了 {len(active_sources)} 个激活的消息源")
                 return active_sources
 
         except Exception as e:
-            logger.error(f"【采集器服务】加载消息源失败: {e}")
+            logger.error(f"【采集器】加载消息源失败: {e}")
             return []
 
     async def _start_collector(self, source_config: Dict[str, Any]) -> bool:
@@ -160,11 +162,10 @@ class CollectorService:
                 "total_runtime": 0
             }
 
-            logger.info(f"【采集器服务】已启动采集器: {source_name} ({collector_class_name})")
             return True
 
         except Exception as e:
-            logger.error(f"【采集器服务】启动采集器 {source_name} 失败: {e}", exc_info=True)
+            logger.error(f"【采集器】启动失败 {source_name}: {e}")
             return False
 
     async def _run_collector_with_monitoring(self, source_name: str, collector: Any) -> None:
@@ -175,15 +176,13 @@ class CollectorService:
             source_name: 消息源名称
             collector: 采集器实例
         """
-        logger.info(f"【采集器服务】开始运行采集器: {source_name}")
-
         try:
             await collector.run()
         except asyncio.CancelledError:
-            logger.info(f"【采集器服务】采集器 {source_name} 被取消")
+            logger.info(f"【采集器】{source_name} 被取消")
             raise
         except Exception as e:
-            logger.exception(f"【采集器服务】采集器 {source_name} 运行异常: {e}")
+            logger.exception(f"【采集器】{source_name} 运行异常: {e}")
 
             # 更新统计信息
             if source_name in self._stats:

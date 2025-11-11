@@ -2,7 +2,7 @@
 
 """
 消息平台数据库连接管理
-独立于PersonalAgent项目的数据库连接
+提供数据库连接池和会话管理
 """
 
 import os
@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.declarative import declarative_base
 
-# 消息平台完全独立，不再依赖PersonalAgent配置
+# 配置可用性标记
 _config_available = False
 
 logger = logging.getLogger(__name__)
@@ -25,33 +25,38 @@ _session_factory: Optional = None
 
 
 def get_database_config() -> dict:
-    """获取数据库配置"""
-    if _config_available:
-        global_config = GlobalConfig.get_instance()
+    """获取数据库配置（Fail Fast策略，直接从ConfigManager读取）"""
+    try:
+        # 直接从ConfigManager读取配置（message_platform专用）
+        from backend.config.config_manager import ConfigManager
+        config_manager = ConfigManager()
+        config_manager.load_config("config.yaml")
+        config = config_manager.get_config()
 
-        # 优先使用消息平台专用配置，否则使用原项目配置
-        platform_config = global_config.get_config("database.mysql", {})
+        # 获取数据库配置
+        db_config = config.get("database", {}).get("mysql", {})
+
+        if not db_config:
+            raise ValueError("database.mysql配置不存在")
 
         # 如果没有指定数据库，默认使用message_platform
-        if not platform_config.get("database"):
-            platform_config["database"] = "message_platform"
+        if not db_config.get("database"):
+            db_config["database"] = "message_platform"
 
-        return platform_config
-    else:
-        # 使用默认配置
-        return {
-            "host": "localhost",
-            "port": 3306,
-            "user": "root",
-            "password": "123456",
-            "database": "message_platform",
-            "charset": "utf8mb4",
-            "echo": False,
-            "pool_size": 20,
-            "max_overflow": 30,
-            "pool_timeout": 30,
-            "pool_recycle": 3600
-        }
+        return db_config
+
+    except Exception as e:
+        # Fail Fast：未配置时拒绝启动，强制从config.yaml读取
+        logger.error(f"【数据库】读取配置失败: {e}")
+        logger.error("【数据库】请在config.yaml中配置database.mysql字段：")
+        logger.error("  database:")
+        logger.error("    mysql:")
+        logger.error("      host: localhost")
+        logger.error("      port: 11527")
+        logger.error("      user: root")
+        logger.error("      password: YOUR_PASSWORD")
+        logger.error("      database: message_platform")
+        raise RuntimeError(f"数据库配置缺失：{e}") from e
 
 
 def init_database() -> bool:
@@ -254,30 +259,30 @@ def get_database_info() -> dict:
 
 # 向后兼容的别名
 MessageSource = None
-ExternalMessage = None
 TongHuaShunMessage = None
 Kr36Message = None
 ArxivMessage = None
+PartnershipAIMessage = None
 
 
 def import_entities():
     """导入实体类（延迟导入避免循环依赖）"""
-    global MessageSource, ExternalMessage, TongHuaShunMessage, Kr36Message, ArxivMessage
+    global MessageSource, TongHuaShunMessage, Kr36Message, ArxivMessage, PartnershipAIMessage
 
     try:
         from .entities import (
             MessageSource as _MessageSource,
-            ExternalMessage as _ExternalMessage,
             TongHuaShunMessage as _TongHuaShunMessage,
             Kr36Message as _Kr36Message,
-            ArxivMessage as _ArxivMessage
+            ArxivMessage as _ArxivMessage,
+            PartnershipAIMessage as _PartnershipAIMessage
         )
 
         MessageSource = _MessageSource
-        ExternalMessage = _ExternalMessage
         TongHuaShunMessage = _TongHuaShunMessage
         Kr36Message = _Kr36Message
         ArxivMessage = _ArxivMessage
+        PartnershipAIMessage = _PartnershipAIMessage
 
     except ImportError as e:
         logger.error(f"导入实体类失败: {e}")

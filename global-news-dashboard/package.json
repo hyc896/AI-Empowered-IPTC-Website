@@ -1,0 +1,31 @@
+{
+  "name": "global-news-dashboard",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "latest",
+    "vue-router": "latest",
+    "pinia": "latest",
+    "element-plus": "latest",
+    "@element-plus/icons-vue": "latest",
+    "axios": "latest",
+    "@vueuse/core": "latest",
+    "dayjs": "latest",
+    "markdown-it": "latest",
+    "highlight.js": "latest"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "vite": "latest",
+    "vue-tsc": "latest",
+    "typescript": "latest",
+    "sass": "latest",
+    "@types/node": "latest",
+    "@types/markdown-it": "latest"
+  }
+}

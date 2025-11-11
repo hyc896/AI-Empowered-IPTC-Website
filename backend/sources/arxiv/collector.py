@@ -72,16 +72,13 @@ class ArxivCollector:
 
         if _llm_available:
             self.embedding_client = get_embedding_client()
-            self.llm_client = get_fast_client()
         else:
             self.embedding_client = None
-            self.llm_client = None
-            logger.warning("【arXiv】LLM服务不可用，将使用简单摘要")
+            logger.warning("【arXiv】Embedding服务不可用，将跳过向量化")
 
         self.client = arxiv.Client()
         self._running = False
         self._is_first_run = True
-        self._llm_semaphore = asyncio.Semaphore(2)  # 限制最多2个并发LLM请求，避免API拥塞
 
     async def initialize(self) -> bool:
         """
@@ -95,11 +92,9 @@ class ArxivCollector:
             self.chroma_storage.create_collection(
                 collection_name=self.chroma_collection
             )
-
-            logger.info(f"【arXiv】采集器初始化成功")
             return True
         except Exception as e:
-            logger.error(f"【arXiv】采集器初始化失败: {e}")
+            logger.error(f"【arXiv】初始化失败: {e}")
             return False
 
     async def run(self) -> None:
@@ -109,11 +104,10 @@ class ArxivCollector:
         每次采集前从数据库重新读取配置，实现动态配置
         """
         if not await self.initialize():
-            logger.error("【arXiv】采集器初始化失败，退出")
+            logger.error("【arXiv】初始化失败，退出")
             return
 
         self._running = True
-        logger.info(f"【arXiv】采集器启动，间隔{self.interval}秒")
 
         while self._running:
             try:
@@ -163,14 +157,11 @@ class ArxivCollector:
 
         if self._is_first_run:
             date_range_days = 30
-            logger.info(f"【arXiv】首次启动，抓取最近{date_range_days}天的论文")
             self._is_first_run = False
 
         if not categories:
-            logger.warning(f"【arXiv】未配置关注的分类，跳过采集")
+            logger.warning(f"【arXiv】未配置分类，跳过采集")
             return
-
-        logger.info(f"【arXiv】开始抓取，关注分类: {categories}, 时间范围: {date_range_days}天")
 
         # 计算日期范围（arXiv API要求格式：YYYYMMDDhhmm，并且需要明确的结束日期）
         date_from = datetime.now() - timedelta(days=date_range_days)
@@ -178,7 +169,7 @@ class ArxivCollector:
         date_from_str = date_from.strftime('%Y%m%d%H%M')
         date_to_str = date_to.strftime('%Y%m%d%H%M')
 
-        logger.info(f"【arXiv】查询日期范围: {date_from_str} TO {date_to_str}")
+        logger.info(f"【arXiv】开始采集: {', '.join(categories)} ({date_range_days}天)")
 
         total_saved = 0
         total_skipped = 0
@@ -196,7 +187,8 @@ class ArxivCollector:
             except Exception as e:
                 logger.error(f"【arXiv】抓取分类 {category} 失败: {e}", exc_info=True)
 
-        logger.info(f"【arXiv】本次采集完成，保存{total_saved}篇，跳过{total_skipped}篇")
+        if total_saved > 0:
+            logger.info(f"【arXiv】采集完成: 新增{total_saved}篇 ✓")
 
         # 更新last_crawled_at
         self._update_last_crawled()
@@ -244,18 +236,15 @@ class ArxivCollector:
                         logger.error(f"【arXiv】保存论文失败: {e}", exc_info=True)
                         skipped_count += 1
 
-                logger.info(f"【arXiv】分类 {category}: 成功处理{papers_processed}篇论文")
 
             except arxiv.UnexpectedEmptyPageError as e:
-                logger.warning(
-                    f"【arXiv】分类 {category}: API分页异常，已处理{papers_processed}篇论文后停止。"
-                    f"这是arXiv API的已知问题，已保存的数据不受影响。错误: {e}"
-                )
+                logger.warning(f"【arXiv】{category}: API分页异常，已处理{papers_processed}篇")
 
         except Exception as e:
-            logger.error(f"【arXiv】查询分类 {category} 失败: {e}", exc_info=True)
+            logger.error(f"【arXiv】{category}: 查询失败 - {e}")
 
-        logger.info(f"【arXiv】分类 {category}: 保存{saved_count}篇，跳过{skipped_count}篇")
+        if saved_count > 0 or skipped_count > 0:
+            logger.info(f"【arXiv】{category}: {saved_count}篇新增, {skipped_count}篇重复")
         return saved_count, skipped_count
 
     async def _save_paper(self, paper) -> bool:
@@ -333,42 +322,21 @@ class ArxivCollector:
 
     async def _generate_summary(self, abstract: str) -> str:
         """
-        使用LLM翻译摘要（英文→中文）
+        使用统一翻译器翻译摘要（英文→中文）
 
         Args:
             abstract: 英文摘要
 
         Returns:
-            中文翻译
+            中文翻译（或降级返回截断的原文）
         """
-        async with self._llm_semaphore:  # 并发控制：同时最多2个翻译请求
-            try:
-                logger.debug(f"【arXiv】开始LLM翻译（当前并发: {2 - self._llm_semaphore._value}/2）")
-                start_time = asyncio.get_event_loop().time()
+        from backend.llm.translator import get_translator
 
-                prompt = f"""请将以下英文学术论文摘要翻译成中文，要求：
-1. 准确翻译，不要遗漏任何信息
-2. 保持学术术语的准确性
-3. 语句通顺流畅，符合中文表达习惯
-
-英文摘要：
-{{{{abstract}}}}
-
-中文翻译：""".replace('{{{{abstract}}}}', abstract)
-
-                response = await self.llm_client.generate_with_messages_async(
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=1000
-                )
-
-                elapsed = asyncio.get_event_loop().time() - start_time
-                logger.debug(f"【arXiv】LLM翻译完成 - 耗时: {elapsed:.1f}秒")
-
-                return response.choices[0].message.content.strip()
-            except Exception as e:
-                logger.error(f"【arXiv】LLM翻译摘要失败: {e}")
-                # 降级策略：返回原文
-                return f"[翻译失败，原文] {abstract}"
+        translator = get_translator()
+        return await translator.translate(
+            text=abstract,
+            context="学术论文摘要"
+        )
 
     async def _vectorize_and_store(self, message: ArxivMessage) -> None:
         """

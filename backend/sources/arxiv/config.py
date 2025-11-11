@@ -14,8 +14,8 @@ class ArxivConfig(BaseModel):
     date_range_days: int = Field(7, ge=1, le=30, description="抓取时间范围（天）")
     summary_length_threshold: int = Field(1000, ge=100, le=5000, description="摘要长度阈值")
 
-    mysql_table: str = "arxiv_messages"
-    chroma_collection: str = "arxiv_messages"
+    mysql_table: str = "mp_arxiv_messages"  # 必须与entities.py中的__tablename__一致
+    chroma_collection: str = "arxiv"  # ChromaDB集合名不使用mp_前缀
     collector_module: str = "backend.services.message.sources.arxiv.collector"
     interval: int = 86400
     api_base_url: str = "http://export.arxiv.org/api/query"

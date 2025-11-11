@@ -31,16 +31,25 @@ except ImportError:
 # 添加项目路径 - 只使用消息平台自己的路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))  # 消息平台根目录
 
-# 配置日志
+# 配置日志（支持环境变量和配置文件）
+log_file = os.getenv('LOG_FILE', 'logs/platform.log')  # 可通过环境变量自定义
+os.makedirs(os.path.dirname(log_file), exist_ok=True)  # 确保日志目录存在
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('logs/platform.log', encoding='utf-8')
+        logging.FileHandler(log_file, encoding='utf-8')
     ]
 )
 logger = logging.getLogger(__name__)
+
+# 降低第三方库日志级别，减少噪音
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('chromadb').setLevel(logging.WARNING)
+logging.getLogger('chromadb.telemetry.product.posthog').setLevel(logging.ERROR)
+logging.getLogger('arxiv').setLevel(logging.WARNING)
 
 class SearchRequest(BaseModel):
     """搜索请求模型"""
@@ -69,27 +78,37 @@ async def startup():
 
     try:
         # 1. 初始化配置
-        logger.info("【启动】正在加载配置...")
+        logger.info("【1/7】加载配置...")
         await init_config()
 
         # 2. 初始化数据库
-        logger.info("【启动】正在初始化数据库...")
+        logger.info("【2/7】初始化数据库...")
         await init_database()
 
+        # 2.5. 启动配置验证（新增）
+        logger.info("【3/7】验证配置完整性...")
+        import os
+        skip_validation = os.getenv('SKIP_VALIDATION', '0') == '1'
+
+        if not skip_validation:
+            from backend.database.startup_validator import startup_validation
+            startup_validation(fail_on_error=True)
+        else:
+            logger.warning("⚠️  跳过启动验证（SKIP_VALIDATION=1）")
+
         # 3. 初始化存储
-        logger.info("【启动】正在初始化存储...")
+        logger.info("【4/7】初始化向量存储...")
         await init_storage()
 
         # 4. 初始化LLM和Embedding客户端
-        logger.info("【启动】正在初始化LLM和Embedding客户端...")
+        logger.info("【5/7】初始化LLM客户端...")
         await init_llm()
 
         # 5. 启动采集器服务
-        logger.info("【启动】正在启动采集器服务...")
+        logger.info("【6/7】启动采集器服务...")
         await start_collector_service()
 
         # 5.5. 启动向量同步检查（后台任务）
-        logger.info("【启动】正在启动向量同步检查...")
         try:
             from backend.services.message.vector_sync import startup_vector_sync
 
@@ -98,7 +117,7 @@ async def startup():
 
             if vector_sync_config.get("enabled", True):
                 full_sync = (vector_sync_config.get("mode", "full") == "full")
-                logger.info(f"【向量同步】后台任务启动（模式：{'全量' if full_sync else '增量'}）")
+                logger.info(f"【向量同步】后台任务启动 ({'全量' if full_sync else '增量'}模式)")
                 asyncio.create_task(startup_vector_sync(full_sync=full_sync))
             else:
                 logger.info("【向量同步】已禁用")
@@ -107,13 +126,11 @@ async def startup():
             logger.warning(f"【向量同步】启动失败: {e}，将继续运行但无法自动同步向量")
 
         # 6. 加载完整的API路由
-        logger.info("【启动】正在加载API路由...")
+        logger.info("【7/7】加载API路由...")
         load_api_routes()
         setup_basic_routes()
-        logger.info("【启动】API路由加载完成")
 
         # 7. 显示数据库数据统计
-        logger.info("【启动】正在统计数据库数据...")
         await display_database_stats()
 
         logger.info("=== 消息平台启动完成 ===")
@@ -167,10 +184,10 @@ async def init_config():
 
         config_data = config_manager.get_config()
         app_state["config"] = config_data
-        logger.info("配置加载成功")
+        logger.info("✓ 配置加载成功")
 
     except Exception as e:
-        logger.error(f"配置加载失败: {e}")
+        logger.error(f"✗ 配置加载失败: {e}")
         raise
 
 
@@ -187,10 +204,10 @@ async def init_database():
 
         config = get_database_config()
         app_state["db_config"] = config
-        logger.info(f"数据库连接测试成功: {config['database']}")
+        logger.info(f"✓ 数据库连接成功: {config['database']}")
 
     except Exception as e:
-        logger.error(f"数据库初始化失败: {e}")
+        logger.error(f"✗ 数据库初始化失败: {e}")
         raise
 
 
@@ -251,14 +268,13 @@ async def init_llm():
 
         app_state["llm_manager"] = llm_manager
 
-        # 记录初始化成功的客户端
-        clients = []
+        # 记录初始化成功的客户端（显示完整配置信息）
+        logger.info("LLM客户端初始化成功:")
         if embedding_config:
-            clients.append(f"Embedding: {embedding_config.get('model')}")
+            logger.info(f"  Embedding: {embedding_config.get('model')} @ {embedding_config.get('base_url')}")
         if fast_config:
-            clients.append(f"Fast: {fast_config.get('model')}")
-
-        logger.info(f"LLM客户端初始化成功 - {', '.join(clients)}")
+            logger.info(f"  Fast: {fast_config.get('model')} @ {fast_config.get('base_url')}")
+            logger.info(f"  Fast模型用途: arXiv论文摘要翻译")
 
     except Exception as e:
         logger.error(f"LLM初始化失败: {e}")
@@ -353,6 +369,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],  # 暴露自定义响应头给前端
 )
 
 
@@ -467,75 +484,54 @@ async def display_database_stats():
     """显示数据库数据统计信息"""
     logger.info("=== 数据库数据统计 ===")
 
-    # 统计MySQL数据库
+    # 统计MySQL数据库（配置驱动，零硬编码）
     try:
         from backend.database.connection import create_session
-        from backend.database.entities import MessageSource, TongHuaShunMessage, Kr36Message, ArxivMessage, ExternalMessage
+        from backend.database.entities import MessageSource
+        from backend.database.orm_registry import get_orm_registry
         from sqlalchemy.exc import OperationalError
 
         with create_session() as session:
             logger.info("【MySQL数据库】")
 
-            # 统计各表数据量，优雅处理不存在的表
-            table_stats = {}
-
-            # 消息源配置表
+            # 统计消息源配置表
             try:
-                table_stats['sources'] = session.query(MessageSource).count()
-                logger.info(f"  消息源配置 (mp_message_sources): {table_stats['sources']} 条")
+                sources_count = session.query(MessageSource).count()
+                logger.info(f"  消息源配置 (mp_message_sources): {sources_count} 条")
             except OperationalError as e:
                 if "doesn't exist" in str(e):
                     logger.warning(f"  消息源配置表 (mp_message_sources): 不存在")
-                    table_stats['sources'] = 0
+                    sources_count = 0
                 else:
                     raise
 
-            # 同花顺消息表
-            try:
-                table_stats['tonghuashun'] = session.query(TongHuaShunMessage).count()
-                logger.info(f"  同花顺消息 (mp_tonghuashun_messages): {table_stats['tonghuashun']} 条")
-            except OperationalError as e:
-                if "doesn't exist" in str(e):
-                    logger.warning(f"  同花顺消息表 (mp_tonghuashun_messages): 不存在")
-                    table_stats['tonghuashun'] = 0
-                else:
-                    raise
+            # 动态统计所有消息表（使用ORM Registry，自动支持新增消息源）
+            total_messages = 0
+            registry = get_orm_registry()
+            sources = session.query(MessageSource).filter(MessageSource.is_active == True).all()
 
-            # 36氪消息表
-            try:
-                table_stats['kr36'] = session.query(Kr36Message).count()
-                logger.info(f"  36氪消息 (mp_kr36_messages): {table_stats['kr36']} 条")
-            except OperationalError as e:
-                if "doesn't exist" in str(e):
-                    logger.warning(f"  36氪消息表 (mp_kr36_messages): 不存在")
-                    table_stats['kr36'] = 0
-                else:
-                    raise
+            for source in sources:
+                source_config = source.config or {}
+                mysql_table = source_config.get('mysql_table')
 
-            # arXiv论文表
-            try:
-                table_stats['arxiv'] = session.query(ArxivMessage).count()
-                logger.info(f"  arXiv论文 (mp_arxiv_messages): {table_stats['arxiv']} 条")
-            except OperationalError as e:
-                if "doesn't exist" in str(e):
-                    logger.warning(f"  arXiv论文表 (mp_arxiv_messages): 不存在")
-                    table_stats['arxiv'] = 0
-                else:
-                    raise
+                if not mysql_table:
+                    continue
 
-            # 通用消息表
-            try:
-                table_stats['external'] = session.query(ExternalMessage).count()
-                logger.info(f"  通用消息 (mp_external_messages): {table_stats['external']} 条")
-            except OperationalError as e:
-                if "doesn't exist" in str(e):
-                    logger.warning(f"  通用消息表 (mp_external_messages): 不存在")
-                    table_stats['external'] = 0
+                model = registry.get_model(mysql_table)
+                if model:
+                    try:
+                        count = session.query(model).count()
+                        total_messages += count
+                        logger.info(f"  {source.display_name} ({mysql_table}): {count} 条")
+                    except OperationalError as e:
+                        if "doesn't exist" in str(e):
+                            logger.warning(f"  {source.display_name} ({mysql_table}): 表不存在")
+                        else:
+                            logger.error(f"  {source.display_name} ({mysql_table}): 统计失败 - {e}")
                 else:
-                    raise
+                    logger.warning(f"  {source.display_name} ({mysql_table}): 未找到ORM模型")
 
-            total_mysql = sum(table_stats.values())
-            logger.info(f"  MySQL总计: {total_mysql} 条记录")
+            logger.info(f"  MySQL总计: {total_messages} 条记录")
 
     except Exception as e:
         logger.error(f"【MySQL统计失败】{e}")

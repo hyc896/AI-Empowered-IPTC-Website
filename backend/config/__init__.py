@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-PersonalAgent Config module
+Config module
 Configuration and prompt management
 """
 
