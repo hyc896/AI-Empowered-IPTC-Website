@@ -513,7 +513,7 @@ class GovAICollector:
 
         try:
             for item in items:
-                summary = item.get('summary') or self._generate_summary(None, item.get('content', ''))
+                summary = await self._generate_summary(item.get('summary'), item.get('content', ''))
                 document_text = f"{item['title']} {summary}"
 
                 embedding = self.embedding_client.generate_embedding(document_text)
@@ -543,47 +543,73 @@ class GovAICollector:
 
     async def _generate_summary(self, summary: Optional[str], content: str) -> str:
         """
-        生成摘要（支持翻译）
+        生成摘要（支持中文翻译）
 
-        完整决策流程：
-        1. 确定原始摘要来源（优先summary，无则用content）
-        2. 判断是否需要翻译（外文消息源）
-        3. 中文：根据长度决定是否截断
-        4. 外文：调用translator.translate()进行翻译（全文翻译，不限制长度）
+        外文内容自动翻译成中文，中文内容直接返回或截断
 
         Args:
             summary: 网页提取的摘要
             content: 正文内容
 
         Returns:
-            摘要文本（中文消息源为原文，外文消息源为中文翻译）
+            摘要文本（中文）
         """
-        # 确定原始文本
-        source_text = summary.strip() if summary and len(summary.strip()) > 0 else content
+        # 1. 确定原始摘要来源
+        source_text = summary if summary and len(summary.strip()) > 0 else content
 
-        # 中文消息源：直接返回或截断
-        if not self.needs_translation:
+        if not source_text:
+            return ""
+
+        # 2. 判断是否需要翻译（语言检测）
+        if self.language == 'zh' or self._is_chinese(source_text):
+            # 中文内容：直接返回或截断
             if len(source_text) <= 1000:
                 return source_text
             return source_text[:1000] + "..."
 
-        # 外文消息源：翻译为中文（全文翻译，不限制长度）
+        # 3. 外文内容：翻译成中文
         if self.translator:
             try:
+                # 短文本直接翻译
+                text_to_translate = source_text if len(source_text) <= 1000 else source_text[:1000]
                 translated = await self.translator.translate(
-                    text=source_text,
-                    context="AI治理研究论文摘要"
+                    text_to_translate,
+                    context="GovAI研究论文摘要"
                 )
                 return translated
             except Exception as e:
                 logger.error(f"翻译失败: {e}")
-                # 翻译失败降级：返回截断原文
+                # 降级策略：返回截断原文
                 return source_text[:500] + "... [AI翻译暂不可用]"
+        else:
+            # 无翻译器：返回截断原文
+            if len(source_text) <= 1000:
+                return source_text
+            return source_text[:500] + "..."
 
-        # 无translator可用：返回截断原文
-        if len(source_text) <= 1000:
-            return source_text
-        return source_text[:1000] + "..."
+    def _is_chinese(self, text: str) -> bool:
+        """
+        检测文本是否为中文
+
+        Args:
+            text: 待检测文本
+
+        Returns:
+            是否为中文
+        """
+        if not text:
+            return False
+
+        # 提取前200字符作为样本
+        sample = text[:200]
+        chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', sample))
+        total_chars = len(sample)
+
+        if total_chars == 0:
+            return False
+
+        # 中文字符占比>30%判定为中文
+        return (chinese_chars / total_chars) > 0.3
 
     async def _close_browser(self) -> None:
         """关闭浏览器"""

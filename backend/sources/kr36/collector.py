@@ -30,6 +30,12 @@ try:
 except ImportError:
     _llm_available = False
 
+try:
+    from backend.services import get_field_enricher
+    _field_enricher_available = True
+except ImportError:
+    _field_enricher_available = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +73,12 @@ class Kr36Collector:
         else:
             self.embedding_client = None
             logger.warning("【36氪】LLM服务不可用，将跳过向量化")
+
+        if _field_enricher_available:
+            self.field_enricher = get_field_enricher()
+        else:
+            self.field_enricher = None
+            logger.warning("【36氪】FieldEnricher不可用，将跳过字段增强")
 
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
@@ -367,12 +379,29 @@ class Kr36Collector:
 
     async def _store_to_mysql(self, items: List[Dict[str, Any]]) -> None:
         """
-        存储到MySQL
+        存储到MySQL（预增强模式：在事务外完成字段增强）
 
         Args:
             items: 快讯列表
         """
         try:
+            # 预增强：在数据库事务外批量增强字段
+            if self.field_enricher:
+                logger.debug(f"【36氪】批量增强 {len(items)} 条消息字段")
+                for item in items:
+                    try:
+                        enriched = await self.field_enricher.enrich_fields(
+                            title=item['title'],
+                            content=item['content']
+                        )
+                        item['region'] = enriched.get('region')
+                        item['industry_tags'] = enriched.get('industry_tags')
+                    except Exception as e:
+                        logger.error(f"【36氪】字段增强失败: {e}")
+                        item['region'] = None
+                        item['industry_tags'] = None
+
+            # 批量存储到数据库
             with create_session() as db:
                 for item in items:
                     summary = self._generate_summary(item['title'], item['content'])
@@ -390,6 +419,8 @@ class Kr36Collector:
                         image_url=item.get('image_url'),
                         comment_count=item.get('comment_count', 0),
                         has_relevant=item.get('has_relevant', False),
+                        region=item.get('region'),
+                        industry_tags=item.get('industry_tags'),
                         crawled_at=datetime.now()
                     )
 

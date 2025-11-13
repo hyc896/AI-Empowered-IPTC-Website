@@ -1,0 +1,1089 @@
+# Message Platform 项目架构文档
+
+## 一、项目概述
+
+Message Platform是一个独立的消息采集与检索微服务，为PersonalAgent系统提供统一的外部信息源管理能力。
+
+**核心功能**：
+- 多源消息采集：覆盖20+国际智库、学术机构和财经媒体
+  - 国内财经：同花顺7x24快讯、36氪快讯
+  - 学术论文：arXiv
+  - 国际智库：RAND、CSIS、CSET、CNAS、OECD、GovAI、WEF、CIGI、Partnership on AI、GCG
+  - 区域智库：Takshashila（印度）、ICRIER（印度）、Stellenbosch（南非）、HSE AI（俄罗斯）、OBIA（巴西）
+- 智能检索：MySQL关键词检索 + ChromaDB语义向量检索
+- 消息源动态配置：数据库驱动的消息源管理
+- 向量自动同步：MySQL数据自动同步到ChromaDB向量数据库
+- RESTful API：标准化的HTTP API接口
+
+**技术栈**：
+- FastAPI：Web框架
+- SQLAlchemy：ORM
+- MySQL：关系数据库
+- ChromaDB：向量数据库
+- Playwright：网页爬虫
+- httpx：HTTP客户端
+
+**运行环境**：
+- Python 3.11+
+- MySQL 8.0+
+- 操作系统：Windows/Linux/MacOS
+
+## 二、目录结构
+
+```
+message_platform/
+├── backend/                     # 后端代码目录
+│   ├── api/                     # API路由层
+│   │   ├── __init__.py
+│   │   ├── schemas.py          # Pydantic数据模型
+│   │   ├── search_routes.py    # 搜索API
+│   │   ├── source_routes.py    # 消息源管理API
+│   │   ├── collector_routes.py # 采集器控制API
+│   │   └── stats_routes.py     # 统计信息API
+│   ├── config/                  # 配置管理
+│   │   ├── __init__.py
+│   │   ├── global_config.py    # 全局配置
+│   │   ├── config_manager.py   # 配置管理器
+│   │   └── prompt_manager.py   # 提示词管理
+│   ├── database/                # 数据库层
+│   │   ├── __init__.py
+│   │   ├── entities.py         # SQLAlchemy实体定义
+│   │   ├── connection.py       # 数据库连接管理
+│   │   ├── orm_registry.py     # ORM自动注册系统
+│   │   └── startup_validator.py # 启动配置验证
+│   ├── llm/                     # LLM客户端
+│   │   ├── __init__.py
+│   │   ├── llm_client.py       # LLM客户端封装
+│   │   ├── global_llm_manager.py # LLM管理器（单例）
+│   │   └── translator.py       # 统一翻译服务
+│   ├── scripts/                 # 后端工具脚本
+│   │   └── fix_table_names.py  # 表名配置修复脚本
+│   ├── services/                # 业务服务层
+│   │   ├── __init__.py
+│   │   ├── collector_service.py    # 采集器服务
+│   │   ├── search_service.py       # 检索服务
+│   │   └── message/                # 消息相关服务
+│   │       ├── __init__.py
+│   │       └── vector_sync.py      # 向量同步服务
+│   ├── sources/                 # 消息源插件
+│   │   ├── __init__.py
+│   │   ├── tonghuashun/         # 同花顺采集器
+│   │   │   ├── __init__.py
+│   │   │   ├── collector.py
+│   │   │   └── register.sql
+│   │   ├── kr36/                # 36氪采集器
+│   │   │   ├── __init__.py
+│   │   │   ├── collector.py
+│   │   │   └── register.sql
+│   │   ├── arxiv/               # arXiv采集器
+│   │   │   ├── __init__.py
+│   │   │   ├── collector.py
+│   │   │   ├── config.py
+│   │   │   └── constants.py
+│   │   ├── partnership_ai/      # Partnership on AI采集器
+│   │   ├── govai/               # Centre for the Governance of AI采集器
+│   │   ├── oecd_ai/             # OECD AI Policy Observatory采集器
+│   │   ├── csis/                # CSIS AI Topic采集器
+│   │   ├── wef_publications/    # World Economic Forum Publications采集器
+│   │   ├── cigi/                # CIGI采集器
+│   │   ├── cnas/                # CNAS采集器
+│   │   ├── cset/                # CSET采集器
+│   │   ├── rand/                # RAND Corporation采集器
+│   │   ├── takshashila/         # Takshashila Institution采集器（印度）
+│   │   ├── icrier/              # ICRIER采集器（印度）
+│   │   ├── stellenbosch/        # Stellenbosch University采集器（南非）
+│   │   ├── gcg_ai/              # Global Center on AI Governance采集器（南非）
+│   │   ├── obia/                # OBIA采集器（巴西）
+│   │   └── hse_ai/              # HSE AI Centre采集器（俄罗斯）
+│   ├── storage/                 # 存储层
+│   │   ├── __init__.py
+│   │   └── chromadb_storage.py # ChromaDB存储
+│   └── main.py                  # 应用入口
+├── scripts/                     # 脚本工具
+│   ├── check_chromadb_dirty_data.py   # 检查ChromaDB数据
+│   ├── clean_chromadb_orphan_data.py  # 清理孤立数据
+│   ├── migrate_chromadb_data.py       # 迁移ChromaDB数据
+│   └── check_mysql_data.py            # 检查MySQL数据
+├── data/                        # 运行时数据
+│   └── chromadb/               # ChromaDB数据目录
+├── logs/                        # 日志目录
+├── config.yaml                  # 主配置文件
+├── requirements.txt             # Python依赖
+├── start_platform.bat           # Windows启动脚本
+├── CLAUDE.md                    # Claude Code项目指导
+├── 项目架构.md                  # 本文档
+└── README.md                    # 项目说明
+```
+
+## 三、核心模块说明
+
+### 3.1 API路由层（backend/api/）
+
+**schemas.py**：
+- 定义所有Pydantic数据模型
+- 请求模型：SearchRequest, MessageSourceCreate, MessageSourceUpdate
+- 响应模型：SearchResponse, MessageResponse, MessageSourceResponse
+- 通用模型：ErrorResponse, SuccessResponse
+
+**search_routes.py**：
+- POST /api/v1/search/messages：搜索消息（语义检索）
+- GET /api/v1/search/messages：获取最近消息
+- GET /api/v1/search/sources：获取可用消息源类型
+- GET /api/v1/search/health：搜索服务健康检查
+
+**source_routes.py**：
+- GET /api/v1/sources：获取消息源列表
+- GET /api/v1/sources/{source_id}：获取单个消息源详情
+- POST /api/v1/sources：创建新消息源
+- PUT /api/v1/sources/{source_id}：更新消息源
+- DELETE /api/v1/sources/{source_id}：删除消息源
+- POST /api/v1/sources/{source_id}/activate：启用消息源
+- POST /api/v1/sources/{source_id}/deactivate：禁用消息源
+- GET /api/v1/sources/{source_id}/status：获取消息源状态
+
+**collector_routes.py**：
+- GET /api/v1/collectors/status：获取所有采集器状态
+- POST /api/v1/collectors/{source_name}/start：启动采集器
+- POST /api/v1/collectors/{source_name}/stop：停止采集器
+- POST /api/v1/collectors/{source_name}/trigger：手动触发采集
+
+**stats_routes.py**：
+- GET /api/v1/stats/overview：获取系统统计概览
+- GET /api/v1/stats/sources：获取各消息源统计
+
+### 3.2 数据库层（backend/database/）
+
+**entities.py**：
+- MessageSource：消息源配置表
+- TongHuaShunMessage：同花顺消息表（含@hybrid_property external_id映射到seq）
+- Kr36Message：36氪消息表（含@hybrid_property external_id映射到item_id）
+- ArxivMessage：arXiv论文表（含@hybrid_property external_id映射到arxiv_id）
+- PartnershipAIMessage：Partnership on AI消息表（遵循2025统一字段标准）
+- GovAIMessage：Centre for the Governance of AI消息表
+- OECDAIMessage：OECD AI Policy Observatory消息表
+- CSISMessage：CSIS AI Topic消息表
+- WEFPublicationMessage：World Economic Forum Publications消息表
+- CIGIMessage：CIGI消息表
+- CNASMessage：CNAS消息表
+- CSETMessage：CSET消息表
+- RANDMessage：RAND Corporation消息表
+- TakshashilaMessage：Takshashila Institution消息表（印度）
+- ICRIERMessage：ICRIER消息表（印度）
+- StellenboschMessage：Stellenbosch University消息表（南非）
+- GCGAIMessage：Global Center on AI Governance消息表（南非/非洲）
+- OBIAMessage：OBIA消息表（巴西）
+- HSEAIMessage：HSE AI Centre消息表（俄罗斯）
+
+**connection.py**：
+- init_database()：初始化数据库连接
+- create_session()：创建数据库会话（上下文管理器）
+- get_database_config()：获取数据库配置
+- check_database_connection()：检查数据库连接
+
+**orm_registry.py**（Fail Fast架构核心）：
+- ORMRegistry类：ORM类注册中心
+- auto_register_all_models()：自动扫描entities.py并注册所有消息表（仅注册*_messages表）
+- get_orm_registry()：获取全局ORM Registry实例
+- 功能：表名→ORM类映射，支持动态查询，消除硬编码
+
+**startup_validator.py**（Fail Fast架构核心）：
+- ValidationResult类：收集验证结果（错误/警告/信息）
+- validate_message_sources()：验证消息源配置完整性
+- startup_validation()：启动时执行验证，fail_on_error=True时阻止服务启动
+- 检查项：config.mysql_table是否在ORM Registry中注册、表名格式一致性、ChromaDB集合配置
+
+**scripts/fix_table_names.py**（智能修复工具）：
+- 从ORM Registry获取所有有效表名（自动发现，零硬编码）
+- 智能修复：尝试添加mp_前缀
+- 创建新dict对象更新JSON字段（修复SQLAlchemy检测bug）
+
+### 3.3 业务服务层（backend/services/）
+
+**collector_service.py**：
+- CollectorService类：采集器服务管理器
+- COLLECTOR_REGISTRY：采集器注册表
+- 功能：启动/停止采集器、调度定时任务、健康检查
+
+**search_service.py**：
+- SearchService类：检索服务
+- 使用ORM Registry动态获取表ORM类（消除硬编码model_map）
+- 混合检索：MySQL关键词检索 + ChromaDB语义检索
+- RRF融合：融合关键词和语义检索结果
+- 时间范围过滤
+- 默认hours=0：返回所有历史消息
+
+**message/vector_sync.py**：
+- startup_vector_sync()：启动时向量同步
+- sync_messages_to_chromadb()：同步MySQL消息到ChromaDB
+- 使用ORM Registry动态获取表ORM类（消除硬编码model_map）
+- 统一使用external_id字段（通过@hybrid_property自动映射旧表）
+- 支持全量同步和增量同步
+- 去重逻辑：url > id > title > 内容哈希
+
+### 3.4 消息源插件（backend/sources/）
+
+**tonghuashun/collector.py**：
+- TongHuaShunCollector类
+- 采集同花顺7x24财经快讯
+- 使用Playwright抓取网页
+- 去重字段：url
+
+**kr36/collector.py**：
+- Kr36Collector类
+- 采集36氪快讯
+- 使用httpx调用API
+- 去重字段：item_id
+
+**arxiv/collector.py**：
+- ArxivCollector类
+- 采集arXiv学术论文
+- 使用arxiv Python库
+- 去重字段：arxiv_id
+- 支持多分类查询
+
+### 3.5 存储层（backend/storage/）
+
+**chromadb_storage.py**：
+- ChromaDBStorage类：ChromaDB存储管理
+- initialize()：初始化ChromaDB客户端，动态从数据库读取所有激活消息源的collection配置（配置驱动，零硬编码）
+- 数据流：查询mp_message_sources表 → 提取config.chroma_collection → 自动创建collection
+- 降级方案：如果数据库查询失败，使用默认集合避免启动失败
+- get_chromadb_storage()：获取全局存储实例
+- 核心方法：upsert（插入向量）、search（语义检索）、count（统计）、delete（删除）
+- create_collection()：动态创建新collection（支持运行时扩展）
+- 集合管理：余弦相似度度量（cosine），自动去重机制
+
+### 3.6 LLM层（backend/llm/）
+
+**global_llm_manager.py**：
+- GlobalLLMManager类：LLM管理器（单例模式）
+- 管理embedding和fast两个LLM客户端
+- 消息平台不需要chat主模型
+
+**llm_client.py**：
+- LLMClient类：LLM客户端封装
+- 支持OpenAI兼容API
+
+**translator.py**：
+- Translator类：统一翻译服务（外文→中文）
+- 功能特性：
+  - 并发控制（默认2个并发，避免API过载）
+  - 自动重试机制（3次重试，指数退避：1秒、2秒、4秒）
+  - 降级策略（翻译失败时返回截断原文前500字）
+  - 批量翻译优化
+- 使用场景：所有将summary翻译为中文的场景
+- 全局访问：`from backend.llm.translator import get_translator`
+
+### 3.7 配置管理（backend/config/）
+
+**config_manager.py**：
+- ConfigManager类：配置管理器
+- 加载config.yaml
+- 支持环境变量替换：${{KEY:default}}
+
+**global_config.py**：
+- GlobalConfig类：全局配置（单例模式）
+
+**prompt_manager.py**：
+- PromptManager类：提示词管理
+
+## 四、数据库设计
+
+### 4.1 核心表结构
+
+**mp_message_sources（消息源配置表）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | String(36) | 主键，UUID |
+| name | String(100) | 源名称，唯一 |
+| adapter_name | String(100) | 适配器名称（对应Collector类名） |
+| category | String(50) | 业务类别（news/paper等） |
+| display_name | String(100) | 显示名称 |
+| config | JSON | 适配器配置（含chroma_collection） |
+| schedule | String(50) | 定时任务cron表达式 |
+| is_active | Boolean | 是否启用 |
+| last_crawled_at | DateTime | 最后抓取时间 |
+| created_at | DateTime | 创建时间 |
+| updated_at | DateTime | 更新时间 |
+
+索引：idx_is_active, idx_created_at, idx_category
+
+**mp_tonghuashun_messages（同花顺消息表）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | String(36) | 主键，UUID |
+| source_id | String(36) | 外键→mp_message_sources.id |
+| title | String(500) | 标题 |
+| content | Text | 正文内容 |
+| summary | Text | 摘要 |
+| provider | String(200) | 信息提供方 |
+| published_at | DateTime | 发布时间 |
+| url | String(500) | 原文链接，唯一 |
+| image_url | Text | 图片链接 |
+| crawled_at | DateTime | 抓取时间 |
+| seq | String(50) | 同花顺序列号 |
+| tags | JSON | 标签列表 |
+
+索引：idx_source_id, idx_published_at, idx_source_published, idx_crawled_at, idx_seq, idx_provider, idx_url
+
+**mp_kr36_messages（36氪消息表）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | String(36) | 主键，UUID |
+| source_id | String(36) | 外键→mp_message_sources.id |
+| item_id | String(50) | 36氪item_id，唯一 |
+| title | String(500) | 标题 |
+| content | Text | 正文内容 |
+| summary | Text | 摘要 |
+| published_at | DateTime | 发布时间 |
+| kr_route | String(500) | 36氪页面路由 |
+| source_url | String(500) | 原文链接 |
+| image_url | Text | 图片链接 |
+| crawled_at | DateTime | 抓取时间 |
+| comment_count | Integer | 评论数 |
+| has_relevant | Boolean | 是否相关 |
+
+索引：idx_source_id, idx_published_at, idx_source_published, idx_crawled_at, idx_item_id, idx_source_url
+
+**mp_arxiv_messages（arXiv论文表）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | String(36) | 主键，UUID |
+| source_id | String(36) | 外键→mp_message_sources.id |
+| arxiv_id | String(50) | arXiv ID，唯一 |
+| title | String(500) | 标题 |
+| content | Text | 摘要（Abstract） |
+| summary | Text | 展示摘要 |
+| provider | Text | 所有作者（逗号分隔） |
+| published_at | DateTime | 发布时间 |
+| url | String(500) | 论文详情页，唯一 |
+| primary_category | String(50) | 主分类 |
+| categories | JSON | 所有分类数组 |
+| doi | String(255) | DOI |
+| journal_ref | Text | 期刊引用 |
+| comment | Text | 评论 |
+| updated_at | DateTime | 更新时间 |
+| crawled_at | DateTime | 抓取时间 |
+
+索引：idx_source_id, idx_published_at, idx_source_published, idx_crawled_at, idx_arxiv_id, idx_primary_category, idx_doi, idx_updated_at
+
+**mp_partnership_ai_messages（Partnership on AI消息表）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | String(36) | 主键，UUID |
+| source_id | String(36) | 外键→mp_message_sources.id（CASCADE） |
+| external_id | String(200) | 外部唯一标识（文章slug） |
+| title | String(500) | 标题 |
+| content | Text | 正文内容 |
+| summary | Text | 摘要（优先从网页提取） |
+| provider | String(500) | 作者或信息提供方（逗号分隔） |
+| published_at | DateTime | 发布时间 |
+| crawled_at | DateTime | 抓取时间 |
+| url | String(500) | 原文链接（UNIQUE，用于去重） |
+| region | String(50) | 地区（US） |
+| category | String(100) | 分类（AI Governance/Policy等） |
+| language | String(10) | 语言（en） |
+| tags | JSON | 标签列表 |
+| extra_metadata | JSON | 其他元数据（列名metadata） |
+
+索引：idx_source_id, idx_published_at, idx_crawled_at, idx_source_published, idx_url, idx_external_id, idx_region, idx_category
+
+说明：遵循2025统一字段标准，为Partnership on AI博客专用表。
+
+**mp_gcg_ai_messages（Global Center on AI Governance消息表）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | String(36) | 主键，UUID |
+| source_id | String(36) | 外键→mp_message_sources.id（CASCADE） |
+| external_id | String(200) | 外部唯一标识（文章slug） |
+| title | String(500) | 标题 |
+| content | Text | 正文内容（从详情页提取的简介） |
+| summary | Text | 中文摘要（翻译后） |
+| provider | String(500) | 作者（多个用逗号分隔） |
+| published_at | DateTime | 发布时间 |
+| crawled_at | DateTime | 抓取时间 |
+| url | String(500) | 原文链接（UNIQUE，用于去重） |
+| region | String(50) | 地区（ZA=South Africa/Africa） |
+| category | String(100) | 出版物类型（Policy Brief/Report/Article/Analysis/Toolkit等） |
+| language | String(10) | 语言（en） |
+| tags | JSON | 标签列表（如Technology、Public Policy等） |
+| pdf_url | String(500) | PDF下载链接（如果有） |
+| extra_metadata | JSON | 其他元数据（列名metadata） |
+
+索引：idx_source_id, idx_published_at, idx_crawled_at, idx_source_published, idx_url, idx_external_id, idx_category
+
+说明：遵循2025统一字段标准，为南非/非洲AI治理研究中心专用表。采用列表页+详情页模式，外文内容自动翻译成中文。
+
+### 4.2 外键关系
+
+```
+mp_message_sources (1)
+├── mp_tonghuashun_messages (N)
+├── mp_kr36_messages (N)
+├── mp_arxiv_messages (N)
+├── mp_partnership_ai_messages (N)
+├── mp_govai_messages (N)
+├── mp_oecd_ai_messages (N)
+├── mp_csis_messages (N)
+├── mp_wef_publication_messages (N)
+├── mp_cigi_messages (N)
+├── mp_cnas_messages (N)
+├── mp_cset_messages (N)
+├── mp_rand_messages (N)
+├── mp_takshashila_messages (N)
+├── mp_icrier_messages (N)
+├── mp_stellenbosch_messages (N)
+├── mp_gcg_ai_messages (N)
+├── mp_obia_messages (N)
+└── mp_hse_ai_messages (N)
+```
+
+说明：外键使用CASCADE删除策略，删除消息源时自动删除所有关联消息。
+
+## 五、API端点完整列表
+
+### 5.1 健康检查
+
+- GET /health：系统健康检查
+- GET /：根路径，返回服务信息
+
+### 5.2 消息搜索
+
+- POST /api/v1/search/messages：搜索消息（语义检索）
+  - 请求体：SearchRequest（source_type, query, time_range, limit）
+  - 响应：SearchResponse（results, total, query, search_time）
+
+- GET /api/v1/search/messages：获取最近消息
+  - 参数：source_type, limit, hours
+  - 响应：List[MessageResponse]
+
+- GET /api/v1/search/sources：获取可用消息源类型
+  - 响应：List[str]（category列表）
+
+- GET /api/v1/search/health：搜索服务健康检查
+
+### 5.3 消息源管理
+
+- GET /api/v1/sources：获取消息源列表
+  - 参数：is_active, category
+  - 响应：List[MessageSourceResponse]
+
+- GET /api/v1/sources/{source_id}：获取单个消息源详情
+  - 响应：MessageSourceResponse
+
+- POST /api/v1/sources：创建新消息源
+  - 请求体：MessageSourceCreate
+  - 响应：MessageSourceResponse（HTTP 201）
+
+- PUT /api/v1/sources/{source_id}：更新消息源
+  - 请求体：MessageSourceUpdate
+  - 响应：MessageSourceResponse
+
+- DELETE /api/v1/sources/{source_id}：删除消息源
+  - 响应：HTTP 204 No Content
+
+- POST /api/v1/sources/{source_id}/activate：启用消息源
+  - 响应：SuccessResponse
+
+- POST /api/v1/sources/{source_id}/deactivate：禁用消息源
+  - 响应：SuccessResponse
+
+- GET /api/v1/sources/{source_id}/status：获取消息源状态
+  - 响应：{id, name, is_active, statistics, ...}
+
+### 5.4 采集器控制
+
+- GET /api/v1/collectors/status：获取所有采集器状态
+  - 响应：{status, collectors: [...]}
+
+- POST /api/v1/collectors/{source_name}/start：启动采集器
+- POST /api/v1/collectors/{source_name}/stop：停止采集器
+- POST /api/v1/collectors/{source_name}/trigger：手动触发采集
+
+### 5.5 统计信息
+
+- GET /api/v1/stats/overview：获取系统统计概览
+  - 响应：{total_messages, sources_count, recent_messages, ...}
+
+- GET /api/v1/stats/sources：获取各消息源统计
+
+## 六、数据流向
+
+### 6.1 消息采集流程
+
+```
+CollectorService启动
+  → 从数据库读取激活的消息源（is_active=1）
+  → 根据adapter_name从COLLECTOR_REGISTRY实例化Collector
+  → 根据schedule创建定时任务
+  → 定时执行Collector.collect()
+    → Playwright/httpx抓取网页/API
+    → 解析数据
+    → 检查唯一字段去重
+    → 插入MySQL数据库
+    → 更新source.last_crawled_at
+  → 后台任务vector_sync同步到ChromaDB
+```
+
+### 6.2 消息检索流程
+
+```
+用户请求 → SearchService.search()
+  → MySQL关键词检索（LIKE查询）
+  → ChromaDB语义检索（相似度搜索）
+  → RRF融合两种结果
+  → 时间范围过滤
+  → 返回融合结果
+```
+
+### 6.3 向量同步流程
+
+```
+启动时：startup_vector_sync()
+  → 全量同步模式：
+    → 读取MySQL所有消息
+    → 去重（url > id > title > 哈希）
+    → 分批（50条/批）
+    → 调用embedding生成向量
+    → upsert到ChromaDB
+  → 增量同步模式：
+    → 读取MySQL最近N条消息
+    → 检查ChromaDB中不存在的
+    → 分批向量化并插入
+```
+
+## 七、与PersonalAgent的集成方式
+
+### 7.1 集成架构
+
+```
+PersonalAgent
+  ├── backend/services/message_platform_client.py
+  │   └── MessagePlatformClient类
+  │       ├── 健康检查缓存（5分钟）
+  │       ├── 重试机制（3次，指数退避）
+  │       └── HTTP请求封装
+  ├── backend/api/message_routes.py
+  │   └── 代理层：转发前端请求到message_platform
+  ├── backend/tools/message_recall_tool.py
+  │   └── MessageRecallTool
+  │       └── get_description()：动态生成工具描述
+  └── backend/agent/react_agent.py
+      └── _generate_tool_usage_guide()：动态注入系统提示词
+```
+
+### 7.2 API调用链路
+
+```
+PersonalAgent前端
+  → axios调用 /api/message/sources
+  → backend/api/message_routes.py（代理层）
+  → message_platform_client.get_message_sources()
+  → httpx请求 http://localhost:11528/api/v1/sources
+  → message_platform返回消息源列表
+  → 代理层转发给前端
+```
+
+### 7.3 工具描述动态生成
+
+```
+ReactAgent初始化
+  → _generate_tool_usage_guide()
+  → 调用message_platform_client.get_message_sources(is_active=True)
+  → 按category分组
+  → 动态生成消息类型列表
+  → 动态生成意图识别规则
+  → 注入到系统提示词
+```
+
+### 7.4 消息源配置同步
+
+```
+message_platform数据库：mp_message_sources
+  ├── 新增消息源（INSERT）
+  ├── 更新category/display_name
+  └── 设置is_active=1
+
+PersonalAgent启动时：
+  ├── MessageRecallTool.get_description()动态加载消息源
+  ├── ReactAgent._generate_tool_usage_guide()生成工具指南
+  └── 无需修改代码，自动同步
+```
+
+## 八、消息源扩展机制
+
+### 8.1 扩展流程
+
+1. **创建采集器模块**：
+   - 在backend/sources/new_source/目录创建
+   - 实现NewSourceCollector类
+   - 必须包含__init__(source_id, config)和collect()方法
+
+2. **注册到CollectorService**：
+   - 在backend/services/collector_service.py的COLLECTOR_REGISTRY添加
+
+3. **数据库注册消息源**：
+   - 在mp_message_sources表插入记录
+   - 设置adapter_name为NewSourceCollector
+   - 设置category（决定API的source_type）
+   - 配置config字段（含chroma_collection）
+
+4. **自动同步到PersonalAgent**：
+   - message_platform启动时自动加载新消息源
+   - PersonalAgent的工具描述自动包含新消息源
+   - 前端自动显示新消息源
+
+### 8.2 采集器接口规范
+
+所有采集器必须实现：
+- `__init__(self, source_id: str, config: dict)`
+- `async def collect(self) -> List[Dict]`
+
+返回的字典必须包含：
+- title：标题
+- content：正文
+- published_at：发布时间（datetime对象）
+- 唯一标识字段（url/item_id/arxiv_id）
+
+## 九、配置文件说明
+
+### 9.1 config.yaml核心配置
+
+- database.mysql：MySQL数据库连接配置
+- database.chromadb：ChromaDB存储配置（mode: local, path）
+- llm.embedding：Embedding模型配置（用于向量化）
+- llm.fast：Fast LLM配置（用于摘要生成）
+- vector_sync：向量同步配置（enabled, mode, incremental_limit）
+- retrieval：检索配置（similarity_threshold, rrf_k）
+- web：Web服务配置（host, port）
+
+### 9.2 环境变量
+
+支持通过环境变量覆盖配置（零硬编码架构）：
+
+**数据库配置**：
+- MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
+
+**LLM配置**：
+- LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+- EMBEDDING_BASE_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL
+
+**存储配置**：
+- CHROMADB_PATH：ChromaDB存储路径（默认：./data/chromadb）
+
+**日志配置**：
+- LOG_FILE：日志文件路径（默认：logs/platform.log）
+
+**调试配置**：
+- SKIP_VALIDATION：跳过启动验证（值：1，仅调试用，生产禁止）
+
+## 十、启动与部署
+
+### 10.1 开发环境启动
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 配置config.yaml和环境变量
+
+# 启动服务
+python backend/main.py
+```
+
+### 10.2 访问地址
+
+- API文档：http://localhost:11528/docs
+- 健康检查：http://localhost:11528/health
+- 根路径：http://localhost:11528/
+
+### 10.3 数据库初始化
+
+首次启动时，SQLAlchemy会自动创建表结构（通过Base.metadata.create_all）。
+
+需手动在mp_message_sources表注册初始消息源。
+
+## 十一、硬编码消除与配置驱动架构
+
+### 11.1 零硬编码原则
+
+本项目严格遵循"零硬编码"原则，所有动态内容从数据库或配置文件读取：
+
+**已消除的硬编码**：
+1. ✅ **MySQL统计硬编码**（main.py）：从硬编码3个表改为动态查询所有消息源
+2. ✅ **搜索统计硬编码**（search_service.py）：使用ORM Registry动态获取所有消息源
+3. ✅ **ChromaDB降级方案**（chromadb_storage.py）：从硬编码列表改为Fail Fast
+4. ✅ **arXiv配置错误**（arxiv/config.py）：修正表名为mp_arxiv_messages
+5. ✅ **数据库默认配置**（connection.py）：移除硬编码密码，强制从配置读取
+6. ✅ **日志路径硬编码**（main.py）：支持LOG_FILE环境变量
+7. ✅ **集合名称拼接逻辑**（search_service.py）：移除错误的mp_前缀
+8. ✅ **ChromaDB路径默认值**（chromadb_storage.py）：支持CHROMADB_PATH环境变量
+
+**架构优势**：
+- 新增消息源无需修改统计、监控等基础设施代码
+- 配置错误在启动时发现（Fail Fast），而非运行时
+- 支持环境变量，便于Docker等容器化部署
+- 敏感信息不出现在代码中
+
+### 11.2 新增消息源检查清单
+
+新增消息源时，必须同步修改以下位置：
+
+**必做项**：
+1. 在backend/sources/新增采集器模块
+2. 在backend/database/entities.py定义ORM实体（_messages结尾，自动注册）
+3. 在数据库mp_message_sources表注册消息源配置
+4. 在CollectorService.COLLECTOR_REGISTRY注册采集器
+
+**自动支持项**（无需修改代码）：
+- ✅ MySQL统计（display_database_stats自动支持）
+- ✅ 搜索统计（get_statistics自动支持）
+- ✅ ChromaDB初始化（从数据库读取配置）
+- ✅ 向量同步（使用ORM Registry动态处理）
+- ✅ 启动验证（自动检查配置一致性）
+
+**可选项**（SQLAlchemy要求，但可接受）：
+- 在MessageSource实体中添加relationship字段（如需反向引用）
+
+### 11.3 MessageSource关系字段维护
+
+由于SQLAlchemy的设计要求，新增消息源时需要在MessageSource实体中手动添加relationship字段：
+
+```python
+# backend/database/entities.py
+class MessageSource(Base):
+    # ... 其他字段 ...
+
+    # 每新增一个消息源，需添加对应的relationship
+    new_source_messages = relationship(
+        "NewSourceMessage",
+        back_populates="source",
+        cascade="all, delete-orphan"
+    )
+```
+
+这是SQLAlchemy ORM的设计要求，而非硬编码缺陷。如不需要反向引用，可省略此步骤。
+
+## 十二、已注册消息源详情
+
+### 12.1 Partnership on AI 采集器
+
+**backend/sources/partnership_ai/collector.py**：
+
+**类**：`PartnershipAICollector`
+
+**配置**：
+- url：https://partnershiponai.org/blog/
+- interval：86400秒（每日采集）
+- category：ai_governance
+- region：US
+- timezone：America/New_York
+- language：en
+- mysql_table：mp_partnership_ai_messages
+- chroma_collection：mp_partnership_ai
+- collector_module：backend.sources.partnership_ai.collector
+
+**数据字段**：
+- external_id：从URL提取的文章slug（如nightmare-on-ai-street-pais-horror-index）
+- title：文章标题（从.content_block提取，自动移除类别前缀）
+- content：文章内容（优先使用excerpt，否则使用title）
+- summary：摘要（优先从.post_excerpt提取）
+- provider：作者名称（从.author_info解析，支持多作者逗号分隔）
+- published_at：发布时间（格式：Oct 31, 2025）
+- url：原文链接（用于去重）
+- region：US
+- category：AI Governance
+- language：en
+
+**网页结构**：
+- 文章容器：`a.post-card`
+- 标题：`.content_block`（可能包含类别前缀如"Blog"、"Policy"）
+- 摘要：`.post_excerpt`
+- 作者与日期：`.author_info`（格式：作者名\n日期）
+
+**去重策略**：
+- 唯一标识：url字段（UNIQUE约束）
+- 查询最新记录：按published_at降序
+- 停止条件：遇到已存储的URL立即停止采集
+
+**ChromaDB ID生成**：
+- 使用url作为稳定的唯一标识
+
+**测试脚本**：
+- backend/sources/partnership_ai/test_collector.py
+
+**注册SQL**：
+- backend/sources/partnership_ai/register.sql
+
+### 12.2 Takshashila Institution 采集器（印度智库）
+
+**backend/sources/takshashila/collector.py**：
+
+**类**：`TakshashilaCollector`
+
+**配置**：
+- url：https://takshashila.org.in/pages/publications/
+- interval：86400秒（每日采集）
+- region：IN（India）
+- language：en
+- mysql_table：mp_takshashila_messages
+- chroma_collection：mp_takshashila
+
+**数据字段**：
+- external_id：从URL提取的文件名（如20251103-LEPF-Policy-Brief）
+- title：出版物标题
+- content：文章正文（从详情页提取完整内容）
+- summary：中文摘要（翻译后）
+- provider：作者列表（逗号分隔）
+- published_at：发布时间（格式：Nov 3, 2025）
+- url：原文链接
+- region：IN
+- language：en
+- publication_type：出版物类型（Policy Brief/Discussion Document等）
+- categories：分类标签列表（如Geopolitics, Public Policy）
+
+**网页结构**：
+- 列表容器：`#listing-publications-list .list > li`
+- 标题：`.listing-title`
+- 日期：`.listing-date`
+- 作者：`.listing-author`
+- 分类：`.listing-categories .listing-category`
+- 详情页正文：`#quarto-content p`
+
+**采集流程**：
+- 使用Playwright抓取列表页（JavaScript渲染，List.js库）
+- 访问详情页获取完整正文内容
+- 预翻译策略：在数据库会话外完成所有翻译
+- 并发存储到MySQL和ChromaDB
+
+**去重策略**：url字段（UNIQUE约束）
+
+### 12.3 ICRIER 采集器（印度经济智库）
+
+**backend/sources/icrier/collector.py**：
+
+**类**：`ICRIERCollector`
+
+**配置**：
+- url：https://icrier.org/publication/
+- interval：86400秒（每日采集）
+- region：IN（India）
+- language：en
+- mysql_table：mp_icrier_messages
+- chroma_collection：mp_icrier
+
+**数据字段**：
+- external_id：URL slug
+- title：出版物标题
+- content：英文摘要（从详情页提取）
+- summary：中文翻译
+- provider：作者（多个用逗号分隔，从详情页提取）
+- published_at：发布时间
+- url：原文链接
+- region：IN
+- category：分类（Policy Briefs/Reports/Bulletins等）
+- language：en
+- pdf_url：PDF下载链接
+
+**网页结构**：
+- 列表页：动态选择器（支持article/.publication-item/.post等）
+- 详情页作者：`a[href*="/people/"]`
+- 详情页正文：`article p, .content p, .entry-content p`
+- PDF链接：`a[href*=".pdf"]`
+
+**采集流程**：
+- Playwright抓取列表页
+- 访问详情页获取完整摘要和作者信息
+- 预翻译所有摘要（在session外执行）
+- 并发存储
+
+**去重策略**：url字段（UNIQUE约束）
+
+### 12.4 Stellenbosch University 采集器（南非智库）
+
+**backend/sources/stellenbosch/collector.py**：
+
+**类**：`StellenboschCollector`
+
+**配置**：
+- url：https://policyinnovationlab.sun.ac.za/news/
+- interval：86400秒（每日采集）
+- region：ZA（South Africa）
+- language：en
+- mysql_table：mp_stellenbosch_messages
+- chroma_collection：mp_stellenbosch
+
+**数据字段**：
+- external_id：URL路径slug
+- title：文章标题
+- content：正文内容（从详情页提取）
+- summary：中文摘要（翻译后）
+- provider：作者（从JSON-LD schema提取）
+- published_at：发布时间
+- url：原文链接
+- region：ZA
+- category：文章分类（从articleSection提取，如Data Science & Public Policy）
+- language：en
+- word_count：字数统计（从JSON-LD schema提取）
+
+**网页结构**：
+- 列表容器：`.eg-grid-item`（支持无限滚动加载）
+- 标题链接：`a[href*='policyinnovationlab.sun.ac.za']`
+- 详情页正文：`article p, .post-content p, .entry-content p`
+- JSON-LD数据：`script[type="application/ld+json"]`
+
+**采集流程**：
+- Playwright抓取列表页，支持滚动加载（最多30次，或连续3次无新内容）
+- 访问详情页获取完整内容（包含JSON-LD结构化数据提取）
+- 预生成所有summary后批量存储
+- 并发存储到MySQL和ChromaDB
+
+**去重策略**：url字段（UNIQUE约束）
+
+### 12.5 GCG AI 采集器（南非/非洲AI治理中心）
+
+**backend/sources/gcg_ai/collector.py**：
+
+**类**：`GCGAICollector`
+
+**配置**：
+- url：https://www.globalcenter.ai/research
+- interval：604800秒（每周采集）
+- region：ZA（South Africa/Africa）
+- language：en
+- mysql_table：mp_gcg_ai_messages
+- chroma_collection：mp_gcg_ai
+
+**数据字段**：
+- external_id：从URL提取的slug
+- title：研究报告标题
+- content：简介内容（从详情页提取）
+- summary：中文摘要（翻译后）
+- provider：作者（多个用逗号分隔）
+- published_at：发布时间
+- url：原文链接
+- region：ZA
+- category：出版物类型（Policy Brief/Report/Article/Analysis/Toolkit等）
+- language：en
+- tags：标签列表（如Technology、Public Policy等）
+- pdf_url：PDF下载链接
+
+**网页结构**：
+- 文章容器：`article, [class*="publication"], [class*="research"]`
+- 备用方案：提取所有`a[href*="/research/"]`链接
+- 标题：`h2, h3, h4, .title`
+- 日期：`time, .date`
+- 类型：`.type, .category`
+- 详情页正文：`article p, .content p, .intro p, .summary p`
+
+**采集流程**：
+- Playwright抓取研究列表页
+- 访问详情页获取简介内容（限制1000字避免过长）
+- 预处理：先完成所有翻译（在session外）
+- 并发存储到MySQL和ChromaDB
+
+**去重策略**：url字段（UNIQUE约束）
+
+### 12.6 OBIA 采集器（巴西AI观测站）
+
+**backend/sources/obia/collector.py**：
+
+**类**：`OBIACollector`
+
+**配置**：
+- url：https://obia.nic.br/s/publicacoes
+- interval：86400秒（每日采集）
+- region：BR（Brazil）
+- language：pt（葡萄牙语）
+- mysql_table：mp_obia_messages
+- chroma_collection：mp_obia
+
+**数据字段**：
+- external_id：从data-guid属性提取
+- title：出版物标题
+- content：描述信息（包含作者）
+- summary：中文翻译
+- provider：作者列表（从描述中提取em标签，逗号或分号分隔）
+- published_at：从PDF URL时间戳提取（格式：YYYYMMDDhhmmss）
+- url：PDF直链（用于去重）
+- region：BR
+- category：分类（PANORAMA SETORIAL DA INTERNET/PESQUISAS TIC等）
+- language：pt
+- pdf_url：PDF下载链接（与url相同）
+- series：系列名称（Panorama Setorial/TIC Empresas/TIC Governo等）
+
+**网页结构**：
+- 出版物容器：`div.publicacao[data-guid]`
+- PDF链接：`a.view-publicacao_link_bloco[href]`
+- 分类：`.publicacao-content-texto > div > p`
+- 标题：`.publicacao-content-texto > div > h1`
+- 描述：`.publicacao-content-texto > div > div`
+- 作者：`em`标签
+
+**采集流程**：
+- 使用requests + BeautifulSoup抓取列表页（静态HTML）
+- 从PDF URL中提取发布时间（14位时间戳）
+- 预翻译所有摘要（葡萄牙语→中文，在session外执行）
+- 并发存储到MySQL和ChromaDB
+
+**去重策略**：url字段（UNIQUE约束）
+
+**特殊功能**：
+- 从标题中提取系列名称（支持正则匹配Panorama Setorial、TIC系列、Inteligência Artificial等）
+- 从PDF URL时间戳解析发布时间
+
+### 12.7 HSE AI 采集器（俄罗斯AI研究中心）
+
+**backend/sources/hse_ai/collector.py**：
+
+**类**：`HSEAICollector`
+
+**配置**：
+- url：https://cs.hse.ru/en/aicenter/news/
+- interval：86400秒（每日采集）
+- region：RU（Russia）
+- language：en
+- mysql_table：mp_hse_ai_messages
+- chroma_collection：mp_hse_ai
+
+**数据字段**：
+- external_id：从URL提取的数字ID（如1039162800）
+- title：新闻标题
+- content：文章正文（从详情页提取）
+- summary：中文摘要（翻译后）
+- provider：主要人物或作者（从摘要中提取）
+- published_at：发布时间（支持多种格式：October 27, 2025 / 2025-10-27 / October 27）
+- url：原文链接
+- region：RU
+- category：研究与专业知识（Research & Expertise等）
+- language：en
+- tags：关键词标签（JSON数组）
+
+**网页结构**：
+- 新闻列表：`article, .news-item, .post, div[class*="news"]`
+- 备用方案：查找所有`a[href*="/news/"]`链接
+- 标题：从`<a>`或父容器中提取
+- 日期：多种模式正则匹配（支持完整日期、年月日、月日）
+- 详情页正文：`article, .post-content, .entry-content, .content-wrapper`
+
+**采集流程**：
+- 使用aiohttp抓取新闻列表页（支持分页，page1.html, page2.html...）
+- 访问详情页获取完整内容
+- 预翻译所有摘要（在session外执行）
+- 将翻译结果回填到items后批量存储
+- 并发存储到MySQL和ChromaDB
+
+**分页策略**：
+- 第1页：base_url
+- 第2页及以上：{base_url}page{N}.html
+- 最多抓取10页（安全上限）
+- 遇到已存在URL或空页面停止翻页
+
+**去重策略**：url字段（UNIQUE约束）
+

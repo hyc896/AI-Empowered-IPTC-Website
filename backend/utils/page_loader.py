@@ -73,7 +73,7 @@ class PageLoader:
         )
 
         if final_count > initial_count:
-            logger.info(f"【PageLoader】使用"加载更多"按钮模式，最终元素数量: {final_count}")
+            logger.info(f"【PageLoader】使用'加载更多'按钮模式，最终元素数量: {final_count}")
             return final_count
 
         # 策略2: 尝试无限滚动

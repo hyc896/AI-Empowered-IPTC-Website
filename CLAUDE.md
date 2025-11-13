@@ -805,6 +805,23 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 - collect方法返回List[Dict]格式的消息列表
 - 实现去重检查逻辑
 - 更新last_crawled_at时间戳
+- 调用FieldEnricherService为消息添加region和industry_tags字段
+
+**字段增强服务（FieldEnricherService）**：
+- 位置：backend/services/field_enricher_service.py
+- 功能：自动为消息添加region（地区）和industry_tags（行业标签）
+- 使用方式：
+  ```python
+  from backend.services import get_field_enricher
+
+  self.field_enricher = get_field_enricher()
+  enriched = await self.field_enricher.enrich_fields(title, content)
+  # enriched包含：{"region": "中国/广东省", "industry_tags": "人工智能,半导体"}
+  ```
+- 设计参考：类似translator.py（并发控制、重试机制、降级策略）
+- 地区格式：中文，斜杠分隔（如"中国/广东省/深圳市"、"全球"）
+- 行业标签：逗号分隔，最多3个（如"人工智能,半导体/芯片"）
+- 参考实现：backend/sources/tonghuashun/collector.py
 
 ## 禁止事项（必须严格遵守）
 
