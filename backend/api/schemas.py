@@ -203,6 +203,24 @@ class PaginatedResponse(BaseModel):
         )
 
 
+# 地理统计相关模型
+class GeoStatisticsResponse(BaseModel):
+    """地理统计响应模型"""
+    statistics: Dict[str, int] = Field(..., description="各国家/地区的消息数量统计（中文国家名作为key）")
+    total_messages: int = Field(..., description="消息总数")
+    total_countries: int = Field(..., description="国家总数")
+    filters_applied: Dict[str, Any] = Field(..., description="应用的筛选条件")
+
+
+class RegionMessagesResponse(BaseModel):
+    """地区消息列表响应模型"""
+    items: List[Dict[str, Any]] = Field(..., description="消息列表")
+    total: int = Field(..., description="总数量")
+    limit: int = Field(..., description="返回数量限制")
+    offset: int = Field(..., description="偏移量")
+    region: str = Field(..., description="查询的地区名")
+
+
 # 类型别名
 MessageSourceList = List[MessageSourceResponse]
 MessageList = List[MessageResponse]

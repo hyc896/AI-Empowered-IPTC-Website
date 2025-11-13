@@ -20,6 +20,14 @@ const routes: RouteRecordRaw[] = [
     meta: {
       title: '消息列表'
     }
+  },
+  {
+    path: '/globe',
+    name: 'Globe',
+    component: () => import('@/views/Globe/index.vue'),
+    meta: {
+      title: '地球视图'
+    }
   }
 ]
 

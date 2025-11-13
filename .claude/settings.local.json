@@ -62,7 +62,15 @@
       "WebFetch(domain:www.rand.org)",
       "WebFetch(domain:www.cnas.org)",
       "WebFetch(domain:cset.georgetown.edu)",
-      "WebFetch(domain:venturebeat.com)"
+      "WebFetch(domain:venturebeat.com)",
+      "WebFetch(domain:geojson-maps.kyd.au)",
+      "Bash(del \"D:\\TechWork\\message_platform\\temp_countries.json\")",
+      "WebFetch(domain:globe.gl)",
+      "WebFetch(domain:giojs.org)",
+      "WebFetch(domain:github.blog)",
+      "WebFetch(domain:stripe.com)",
+      "Bash(cat:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []

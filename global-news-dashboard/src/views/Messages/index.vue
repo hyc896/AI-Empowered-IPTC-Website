@@ -93,7 +93,8 @@ import MarkdownRenderer from '@/components/common/MarkdownRenderer.vue'
 
 const messageStore = useMessageStore()
 
-const sources = computed(() => messageStore.sources)
+// 只显示活跃的消息源
+const sources = computed(() => messageStore.activeSources)
 const messages = computed(() => messageStore.messages)
 const total = computed(() => messageStore.total)
 const stats = computed(() => messageStore.stats)

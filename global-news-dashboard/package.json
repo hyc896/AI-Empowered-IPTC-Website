@@ -8,24 +8,27 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "latest",
-    "vue-router": "latest",
-    "pinia": "latest",
-    "element-plus": "latest",
     "@element-plus/icons-vue": "latest",
-    "axios": "latest",
     "@vueuse/core": "latest",
+    "axios": "latest",
     "dayjs": "latest",
+    "element-plus": "latest",
+    "globe.gl": "^2.45.0",
+    "highlight.js": "latest",
     "markdown-it": "latest",
-    "highlight.js": "latest"
+    "pinia": "latest",
+    "three": "^0.181.1",
+    "topojson-client": "^3.1.0",
+    "vue": "latest",
+    "vue-router": "latest"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "latest",
-    "vite": "latest",
-    "vue-tsc": "latest",
-    "typescript": "latest",
-    "sass": "latest",
+    "@types/markdown-it": "latest",
     "@types/node": "latest",
-    "@types/markdown-it": "latest"
+    "@vitejs/plugin-vue": "latest",
+    "sass": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "vue-tsc": "latest"
   }
 }

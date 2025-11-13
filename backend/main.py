@@ -343,6 +343,12 @@ def load_api_routes():
         except ImportError as e:
             logger.warning(f"统计路由加载失败: {e}")
 
+        try:
+            from backend.api.geo_routes import router as geo_router
+            app.include_router(geo_router, prefix="/api/v1")
+        except ImportError as e:
+            logger.warning(f"地理路由加载失败: {e}")
+
         app.include_router(search_router, prefix="/api/v1")
 
         logger.info("API路由加载成功")

@@ -22,6 +22,11 @@ export const useMessageStore = defineStore('message', () => {
     return sources.value.find((s) => s.id === currentSourceId.value) || null
   })
 
+  // 只返回活跃的消息源（用于筛选下拉框）
+  const activeSources = computed(() => {
+    return sources.value.filter((s) => s.is_active === true)
+  })
+
   async function fetchMessageSources(): Promise<void> {
     try {
       sources.value = await messageApi.getMessageSources()
@@ -119,6 +124,7 @@ export const useMessageStore = defineStore('message', () => {
 
   return {
     sources,
+    activeSources,
     messages,
     total,
     currentSourceId,
