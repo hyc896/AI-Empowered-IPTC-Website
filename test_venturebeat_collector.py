@@ -10,6 +10,10 @@ import sys
 import os
 from pathlib import Path
 
+# 设置UTF-8编码输出（Windows终端兼容）
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 # 添加项目根目录到系统路径
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -27,18 +31,28 @@ async def test_venturebeat_collector():
 
     try:
         # 导入配置和采集器
-        from backend.config import get_config
+        from backend.config import get_config, GlobalConfig
         from backend.sources.venturebeat.collector import VentureBeatCollector
         from backend.database.connection import create_session
         from backend.database.entities import VentureBeatMessage
 
-        # 加载配置
+        # 初始化配置
+        global_config = GlobalConfig.get_instance()
+        global_config.initialize("config.yaml")
+
+        # 获取配置
         config = get_config()
         print("\n✓ 配置加载成功")
 
         # 初始化LLM客户端（用于翻译和字段增强）
-        from backend.llm import init_llm_clients
-        init_llm_clients(config)
+        from backend.llm.global_llm_manager import GlobalLLMManager
+        llm_config = config.get("llm", {})
+        llm_manager = GlobalLLMManager.get_instance()
+        llm_manager.initialize(
+            chat_config=None,  # 消息平台不需要Chat主模型
+            embedding_config=llm_config.get("embedding", {}),
+            fast_config=llm_config.get("fast", {})
+        )
         print("✓ LLM客户端初始化成功")
 
         # 从数据库获取消息源配置

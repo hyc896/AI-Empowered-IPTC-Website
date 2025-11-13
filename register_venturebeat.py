@@ -11,7 +11,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from backend.database.connection import init_database, create_session
-from backend.config import get_global_config
+from sqlalchemy import text
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -66,8 +66,8 @@ def main():
             try:
                 logger.info(f"\n[{i}/{len(sql_statements)}] 执行SQL...")
 
-                # 执行SQL
-                result = db.execute(sql)
+                # 执行SQL（使用text()包装）
+                result = db.execute(text(sql))
                 db.commit()
 
                 # 显示结果
@@ -75,8 +75,9 @@ def main():
                     rows = result.fetchall()
                     if rows:
                         logger.info(f"  查询结果: {len(rows)} 行")
+                        # 显示结果（row是tuple，不是dict）
                         for row in rows:
-                            logger.info(f"    {dict(row)}")
+                            logger.info(f"    {row}")
                     else:
                         logger.info("  查询结果: 0 行")
                 elif sql.strip().upper().startswith('CREATE'):
@@ -102,7 +103,7 @@ def main():
     # 验证注册结果
     logger.info("\n验证注册结果:")
     with create_session() as db:
-        result = db.execute("""
+        result = db.execute(text("""
             SELECT
                 id,
                 name,
@@ -114,7 +115,7 @@ def main():
                 JSON_EXTRACT(config, '$.categories') AS categories
             FROM mp_message_sources
             WHERE name = 'venturebeat'
-        """)
+        """))
 
         row = result.fetchone()
         if row:

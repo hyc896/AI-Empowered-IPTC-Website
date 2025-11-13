@@ -1,40 +1,75 @@
-# Message Platform
+# 消息平台 (Message Platform)
 
 个人Agent系统的独立消息采集与检索平台，提供统一的消息源管理和检索服务。
 
-## 核心功能
+## 🎯 功能特性
 
-- **多源消息采集**: 同花顺、36氪、arXiv、Partnership on AI等多种消息源
+- **多源消息采集**: 支持同花顺、36氪、arXiv等多种消息源
 - **智能检索**: MySQL+ChromaDB混合检索，支持关键词和语义搜索
-- **RESTful API**: 标准化的HTTP API接口，易于集成
+- **RESTful API**: 标准化的API接口，易于集成
+- **实时采集**: 自动化的消息采集和更新
 - **向量存储**: 基于ChromaDB的语义向量检索
-- **消息源动态配置**: 数据库驱动的消息源管理
+- **监控告警**: 完整的健康检查和监控体系
 
-## 技术栈
+## 📁 项目结构
 
-- **后端框架**: FastAPI
-- **数据库**: MySQL 8.0+ (关系数据库) + ChromaDB (向量数据库)
-- **ORM**: SQLAlchemy
-- **爬虫**: Playwright, httpx
-- **前端Dashboard**: Vue 3 + Element Plus (位于global-news-dashboard目录)
+```
+message_platform/
+├── backend/                 # 后端代码
+│   ├── api/                # API路由层
+│   │   ├── search_routes.py      # 检索API
+│   │   ├── source_routes.py      # 消息源管理API
+│   │   ├── collector_routes.py   # 采集器控制API
+│   │   └── stats_routes.py        # 统计API
+│   ├── services/           # 核心服务层
+│   │   ├── collector_service.py   # 采集器服务
+│   │   └── search_service.py      # 检索服务
+│   ├── sources/            # 消息源插件
+│   │   ├── tonghuashun/           # 同花顺采集器
+│   │   ├── kr36/                  # 36氪采集器
+│   │   └── arxiv/                 # arXiv采集器
+│   ├── database/           # 数据库层
+│   │   ├── entities.py             # ORM实体
+│   │   └── connection.py          # 连接管理
+│   └── main.py             # 应用入口
+├── config/                # 配置文件
+│   └── platform_config.yaml # 主配置文件
+├── data/                  # 运行时数据
+├── logs/                  # 日志文件
+├── tests/                 # 测试文件
+├── requirements.txt       # Python依赖
+└── README.md             # 项目文档
+```
 
-## 快速开始
+## 🚀 快速开始
 
-### 1. 安装依赖
+### 1. 环境准备
 
 ```bash
+# 创建虚拟环境
+python -m venv venv
+
+# 激活虚拟环境
+# Windows
+venv\Scripts\activate
+# Linux/Mac
+source venv/bin/activate
+
+# 安装依赖
 pip install -r requirements.txt
 ```
 
 ### 2. 配置数据库
 
 ```bash
-mysql -u root -p -e "CREATE DATABASE message_platform CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+# 创建消息平台数据库
+mysql -u root -p
+CREATE DATABASE message_platform CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
 ### 3. 配置文件
 
-编辑 `config.yaml` 文件，配置数据库连接和LLM服务：
+编辑 `config/platform_config.yaml` 文件，配置数据库连接等信息：
 
 ```yaml
 database:
@@ -45,83 +80,36 @@ database:
     password: "your_password"
     database: "message_platform"
 
-llm:
-  embedding:
-    base_url: "http://localhost:11434"
-    api_key: "your_api_key"
-    model: "nomic-embed-text"
-
 web:
   host: "0.0.0.0"
-  port: 11528
+  port: 11523
 ```
 
 ### 4. 启动服务
 
 ```bash
-python backend/main.py
-```
-
-### 5. 访问服务
-
-- **API文档**: http://localhost:11528/docs
-- **健康检查**: http://localhost:11528/health
-- **前端Dashboard**: 进入 `global-news-dashboard` 目录，运行 `npm install; npm run dev`
-
-## 项目结构
+# 开发模式启动
+conda activate personal_agent; python backend/main.py
+cd global-news-dashboard; npm install; npm run dev
 
 ```
-message_platform/
-├── backend/                        # 后端代码
-│   ├── api/                        # API路由层
-│   │   ├── search_routes.py       # 检索API
-│   │   ├── source_routes.py       # 消息源管理API
-│   │   ├── collector_routes.py    # 采集器控制API
-│   │   └── stats_routes.py        # 统计API
-│   ├── services/                   # 核心服务层
-│   │   ├── collector_service.py   # 采集器服务
-│   │   ├── search_service.py      # 检索服务
-│   │   └── message/vector_sync.py # 向量同步服务
-│   ├── sources/                    # 消息源插件
-│   │   ├── tonghuashun/           # 同花顺采集器
-│   │   ├── kr36/                  # 36氪采集器
-│   │   ├── arxiv/                 # arXiv采集器
-│   │   └── partnership_ai/        # Partnership on AI采集器
-│   ├── database/                   # 数据库层
-│   │   ├── entities.py            # ORM实体定义
-│   │   ├── connection.py          # 数据库连接管理
-│   │   ├── orm_registry.py        # ORM自动注册系统
-│   │   └── startup_validator.py   # 启动配置验证
-│   ├── storage/                    # 存储层
-│   │   └── chromadb_storage.py    # ChromaDB存储
-│   ├── llm/                        # LLM客户端
-│   ├── config/                     # 配置管理
-│   └── main.py                     # 应用入口
-├── global-news-dashboard/          # 前端Dashboard (Vue 3)
-│   ├── src/
-│   ├── package.json
-│   └── README.md
-├── data/                           # 运行时数据
-│   └── chromadb_mp/               # ChromaDB数据存储
-├── logs/                           # 日志文件
-├── config.yaml                     # 主配置文件
-├── requirements.txt                # Python依赖
-├── CLAUDE.md                       # 开发指导文档
-├── 项目架构.md                     # 详细技术文档
-└── README.md                       # 本文档
-```
 
-## 核心API接口
+### 5. 验证服务
+
+- API文档: http://localhost:11523/docs
+- 健康检查: http://localhost:11523/health
+
+## 📡 API接口
 
 ### 消息检索
 
 ```http
-POST /api/v1/search/messages
+POST /api/v1/search
 Content-Type: application/json
 
 {
     "source_type": "news",
-    "query": "人工智能",
+    "query": "财经资讯",
     "time_range": {"hours": 24},
     "limit": 20
 }
@@ -129,49 +117,187 @@ Content-Type: application/json
 
 ### 消息源管理
 
-- `GET /api/v1/sources` - 获取消息源列表
-- `POST /api/v1/sources` - 创建新消息源
-- `PUT /api/v1/sources/{source_id}` - 更新消息源
-- `DELETE /api/v1/sources/{source_id}` - 删除消息源
-- `POST /api/v1/sources/{source_id}/activate` - 启用消息源
-- `POST /api/v1/sources/{source_id}/deactivate` - 禁用消息源
+```http
+# 获取消息源列表
+GET /api/v1/sources
 
-### 采集器控制
+# 创建消息源
+POST /api/v1/sources
 
-- `GET /api/v1/collectors/status` - 获取采集器状态
-- `POST /api/v1/collectors/{source_name}/start` - 启动采集器
-- `POST /api/v1/collectors/{source_name}/stop` - 停止采集器
-- `POST /api/v1/collectors/{source_name}/trigger` - 手动触发采集
+# 启动采集器
+POST /api/v1/collectors/{source_name}/start
+
+# 停止采集器
+POST /api/v1/collectors/{source_name}/stop
+```
 
 ### 统计信息
 
-- `GET /api/v1/stats/overview` - 获取系统统计概览
-- `GET /api/v1/stats/sources` - 获取各消息源统计
+```http
+GET /api/v1/stats
+```
 
-完整API文档请访问：http://localhost:11528/docs
+## 🗄️ 数据库设计
 
-## 与PersonalAgent集成
+### 核心表结构
 
-消息平台通过HTTP API与PersonalAgent项目集成。PersonalAgent中的`message_platform_client.py`封装了所有API调用，并提供健康检查、重试机制等功能。
+1. **mp_message_sources** - 消息源配置表
+2. **mp_tonghuashun_messages** - 同花顺消息表
+3. **mp_kr36_messages** - 36氪消息表
+4. **mp_arxiv_messages** - arXiv论文表
+5. **mp_external_messages** - 通用外部消息表
 
-消息源配置存储在数据库中，PersonalAgent启动时会自动同步消息源信息，无需修改代码即可支持新消息源。
+### 外键关系
 
-## 扩展消息源
+```
+mp_message_sources (1)
+├── mp_tonghuashun_messages (N)
+├── mp_kr36_messages (N)
+├── mp_arxiv_messages (N)
+└── mp_external_messages (N)
+```
 
-1. 在 `backend/sources/` 创建新的消息源目录
-2. 实现采集器类，包含 `__init__` 和 `collect` 方法
-3. 在 `CollectorService.COLLECTOR_REGISTRY` 注册采集器
-4. 在数据库 `mp_message_sources` 表注册消息源配置
-5. PersonalAgent将自动同步新消息源
+## 🔧 配置说明
 
-详细开发指导请参考 `CLAUDE.md` 和 `项目架构.md`
+### 数据库配置
 
-## 文档说明
+```yaml
+database:
+  mysql:
+    host: "localhost"
+    port: 3306
+    user: "root"
+    password: "password"
+    database: "message_platform"
+    pool_size: 20
+```
 
-- **README.md** (本文档): 快速开始指南
-- **项目架构.md**: 详细技术文档，包含数据库设计、数据流向、消息源详情等
-- **CLAUDE.md**: 开发指导文档，包含架构设计原则、编码规范、最佳实践等
+### 采集器配置
 
-## 许可证
+```yaml
+collectors:
+  tonghuashun:
+    enabled: true
+    interval: 15  # 采集间隔（秒）
+  kr36:
+    enabled: true
+    interval: 30
+  arxiv:
+    enabled: true
+    interval: 86400  # 24小时
+```
 
-MIT License
+### 检索配置
+
+```yaml
+retrieval:
+  similarity_threshold: 0.4  # 相似度阈值
+  rrf_k: 60                  # RRF融合参数
+  max_results: 100           # 最大结果数
+```
+
+## 🧪 测试
+
+```bash
+# 运行测试
+pytest tests/
+
+# 运行特定测试
+pytest tests/test_search_service.py
+
+# 生成覆盖率报告
+pytest --cov=backend tests/
+```
+
+## 📊 监控
+
+### 健康检查
+
+```bash
+curl http://localhost:11523/health
+```
+
+### 指标监控
+
+- 服务状态: `/health`
+- 采集器状态: `/api/v1/collectors/status`
+- 系统统计: `/api/v1/stats`
+
+## 🔗 与Agent系统集成
+
+消息平台通过HTTP API与PersonalAgent项目集成：
+
+1. **Agent项目**: 通过HTTP客户端调用消息平台API
+2. **消息平台**: 提供标准化的检索和管理接口
+3. **数据同步**: 支持增量同步和全量同步
+
+### 接口示例
+
+```python
+# Agent项目中的调用示例
+import httpx
+
+async def search_messages(query: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://localhost:11523/api/v1/search",
+            json={
+                "source_type": "news",
+                "query": query,
+                "limit": 20
+            }
+        )
+        return response.json()
+```
+
+## 🚀 部署
+
+### Docker部署（可选）
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+EXPOSE 11523
+
+CMD ["python", "backend/main.py"]
+```
+
+### 生产环境配置
+
+1. 使用Gunicorn作为WSGI服务器
+2. 配置Nginx反向代理
+3. 设置SSL证书
+4. 配置日志轮转
+5. 设置监控告警
+
+## 🤝 贡献
+
+1. Fork 项目
+2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 打开 Pull Request
+
+## 📝 许可证
+
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
+
+## 📞 联系方式
+
+- 项目主页: [GitHub Repository]
+- 问题反馈: [Issues]
+- 文档: [Wiki]
+
+## 🙏 致谢
+
+感谢以下开源项目的支持：
+
+- [FastAPI](https://fastapi.tiangolo.com/) - 现代化的Python Web框架
+- [ChromaDB](https://www.trychroma.com/) - 开源向量数据库
+- [SQLAlchemy](https://www.sqlalchemy.org/) - Python SQL工具包
+- [Playwright](https://playwright.dev/) - 现代化网页爬虫框架
