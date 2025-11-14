@@ -11,7 +11,9 @@
     "@element-plus/icons-vue": "latest",
     "@vueuse/core": "latest",
     "axios": "latest",
+    "d3-geo": "^3.1.1",
     "dayjs": "latest",
+    "echarts": "^6.0.0",
     "element-plus": "latest",
     "globe.gl": "^2.45.0",
     "highlight.js": "latest",
@@ -20,6 +22,7 @@
     "three": "^0.181.1",
     "topojson-client": "^3.1.0",
     "vue": "latest",
+    "vue-echarts": "^8.0.1",
     "vue-router": "latest"
   },
   "devDependencies": {

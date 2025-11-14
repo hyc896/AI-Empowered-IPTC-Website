@@ -5,7 +5,8 @@
       <nav class="app-nav">
         <router-link to="/messages">消息列表</router-link>
         <router-link to="/message-sources">消息源管理</router-link>
-        <router-link to="/globe">地球视图</router-link>
+        <router-link to="/globe">3D地球</router-link>
+        <router-link to="/globe-2d">2D地球</router-link>
       </nav>
     </div>
     <div class="content-wrapper">

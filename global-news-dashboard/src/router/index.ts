@@ -28,6 +28,14 @@ const routes: RouteRecordRaw[] = [
     meta: {
       title: '地球视图'
     }
+  },
+  {
+    path: '/globe-2d',
+    name: 'Globe2D',
+    component: () => import('@/views/Globe2D/index.vue'),
+    meta: {
+      title: '2D地球视图'
+    }
   }
 ]
 
