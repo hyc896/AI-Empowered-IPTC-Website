@@ -105,6 +105,8 @@
       :option="chartOption"
       :loading="loading"
       @click="handleMapClick"
+      @mouseover="handleMouseOver"
+      @mouseout="handleMouseOut"
       autoresize
     />
 
@@ -197,10 +199,19 @@ const selectedCountryNewsCount = ref(0)
 const selectedCountryMessages = ref<any[]>([])
 const totalNews = ref(0)
 const totalCountries = ref(0)
+const selectedCountryGeoName = ref<string>('')  // 新增：保存选中国家的英文名
 
 const mapData = ref<Array<{ name: string; value: number }>>([])
 
 const sources = computed<MessageSource[]>(() => messageStore.activeSources)
+
+// 颜色映射函数（与3D地图保持一致）
+const getHeatmapColor = (count: number): string => {
+  if (count === 0 || count === undefined) return 'rgba(30, 58, 138, 0.3)'
+  if (count < 100) return 'rgba(59, 130, 246, 0.5)'
+  if (count < 200) return 'rgba(251, 191, 36, 0.6)'
+  return 'rgba(239, 68, 68, 0.7)'
+}
 
 const chartOption = computed(() => ({
   title: {
@@ -216,32 +227,42 @@ const chartOption = computed(() => ({
   tooltip: {
     trigger: 'item',
     formatter: (params: any) => {
-      if (params.data) {
-        return `<strong>${params.name}</strong><br/>新闻数量: ${params.data.value || 0} 条`
-      }
-      return params.name
+      const geoJsonName = params.name
+      const chineseName = geoJSONToChinese(geoJsonName)
+      const newsCount = params.data?.value || 0
+      return `
+        <div style="background: rgba(0,0,0,0.9); padding: 8px 12px; border-radius: 6px; color: white;">
+          <strong>${chineseName}</strong><br>
+          <span style="color: #00d4ff;">${newsCount} 条新闻</span>
+        </div>
+      `
     },
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    borderColor: '#00d4ff',
-    borderWidth: 1,
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderWidth: 0,
     textStyle: {
       color: '#fff'
     }
   },
   visualMap: {
+    type: 'piecewise',
     min: 0,
     max: 500,
     text: ['高', '低'],
-    realtime: false,
-    calculable: true,
-    inRange: {
-      color: ['#1e3a8a', '#3b82f6', '#fbbf24', '#ef4444']
-    },
+    pieces: [
+      { min: 200, label: '200+', color: 'rgba(239, 68, 68, 0.7)' },
+      { min: 100, max: 199, label: '100-199', color: 'rgba(251, 191, 36, 0.6)' },
+      { min: 1, max: 99, label: '1-99', color: 'rgba(59, 130, 246, 0.5)' },
+      { value: 0, label: '无数据', color: 'rgba(30, 58, 138, 0.3)' }
+    ],
     textStyle: {
       color: '#fff'
     },
     left: 20,
-    bottom: 40
+    bottom: 40,
+    itemWidth: 20,
+    itemHeight: 14,
+    orient: 'vertical'
   },
   series: [
     {
@@ -256,18 +277,39 @@ const chartOption = computed(() => ({
       emphasis: {
         label: {
           show: true,
-          color: '#fff'
+          color: '#fff',
+          fontWeight: 'bold'
         },
         itemStyle: {
           areaColor: '#00d4ff',
           borderColor: '#fff',
-          borderWidth: 2
+          borderWidth: 2,
+          shadowBlur: 10,
+          shadowColor: 'rgba(0, 212, 255, 0.5)'
         }
       },
+      select: {
+        label: {
+          show: true,
+          color: '#fff',
+          fontWeight: 'bold'
+        },
+        itemStyle: {
+          areaColor: '#fbbf24',
+          borderColor: '#fff',
+          borderWidth: 2,
+          shadowBlur: 15,
+          shadowColor: 'rgba(251, 191, 36, 0.7)'
+        }
+      },
+      selectedMode: 'single',
       itemStyle: {
         borderColor: 'rgba(0, 212, 255, 0.3)',
         borderWidth: 0.5,
-        areaColor: '#1e3a8a'
+        areaColor: (params: any) => {
+          const value = params.data?.value || 0
+          return getHeatmapColor(value)
+        }
       },
       label: {
         show: false
@@ -371,7 +413,17 @@ const handleMapClick = async (params: any) => {
   const chineseName = geoJSONToChinese(geoJsonName)
 
   selectedCountry.value = chineseName
+  selectedCountryGeoName.value = geoJsonName
   selectedCountryNewsCount.value = params.data.value || 0
+
+  // 触发ECharts选中状态
+  if (chartRef.value) {
+    chartRef.value.dispatchAction({
+      type: 'select',
+      seriesIndex: 0,
+      name: geoJsonName
+    })
+  }
 
   try {
     const response = await geoApi.getMessagesByRegion(chineseName, {
@@ -392,7 +444,39 @@ const handleMapClick = async (params: any) => {
   drawerVisible.value = true
 }
 
+// 鼠标悬停事件处理
+const handleMouseOver = (params: any) => {
+  if (params.componentType === 'series' && params.seriesType === 'map') {
+    if (chartRef.value) {
+      const chartInstance = chartRef.value
+      const dom = chartInstance.$el
+      if (dom) {
+        dom.style.cursor = 'pointer'
+      }
+    }
+  }
+}
+
+// 鼠标移出事件处理
+const handleMouseOut = (params: any) => {
+  if (chartRef.value) {
+    const chartInstance = chartRef.value
+    const dom = chartInstance.$el
+    if (dom) {
+      dom.style.cursor = 'default'
+    }
+  }
+}
+
 const handleFilterChange = async () => {
+  // 清除选中状态
+  selectedCountryGeoName.value = ''
+  if (chartRef.value) {
+    chartRef.value.dispatchAction({
+      type: 'unselect',
+      seriesIndex: 0
+    })
+  }
   await loadStatistics()
 }
 
