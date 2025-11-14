@@ -1,0 +1,14 @@
+# Document Reader Skill 依赖
+
+# Excel 文件处理
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Word 文档处理
+python-docx>=1.1.0
+
+# PDF 文件处理
+PyPDF2>=3.0.0
+
+# 可选：更强大的 PDF 处理（支持图片、复杂排版）
+# pdfplumber>=0.10.0
