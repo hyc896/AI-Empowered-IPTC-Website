@@ -127,7 +127,7 @@ class FieldEnricherService:
         """
         增强字段（单条消息）
 
-        并发调用地区分类、行业分类和AI标签分类，返回增强后的字段
+        先并发执行地区分类和行业分类，仅当industry_tags包含"人工智能"时才执行AI标签分类
 
         Args:
             title: 消息标题
@@ -137,19 +137,25 @@ class FieldEnricherService:
             字典包含：
             - region: 地区（如"中国/广东省/深圳市"）
             - industry_tags: 行业标签（如"人工智能,半导体"）
-            - ai_tag: AI分类标签（"AI科研信息"/"AI产业信息"/"AI治理信息"）
+            - ai_tag: AI分类标签（"AI科研信息"/"AI产业信息"/"AI治理信息"），仅在包含"人工智能"标签时返回
             失败时对应字段为None
         """
         if not title or not content:
             logger.warning("【FieldEnricher】标题或内容为空，跳过增强")
             return {"region": None, "industry_tags": None, "ai_tag": None}
 
-        # 并发执行地区分类、行业分类和AI标签分类
+        # 第一步：并发执行地区分类和行业分类
         region_task = self._classify_region(title, content)
         industry_task = self._classify_industry(title, content)
-        ai_tag_task = self._classify_ai_tag(title, content)
+        region, industry_tags = await asyncio.gather(region_task, industry_task)
 
-        region, industry_tags, ai_tag = await asyncio.gather(region_task, industry_task, ai_tag_task)
+        # 第二步：检查industry_tags是否包含"人工智能"，决定是否执行ai_tag分类
+        ai_tag = None
+        if industry_tags and "人工智能" in industry_tags:
+            logger.debug(f"【FieldEnricher】检测到'人工智能'标签，执行AI分类")
+            ai_tag = await self._classify_ai_tag(title, content)
+        else:
+            logger.debug(f"【FieldEnricher】未检测到'人工智能'标签（industry_tags={industry_tags}），跳过AI分类")
 
         return {
             "region": region,
