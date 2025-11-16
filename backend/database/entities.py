@@ -116,6 +116,7 @@ class MessageSource(Base):
     future_society_messages = relationship("FutureSocietyMessage", back_populates="source", cascade="all, delete-orphan")
     saif_messages = relationship("SAIFMessage", back_populates="source", cascade="all, delete-orphan")
     venturebeat_messages = relationship("VentureBeatMessage", back_populates="source", cascade="all, delete-orphan")
+    nikkei_asia_ai_messages = relationship("NikkeiAsiaAIMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
@@ -142,6 +143,7 @@ class TongHuaShunMessage(Base):
     tags = Column(JSON, comment="标签列表（JSON数组）")
     region = Column(String(200), comment="地区（国家/省份/城市，斜杠分隔）")
     industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
 
     # 关系
     source = relationship("MessageSource", back_populates="tonghuashun_messages")
@@ -182,6 +184,7 @@ class Kr36Message(Base):
     has_relevant = Column(Boolean, default=False, comment="是否相关")
     region = Column(String(200), comment="地区（国家/省份/城市，斜杠分隔）")
     industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
 
     # 关系
     source = relationship("MessageSource", back_populates="kr36_messages")
@@ -1166,4 +1169,43 @@ class VentureBeatMessage(Base):
         Index("idx_external_id", "external_id"),
         Index("idx_category", "category"),
         Index("idx_region", "region"),
+    )
+
+
+class NikkeiAsiaAIMessage(Base):
+    """Nikkei Asia AI板块（日经亚洲人工智能新闻）消息表"""
+    __tablename__ = "mp_nikkei_asia_ai_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（文章ID或slug）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容（subhead描述）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 扩展字段
+    region = Column(String(200), comment="地区")
+    category = Column(String(100), comment="分类")
+    language = Column(String(10), default="en", comment="语言")
+    industry_tags = Column(String(200), comment="行业标签")
+    ai_tag = Column(String(50), comment="AI分类标签")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="nikkei_asia_ai_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
     )

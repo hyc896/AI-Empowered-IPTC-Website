@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+33# -*- coding: utf-8 -*-
 
 """
 字段增强服务
@@ -127,7 +127,7 @@ class FieldEnricherService:
         """
         增强字段（单条消息）
 
-        并发调用地区分类和行业分类，返回增强后的字段
+        并发调用地区分类、行业分类和AI标签分类，返回增强后的字段
 
         Args:
             title: 消息标题
@@ -137,21 +137,24 @@ class FieldEnricherService:
             字典包含：
             - region: 地区（如"中国/广东省/深圳市"）
             - industry_tags: 行业标签（如"人工智能,半导体"）
+            - ai_tag: AI分类标签（"AI科研信息"/"AI产业信息"/"AI治理信息"）
             失败时对应字段为None
         """
         if not title or not content:
             logger.warning("【FieldEnricher】标题或内容为空，跳过增强")
-            return {"region": None, "industry_tags": None}
+            return {"region": None, "industry_tags": None, "ai_tag": None}
 
-        # 并发执行地区分类和行业分类
+        # 并发执行地区分类、行业分类和AI标签分类
         region_task = self._classify_region(title, content)
         industry_task = self._classify_industry(title, content)
+        ai_tag_task = self._classify_ai_tag(title, content)
 
-        region, industry_tags = await asyncio.gather(region_task, industry_task)
+        region, industry_tags, ai_tag = await asyncio.gather(region_task, industry_task, ai_tag_task)
 
         return {
             "region": region,
-            "industry_tags": industry_tags
+            "industry_tags": industry_tags,
+            "ai_tag": ai_tag
         }
 
     async def enrich_batch(
@@ -446,6 +449,133 @@ class FieldEnricherService:
 新闻内容：{content_excerpt}
 
 仅返回行业标签（逗号分隔，如"人工智能,半导体/芯片"），不要任何解释。"""
+
+        return prompt
+
+    async def _classify_ai_tag(
+        self,
+        title: str,
+        content: str
+    ) -> Optional[str]:
+        """
+        AI标签分类
+
+        Args:
+            title: 消息标题
+            content: 消息内容
+
+        Returns:
+            AI标签字符串（"AI科研信息"/"AI产业信息"/"AI治理信息"），失败返回None
+        """
+        async with self._semaphore:
+            max_429_retries = 10
+            consecutive_429_in_this_call = 0
+
+            for attempt in range(self.max_retries):
+                try:
+                    logger.debug(
+                        f"【FieldEnricher】AI标签分类 "
+                        f"(尝试{attempt + 1}/{self.max_retries}, "
+                        f"并发: {self.max_concurrent - self._semaphore._value}/{self.max_concurrent})"
+                    )
+
+                    # 构建Prompt
+                    prompt = self._build_ai_tag_prompt(title, content)
+
+                    # 调用Fast LLM
+                    llm_client = self._get_llm_client()
+                    response = await llm_client.generate_with_messages_async(
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=50
+                    )
+
+                    tag = response.choices[0].message.content.strip()
+
+                    # 验证格式：必须是三个标签之一
+                    valid_tags = ["AI科研信息", "AI产业信息", "AI治理信息"]
+                    if tag in valid_tags:
+                        logger.debug(f"【FieldEnricher】AI标签分类成功: {tag}")
+                        self._reset_rate_limit_counter()
+                        return tag
+                    else:
+                        logger.warning(f"【FieldEnricher】AI标签分类结果异常: {tag}")
+                        return None
+
+                except Exception as e:
+                    # 检测429错误
+                    if self._is_rate_limit_error(e):
+                        consecutive_429_in_this_call += 1
+                        if consecutive_429_in_this_call >= max_429_retries:
+                            logger.error(
+                                f"【FieldEnricher】连续{max_429_retries}次遇到429错误，放弃本次调用"
+                            )
+                            return None
+
+                        await self._handle_rate_limit()
+                        continue
+
+                    # 其他错误按正常重试逻辑
+                    if attempt < self.max_retries - 1:
+                        retry_delay = 2 ** attempt
+                        logger.warning(
+                            f"【FieldEnricher】AI标签分类失败 "
+                            f"(尝试{attempt + 1}/{self.max_retries}): {e}，"
+                            f"{retry_delay}秒后重试..."
+                        )
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        logger.error(f"【FieldEnricher】AI标签分类所有重试均失败: {e}")
+                        return None
+
+    def _build_ai_tag_prompt(self, title: str, content: str) -> str:
+        """
+        构建AI标签分类Prompt
+
+        Args:
+            title: 消息标题
+            content: 消息内容
+
+        Returns:
+            Prompt字符串
+        """
+        # 截取content前500字符
+        content_excerpt = content[:500] if len(content) > 500 else content
+
+        prompt = f"""请为以下新闻进行AI相关分类，从三个类别中选择一个。
+
+可选类别（只能选择其中一个）：
+1. AI治理信息 - AI相关的安全、法律、政策、监管、伦理、治理等内容
+2. AI科研信息 - AI相关的学术研究、论文、技术突破、算法创新等内容
+3. AI产业信息 - AI相关的产业动态、企业新闻、投资融资、产品发布、市场应用等内容
+
+判断规则（按优先级）：
+1. **优先判断是否属于AI治理信息**：
+   - 关键词：政策、法律、法规、监管、治理、伦理、安全、隐私、合规、标准、规范
+   - 示例："欧盟通过AI法案"、"AI安全监管政策"、"算法伦理规范" → AI治理信息
+
+2. 如果不属于治理，判断是否属于科研信息：
+   - 关键词：论文、研究、算法、模型、技术突破、学术成果、arXiv、会议发表
+   - 示例："Nature发表AI新算法"、"清华发布大模型论文" → AI科研信息
+
+3. 如果以上都不是，归类为产业信息：
+   - 关键词：公司、企业、投资、融资、产品、发布、应用、市场、数据中心、芯片
+   - 示例："Anthropic投资数据中心"、"英伟达发布AI芯片" → AI产业信息
+
+特殊情况处理：
+- 如果新闻同时涉及多个类别，优先选择AI治理信息
+- 如果新闻与AI无关，返回"AI产业信息"（作为默认类别）
+
+示例：
+- "欧盟通过人工智能法案，加强AI监管" → "AI治理信息"
+- "清华大学发表AI大模型最新研究论文" → "AI科研信息"
+- "Anthropic将在美国投资500亿美元建设数据中心" → "AI产业信息"
+- "英伟达发布新一代AI芯片" → "AI产业信息"
+- "OpenAI发布安全对齐新标准" → "AI治理信息"
+
+新闻标题：{title}
+新闻内容：{content_excerpt}
+
+仅返回分类结果（"AI科研信息"、"AI产业信息"或"AI治理信息"），不要任何解释。"""
 
         return prompt
 

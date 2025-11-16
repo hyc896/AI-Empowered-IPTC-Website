@@ -406,10 +406,12 @@ class TongHuaShunCollector:
                         )
                         item['region'] = enriched.get('region')
                         item['industry_tags'] = enriched.get('industry_tags')
+                        item['ai_tag'] = enriched.get('ai_tag')
                     except Exception as e:
                         logger.error(f"【同花顺】字段增强失败: {e}")
                         item['region'] = None
                         item['industry_tags'] = None
+                        item['ai_tag'] = None
 
             # 批量存储到数据库
             with create_session() as db:
@@ -430,6 +432,7 @@ class TongHuaShunCollector:
                         tags=[],
                         region=item.get('region'),
                         industry_tags=item.get('industry_tags'),
+                        ai_tag=item.get('ai_tag'),
                         crawled_at=datetime.now()
                     )
 
