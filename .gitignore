@@ -38,6 +38,7 @@ Thumbs.db
 *.tmp
 
 # Frontend build outputs
+node_modules/
 global-news-dashboard/node_modules/
 global-news-dashboard/dist/
 global-news-dashboard/.vite/
