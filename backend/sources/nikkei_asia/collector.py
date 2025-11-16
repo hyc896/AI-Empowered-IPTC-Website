@@ -44,22 +44,51 @@ class NikkeiAsiaCollector:
 
     def __init__(self, config: Dict[str, Any]):
         """
-        初始化采集器
+        初始化采集器（Fail Fast：配置错误立即抛出异常）
 
         Args:
             config: 配置字典，包含：
-                - interval: 采集间隔（秒）
-                - mysql_table: MySQL表名
-                - chroma_collection: ChromaDB collection名称
-                - url: 日经亚洲AI板块URL
-                - source_id: 消息源ID
+                - id: 消息源ID（必需）
+                - config: 详细配置
+                  - interval: 采集间隔（秒，可选，默认3600）
+                  - mysql_table: MySQL表名（必需）
+                  - chroma_collection: ChromaDB collection名称（必需）
+                  - url: 日经亚洲AI板块URL（可选）
+
+        Raises:
+            ValueError: 配置缺少必需字段时抛出
         """
+        # Fail Fast: 验证必需配置字段
+        required_fields = ['id']
+        missing_fields = [field for field in required_fields if field not in config]
+        if missing_fields:
+            raise ValueError(
+                f"【Nikkei Asia】配置缺少必需字段: {', '.join(missing_fields)}\n"
+                f"修复建议: 检查数据库 mp_message_sources 表的配置"
+            )
+
+        # Fail Fast: 验证嵌套配置
+        if 'config' not in config:
+            raise ValueError(
+                f"【Nikkei Asia】配置缺少 'config' 字段\n"
+                f"修复建议: 确保 mp_message_sources.config 字段为有效JSON"
+            )
+
+        nested_config = config['config']
+        required_nested = ['mysql_table', 'chroma_collection']
+        missing_nested = [field for field in required_nested if field not in nested_config]
+        if missing_nested:
+            raise ValueError(
+                f"【Nikkei Asia】config 缺少必需字段: {', '.join(missing_nested)}\n"
+                f"修复建议: UPDATE mp_message_sources SET config = JSON_SET(config, '$.mysql_table', 'mp_nikkei_asia_ai_messages', '$.chroma_collection', 'nikkei_asia_ai') WHERE id = '{config['id']}';"
+            )
+
         self.config = config
-        self.interval = config.get('interval', 3600)
-        self.mysql_table = config['mysql_table']
-        self.chroma_collection = config['chroma_collection']
-        self.url = config['config'].get('url', 'https://asia.nikkei.com/Business/Technology/Artificial-intelligence')
-        self.source_id = config.get('id', 'auto')
+        self.source_id = config['id']
+        self.interval = nested_config.get('interval', 3600)
+        self.mysql_table = nested_config['mysql_table']
+        self.chroma_collection = nested_config['chroma_collection']
+        self.url = nested_config.get('url', 'https://asia.nikkei.com/Business/Technology/Artificial-intelligence')
 
         if _chroma_available:
             self.chroma_storage = get_chromadb_storage()
@@ -86,24 +115,65 @@ class NikkeiAsiaCollector:
         self._running = False
 
     async def initialize(self) -> bool:
-        """初始化采集器（启动Playwright浏览器）"""
+        """
+        初始化采集器（Fail Fast：验证配置与代码一致性）
+
+        Returns:
+            是否初始化成功
+
+        Raises:
+            ValueError: 配置与代码不一致时抛出，阻止服务启动
+        """
+        errors = []
+
+        # 1. 验证表名一致性
+        try:
+            expected_table = NikkeiAsiaAIMessage.__tablename__
+            actual_table = self.mysql_table
+            if actual_table != expected_table:
+                errors.append(
+                    f"配置的表名({actual_table})与ORM类不匹配({expected_table})\n"
+                    f"  修复SQL: UPDATE mp_message_sources SET config = JSON_SET(config, '$.mysql_table', '{expected_table}') WHERE id = '{self.source_id}';"
+                )
+        except Exception as e:
+            errors.append(f"无法验证表名一致性: {e}")
+
+        # 2. 验证Playwright依赖
         try:
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(
                 headless=True,
                 args=['--disable-blink-features=AutomationControlled']
             )
+            logger.debug("【Nikkei Asia】Playwright启动成功")
+        except Exception as e:
+            errors.append(
+                f"Playwright启动失败: {e}\n"
+                f"  修复建议:\n"
+                f"    1. 安装Playwright: pip install playwright\n"
+                f"    2. 安装浏览器: playwright install chromium\n"
+                f"    3. 检查系统依赖: playwright install-deps"
+            )
 
-            if self.chroma_storage:
+        # 3. 验证ChromaDB（非阻断性）
+        if self.chroma_storage:
+            try:
                 self.chroma_storage.create_collection(
                     collection_name=self.chroma_collection
                 )
+                logger.debug(f"【Nikkei Asia】ChromaDB collection '{self.chroma_collection}' 已创建/验证")
+            except Exception as e:
+                logger.warning(f"【Nikkei Asia】ChromaDB初始化警告: {e}（将只存储到MySQL）")
+                self.chroma_storage = None
 
-            logger.info(f"【Nikkei Asia】采集器初始化成功: {self.url}")
-            return True
-        except Exception as e:
-            logger.error(f"【Nikkei Asia】采集器初始化失败: {e}")
-            return False
+        # 4. 汇总所有错误并抛出（阻止服务启动）
+        if errors:
+            error_msg = "【Nikkei Asia】启动验证失败！请修复以下错误后重新启动：\n" + "\n".join(f"  [{i+1}] {err}" for i, err in enumerate(errors))
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        logger.info(f"【Nikkei Asia】采集器初始化成功: {self.url}")
+        return True
 
     async def run(self) -> None:
         """主循环：定时采集"""
@@ -130,33 +200,27 @@ class NikkeiAsiaCollector:
 
     async def _collect_once(self) -> None:
         """
-        单次采集
+        单次采集（智能去重：爬取时检测，而非爬完后过滤）
 
         流程：
         1. 获取MySQL中最新消息的URL
-        2. Playwright爬取列表页，解析嵌入的JSON数据
-        3. 过滤已存在的URL
-        4. 预翻译：批量翻译summary
-        5. 存储到MySQL + ChromaDB
+        2. Playwright爬取列表页（遇到latest_url立即停止）
+        3. 预翻译：批量翻译summary
+        4. 存储到MySQL + ChromaDB
         """
         try:
             latest_url = await self._get_latest_stored_url()
             logger.debug(f"Latest stored URL: {latest_url}")
 
-            articles = await self._scrape_articles()
+            # 爬取文章（已经在爬取过程中过滤了重复）
+            articles = await self._scrape_articles(latest_url)
 
-            if not articles:
-                logger.debug("No articles found")
-                return
-
-            new_articles = self._filter_new_articles(articles, latest_url)
-
-            if new_articles:
-                enriched_articles = await self._pre_translate(new_articles)
+            if articles:
+                enriched_articles = await self._pre_translate(articles)
                 await self._store_items(enriched_articles)
-                logger.info(f"【Nikkei Asia】采集到 {len(new_articles)} 条新文章")
+                logger.info(f"【Nikkei Asia】采集到 {len(articles)} 条新文章")
             else:
-                logger.debug("【Nikkei Asia】所有文章已存在，无新数据")
+                logger.debug("【Nikkei Asia】无新数据")
 
         except Exception as e:
             logger.error(f"【Nikkei Asia】采集错误: {e}", exc_info=True)
@@ -177,15 +241,16 @@ class NikkeiAsiaCollector:
             logger.error(f"Failed to get latest URL: {e}")
             return None
 
-    async def _scrape_articles(self, max_pages: int = 21) -> List[Dict[str, Any]]:
+    async def _scrape_articles(self, latest_url: Optional[str], max_pages: int = 21) -> List[Dict[str, Any]]:
         """
-        爬取文章列表（支持分页，从嵌入的JSON数据中提取）
+        爬取文章列表（智能停止：遇到已存在记录立即停止后续页面采集）
 
         Args:
+            latest_url: 数据库中最新文章的URL（用于去重检测）
             max_pages: 最多爬取的页数（默认21页）
 
         Returns:
-            所有页面的文章列表
+            新文章列表（已过滤重复）
         """
         all_articles = []
 
@@ -200,13 +265,27 @@ class NikkeiAsiaCollector:
                 logger.warning(f"【Nikkei Asia】第 {page_num} 页未获取到文章，停止采集")
                 break
 
-            all_articles.extend(page_articles)
-            logger.info(f"【Nikkei Asia】第 {page_num} 页采集到 {len(page_articles)} 条文章，累计 {len(all_articles)} 条")
+            # 智能去重：检查本页是否包含latest_url
+            found_duplicate = False
+            new_articles_count = 0
+
+            for article in page_articles:
+                if latest_url and article.get('url') == latest_url:
+                    logger.info(f"【Nikkei Asia】第 {page_num} 页检测到已存在记录（URL={latest_url[:60]}...），停止后续页面采集")
+                    found_duplicate = True
+                    break  # 停止添加本页后续文章
+                all_articles.append(article)
+                new_articles_count += 1
+
+            logger.info(f"【Nikkei Asia】第 {page_num} 页采集到 {len(page_articles)} 条文章，新增 {new_articles_count} 条，累计 {len(all_articles)} 条")
+
+            if found_duplicate:
+                break  # 停止后续页面的爬取
 
             # 礼貌延迟，避免请求过快
             await asyncio.sleep(2)
 
-        logger.info(f"【Nikkei Asia】总共采集到 {len(all_articles)} 条文章")
+        logger.info(f"【Nikkei Asia】总共采集到 {len(all_articles)} 条新文章")
         return all_articles
 
     async def _scrape_single_page(self, page_url: str) -> List[Dict[str, Any]]:
@@ -310,23 +389,6 @@ class NikkeiAsiaCollector:
         except Exception as e:
             logger.error(f"Failed to parse article data: {e}")
             return None
-
-    def _filter_new_articles(
-        self,
-        articles: List[Dict[str, Any]],
-        latest_url: Optional[str]
-    ) -> List[Dict[str, Any]]:
-        """过滤已存在的文章"""
-        if not latest_url:
-            return articles
-
-        new_articles = []
-        for article in articles:
-            if article.get('url') == latest_url:
-                break
-            new_articles.append(article)
-
-        return new_articles
 
     async def _pre_translate(self, articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
