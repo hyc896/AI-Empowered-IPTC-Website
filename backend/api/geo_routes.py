@@ -99,6 +99,11 @@ async def get_geo_statistics(
                     continue
 
                 try:
+                    # 检查模型是否有region字段（旧表如ArxivMessage可能没有）
+                    if not hasattr(model, 'region'):
+                        logger.debug(f"表 {table_name} 没有region字段，跳过地理统计")
+                        continue
+
                     # 构建查询：提取region第一级（国家名）
                     subquery = db.query(
                         func.substring_index(model.region, '/', 1).label('country'),

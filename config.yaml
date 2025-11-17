@@ -139,9 +139,10 @@ logging:
 # ========================
 vector_sync:
   enabled: true
-  mode: "full"
+  mode: "full"  # full: 全量同步所有记录, incremental: 仅同步最近1000条
   incremental_limit: 1000
   async_mode: true
+  cleanup_orphaned: true  # 是否清理孤立向量（ChromaDB有但MySQL没有的）
 
 # ========================
 # File Parsing Configuration

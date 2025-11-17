@@ -719,8 +719,12 @@ class VentureBeatCollector:
 
         # 串行处理每条消息（Translator内部有并发控制）
         for idx, item in enumerate(items, 1):
+            # 提前生成message_id用于事件发布
+            message_id = str(uuid.uuid4())
+            item['message_id'] = message_id
+
             try:
-                await self._preprocess_single_item(item)
+                await self._preprocess_single_item(item, message_id)
                 logger.debug(f"【VentureBeat】预处理完成 [{idx}/{len(items)}]: {item.get('title', '')[:30]}")
             except Exception as e:
                 logger.error(f"【VentureBeat】预处理失败 [{idx}/{len(items)}]: {e}")
@@ -729,12 +733,13 @@ class VentureBeatCollector:
                 item['region'] = None
                 item['industry_tags'] = None
 
-    async def _preprocess_single_item(self, item: Dict[str, Any]) -> None:
+    async def _preprocess_single_item(self, item: Dict[str, Any], message_id: str) -> None:
         """
         预处理单条消息（翻译 + 字段增强）
 
         Args:
             item: 文章数据（会被原地修改）
+            message_id: 消息ID（用于事件发布）
 
         架构改进：
         - 串行执行翻译和字段增强（而非并发），降低API压力
@@ -754,34 +759,42 @@ class VentureBeatCollector:
 
         # 2. 字段增强（单独try-catch，失败设为None）
         try:
-            enriched = await self._enrich_fields(item.get('title', ''), cleaned_content)
+            enriched = await self._enrich_fields(item.get('title', ''), cleaned_content, message_id)
             item['region'] = enriched.get('region')
             item['industry_tags'] = enriched.get('industry_tags')
+            item['ai_tag'] = enriched.get('ai_tag')
         except Exception as e:
             logger.error(f"【VentureBeat】字段增强失败 (url={item.get('url')}): {e}")
             item['region'] = None
             item['industry_tags'] = None
+            item['ai_tag'] = None
 
-    async def _enrich_fields(self, title: str, content: str) -> Dict[str, Optional[str]]:
+    async def _enrich_fields(self, title: str, content: str, message_id: str = None) -> Dict[str, Optional[str]]:
         """
-        字段增强（region + industry_tags）
+        字段增强（region + industry_tags + ai_tag）
 
         Args:
             title: 标题
             content: 内容
+            message_id: 消息ID（用于事件发布）
 
         Returns:
-            包含region和industry_tags的字典
+            包含region、industry_tags和ai_tag的字典
         """
         if not self.field_enricher:
-            return {"region": None, "industry_tags": None}
+            return {"region": None, "industry_tags": None, "ai_tag": None}
 
         try:
-            enriched = await self.field_enricher.enrich_fields(title, content)
+            enriched = await self.field_enricher.enrich_fields(
+                title,
+                content,
+                message_id=message_id,
+                source_name="VentureBeat"
+            )
             return enriched
         except Exception as e:
             logger.error(f"【VentureBeat】字段增强失败: {e}")
-            return {"region": None, "industry_tags": None}
+            return {"region": None, "industry_tags": None, "ai_tag": None}
 
     async def _store_items(self, items: List[Dict[str, Any]]) -> None:
         """
@@ -805,7 +818,7 @@ class VentureBeatCollector:
             with create_session() as db:
                 for item in items:
                     message = VentureBeatMessage(
-                        id=str(uuid.uuid4()),
+                        id=item.get('message_id', str(uuid.uuid4())),
                         source_id=self.source_id,
                         external_id=item.get('external_id'),
                         title=item['title'],

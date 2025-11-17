@@ -77,9 +77,10 @@ When a user provides a webpage URL and requests it to be added as a message sour
 **新增必备字段（2025年强制要求）**：
 - region: VARCHAR(200) - 地区（中文，格式：国家/省份/城市，全球性事件标为"全球"，用斜杠/分隔）
 - industry_tags: TEXT - 行业标签（逗号分隔，最多3个，涉及AI必须包含"人工智能"标签）
+- ai_tag: VARCHAR(50) - AI分类标签（"AI科研信息"/"AI产业信息"/"AI治理信息"）
 
 **字段增强调用规范**：
-采集器必须在存储前调用FieldEnricherService.enrich_fields()为消息添加region和industry_tags。
+采集器必须在存储前调用FieldEnricherService.enrich_fields()为消息添加region、industry_tags和ai_tag。
 
 示例代码：
 ```python
@@ -98,6 +99,7 @@ class NewCollector:
             )
             msg['region'] = enriched['region']
             msg['industry_tags'] = enriched['industry_tags']
+            msg['ai_tag'] = enriched['ai_tag']
 
         # 存储到数据库
         ...
@@ -503,10 +505,22 @@ class NewCollector:
 - 当发现更好的实现时，更新参照标准
 - 定期审查参照标准是否仍然最佳
 
-**当前项目的参照标准**：
-- 采集器实现：backend/sources/cigi/collector.py
-- _generate_summary方法：CIGI的实现
-- 翻译逻辑：预翻译模式（session外）
+**当前项目的Golden Example（已验证正确）**：
+
+1. **异步编程最佳实践**：backend/sources/venturebeat/collector.py
+   - 预处理模式：_preprocess_items在数据库会话外完成翻译和字段增强
+   - _store_to_mysql仅做数据库写入，不调用任何异步外部服务
+   - 三阶段分离：scrape → preprocess → store
+   - 全文传给translator，不提前截断
+
+2. **增量采集优化**：backend/sources/nikkei_asia/collector.py
+   - 智能停止：_scrape_articles逐页检查，遇到latest_url立即停止后续页面
+   - Fail Fast配置验证：__init__方法检查所有必需字段
+
+3. **反面教材（禁止模仿）**：backend/sources/cigi/collector.py
+   - _store_to_mysql在数据库会话内调用await self._generate_summary()
+   - 违反异步编程铁律：翻译耗时2-5秒，期间占用数据库连接
+   - 多采集器并发时导致连接池耗尽
 
 ---
 

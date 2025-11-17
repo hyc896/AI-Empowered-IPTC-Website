@@ -685,17 +685,38 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 - Golden Example必须文档化其设计决策
 
 **真实后果**：
-- CIGI采集器是唯一正确实现，但未标记为参照标准
+- 早期错误地将CIGI标记为参照标准，但其在数据库会话内调用翻译（严重违反异步编程铁律）
 - 开发新采集器时重复犯同样的错误
 - Code Review缺乏客观评判依据
 
+**当前项目的Golden Example（已验证）**：
+
+1. **异步编程最佳实践**：backend/sources/venturebeat/collector.py
+   - 预处理模式：_preprocess_items（第703-770行）在数据库会话外完成翻译和字段增强
+   - _store_to_mysql（第810-851行）仅做数据库写入，不调用任何异步外部服务
+   - 关注点分离：scrape → preprocess → store三阶段严格分离
+   - 信任下游工具：全文传给translator，不提前截断
+
+2. **增量采集优化**：backend/sources/nikkei_asia/collector.py
+   - 智能停止：_scrape_articles（第244-289行）逐页检查，遇到latest_url立即停止后续页面
+   - 页级+条级双重粒度控制
+   - Fail Fast配置验证：__init__方法检查所有必需字段（第44-83行）
+
+3. **反面教材**：backend/sources/cigi/collector.py（禁止模仿）
+   - _store_to_mysql（第489-529行）在数据库会话内调用await self._generate_summary()
+   - 违反异步编程铁律（第602-620行）：翻译耗时2-5秒，期间占用数据库连接
+   - 多采集器并发时导致连接池耗尽
+
 **操作流程**：
-1. 确定Golden Example：backend/sources/cigi/collector.py
-2. 新采集器开发时：逐函数对照Golden Example
-3. 文档化Golden Example的关键决策：
-   - 为什么pre-translation？→ 避免会话阻塞
-   - 为什么全文传给translator？→ 信任下游工具
-   - 为什么三阶段分离？→ 职责单一原则
+1. 新采集器开发时：逐函数对照VentureBeat和Nikkei Asia的实现
+2. 必须遵循的模式：
+   - 预处理阶段：在数据库会话外完成所有异步IO（翻译、字段增强、外部API调用）
+   - 存储阶段：仅做数据库CRUD，不包含await外部服务
+   - 增量采集：优先参考Nikkei Asia的_scrape_articles逻辑（如果是分页网站）
+3. 文档化关键决策：
+   - 为什么pre-translation？→ 避免数据库会话阻塞，防止连接池耗尽
+   - 为什么全文传给translator？→ 信任下游工具的智能截断和分块能力
+   - 为什么三阶段分离？→ 职责单一原则，错误易定位
 
 #### 隐式假设必须显式验证
 

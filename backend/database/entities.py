@@ -6,7 +6,8 @@
 """
 
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, Integer, BigInteger, Float, Boolean, ForeignKey, Index, JSON, Enum
+import uuid
+from sqlalchemy import Column, String, Text, DateTime, Date, Integer, BigInteger, Float, Boolean, ForeignKey, Index, JSON, Enum
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.ext.hybrid import hybrid_property
 import enum
@@ -117,6 +118,8 @@ class MessageSource(Base):
     saif_messages = relationship("SAIFMessage", back_populates="source", cascade="all, delete-orphan")
     venturebeat_messages = relationship("VentureBeatMessage", back_populates="source", cascade="all, delete-orphan")
     nikkei_asia_ai_messages = relationship("NikkeiAsiaAIMessage", back_populates="source", cascade="all, delete-orphan")
+    investing_com_messages = relationship("InvestingComMessage", back_populates="source", cascade="all, delete-orphan")
+    techcrunch_messages = relationship("TechCrunchMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
@@ -1208,4 +1211,112 @@ class NikkeiAsiaAIMessage(Base):
         Index("idx_url", "url"),
         Index("idx_external_id", "external_id"),
         Index("idx_category", "category"),
+    )
+
+
+class InvestingComMessage(Base):
+    """Investing.com General News（全球金融市场综合新闻）消息表"""
+    __tablename__ = "mp_investing_com_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS guid）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容（description）")
+    summary = Column(Text, comment="摘要（同content）")
+    provider = Column(String(500), comment="信息提供方（固定为Investing.com）")
+    published_at = Column(DateTime, comment="发布时间（pubDate）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，如'美国'、'全球'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(100), comment="分类（General News）")
+    language = Column(String(10), default="en", comment="语言（en）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="investing_com_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+    )
+
+
+class TechCrunchMessage(Base):
+    """TechCrunch Tech News（全球科技新闻与深度报道）消息表"""
+    __tablename__ = "mp_techcrunch_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取的post ID或slug）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容（完整文章内容）")
+    summary = Column(Text, comment="摘要（中文翻译）")
+    provider = Column(String(500), comment="作者（多个用逗号分隔）")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，多为'全球'、'美国'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(100), comment="分类（AI/Security/Robotics/Cloud Computing/Hardware等）")
+    language = Column(String(10), default="en", comment="语言（en）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="techcrunch_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+    )
+
+
+class AIDailyReport(Base):
+    """AI日报表"""
+    __tablename__ = "mp_ai_daily_reports"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), comment="UUID主键")
+    report_date = Column(Date, unique=True, nullable=False, index=True, comment="报告日期（YYYY-MM-DD）")
+    content = Column(Text, nullable=False, comment="日报Markdown内容")
+    statistics = Column(JSON, nullable=False, comment="统计数据（消息数量、地区分布等）")
+    governance_count = Column(Integer, nullable=False, default=0, comment="AI治理信息数量")
+    research_count = Column(Integer, nullable=False, default=0, comment="AI科研信息数量")
+    industry_count = Column(Integer, nullable=False, default=0, comment="AI产业信息数量")
+    total_messages = Column(Integer, nullable=False, default=0, comment="总消息数量")
+    generation_status = Column(String(20), nullable=False, default='pending', comment="生成状态（pending/completed/failed）")
+    error_message = Column(Text, nullable=True, comment="错误信息（生成失败时记录）")
+    generated_at = Column(DateTime, nullable=False, default=datetime.now, comment="生成时间")
+    model_version = Column(String(50), nullable=False, comment="LLM模型版本")
+
+    __table_args__ = (
+        Index("idx_report_date", "report_date"),
+        Index("idx_generated_at", "generated_at"),
+        Index("idx_status", "generation_status"),
     )

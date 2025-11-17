@@ -389,17 +389,25 @@ class Kr36Collector:
             if self.field_enricher:
                 logger.debug(f"【36氪】批量增强 {len(items)} 条消息字段")
                 for item in items:
+                    # 提前生成message_id用于事件发布
+                    message_id = str(uuid.uuid4())
+                    item['message_id'] = message_id
+
                     try:
                         enriched = await self.field_enricher.enrich_fields(
                             title=item['title'],
-                            content=item['content']
+                            content=item['content'],
+                            message_id=message_id,
+                            source_name="36氪快讯"
                         )
                         item['region'] = enriched.get('region')
                         item['industry_tags'] = enriched.get('industry_tags')
+                        item['ai_tag'] = enriched.get('ai_tag')
                     except Exception as e:
                         logger.error(f"【36氪】字段增强失败: {e}")
                         item['region'] = None
                         item['industry_tags'] = None
+                        item['ai_tag'] = None
 
             # 批量存储到数据库
             with create_session() as db:
@@ -407,7 +415,7 @@ class Kr36Collector:
                     summary = self._generate_summary(item['title'], item['content'])
 
                     message = Kr36Message(
-                        id=str(uuid.uuid4()),
+                        id=item.get('message_id', str(uuid.uuid4())),
                         source_id=self.source_id,
                         item_id=item['item_id'],
                         title=item['title'],
@@ -421,6 +429,7 @@ class Kr36Collector:
                         has_relevant=item.get('has_relevant', False),
                         region=item.get('region'),
                         industry_tags=item.get('industry_tags'),
+                        ai_tag=item.get('ai_tag'),
                         crawled_at=datetime.now()
                     )
 

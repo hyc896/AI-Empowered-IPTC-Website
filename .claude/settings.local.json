@@ -70,7 +70,9 @@
       "WebFetch(domain:github.blog)",
       "WebFetch(domain:stripe.com)",
       "Bash(cat:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git checkout:*)",
+      "Bash(\"D:\\TechWork\\message_platform\\backend\\database\\entities.py\")"
     ],
     "deny": [],
     "ask": []

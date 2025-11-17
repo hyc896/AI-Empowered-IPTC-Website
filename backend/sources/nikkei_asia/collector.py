@@ -435,10 +435,16 @@ class NikkeiAsiaCollector:
             if self.field_enricher:
                 logger.debug(f"【Nikkei Asia】批量增强 {len(items)} 条消息字段")
                 for item in items:
+                    # 提前生成message_id用于事件发布
+                    message_id = str(uuid.uuid4())
+                    item['message_id'] = message_id
+
                     try:
                         enriched = await self.field_enricher.enrich_fields(
                             title=item['title'],
-                            content=item['content']
+                            content=item['content'],
+                            message_id=message_id,
+                            source_name="Nikkei Asia AI"
                         )
                         item['region'] = enriched.get('region')
                         item['industry_tags'] = enriched.get('industry_tags')
@@ -455,7 +461,7 @@ class NikkeiAsiaCollector:
                     summary = item.get('summary_zh') or (content if len(content) <= 1000 else content[:1000])
 
                     message = NikkeiAsiaAIMessage(
-                        id=str(uuid.uuid4()),
+                        id=item.get('message_id', str(uuid.uuid4())),
                         source_id=self.source_id,
                         external_id=item.get('external_id'),
                         title=item['title'],

@@ -21,6 +21,75 @@ from backend.llm import get_embedding_client
 logger = logging.getLogger(__name__)
 
 
+async def check_orphaned_vectors(
+    source_config: Dict[str, Any]
+) -> Set[str]:
+    """
+    检查ChromaDB中的孤立向量（ChromaDB有但MySQL没有）
+
+    Args:
+        source_config: 消息源配置
+
+    Returns:
+        孤立向量的ID集合
+    """
+    source_name = source_config.get('display_name', source_config['name'])
+    mysql_table = source_config['mysql_table']
+    chroma_collection = source_config['chroma_collection']
+
+    try:
+        # 从ORM Registry获取模型
+        registry = get_orm_registry()
+        model = registry.get_model(mysql_table)
+        if not model:
+            logger.warning(f"【向量清理】{source_name}: 未找到ORM模型")
+            return set()
+
+        # 第一阶段：获取MySQL所有ID
+        with create_session() as db:
+            id_column = getattr(model, 'external_id')
+            results = db.query(id_column).all()
+            mysql_ids = {str(row[0]) for row in results if row[0] is not None}
+
+            if not mysql_ids:
+                logger.warning(f"【向量清理】{source_name}: MySQL表为空")
+                return set()
+
+        # 第二阶段：获取ChromaDB所有ID
+        chroma_storage = get_chromadb_storage()
+        try:
+            collection = chroma_storage._collections.get(chroma_collection)
+            if collection is None:
+                logger.info(f"【向量清理】{source_name}: ChromaDB集合不存在")
+                return set()
+
+            # 获取所有向量ID（ChromaDB的get()不带参数返回全部）
+            all_data = collection.get()
+            chroma_ids = set(all_data.get('ids', []))
+
+            if not chroma_ids:
+                logger.info(f"【向量清理】{source_name}: ChromaDB集合为空")
+                return set()
+
+        except Exception as e:
+            logger.warning(f"【向量清理】{source_name}: ChromaDB查询失败 - {e}")
+            return set()
+
+        # 第三阶段：计算孤立向量（ChromaDB有但MySQL没有）
+        orphaned_ids = chroma_ids - mysql_ids
+
+        if orphaned_ids:
+            logger.info(f"【向量清理】{source_name}: 发现{len(orphaned_ids)}个孤立向量")
+        else:
+            logger.info(f"【向量清理】{source_name}: 无孤立向量 ✓")
+
+        return orphaned_ids
+
+    except Exception as e:
+        logger.error(f"【向量清理】{source_name}: 检查失败 - {e}")
+        return set()
+
+
 async def check_missing_records(
     source_config: Dict[str, Any],
     full_sync: bool = True
@@ -143,6 +212,61 @@ async def check_missing_records(
         return []
 
 
+async def cleanup_orphaned_vectors(
+    orphaned_ids: Set[str],
+    source_config: Dict[str, Any]
+) -> int:
+    """
+    清理ChromaDB中的孤立向量
+
+    Args:
+        orphaned_ids: 孤立向量的ID集合
+        source_config: 消息源配置
+
+    Returns:
+        清理的向量数量
+    """
+    if not orphaned_ids:
+        return 0
+
+    source_name = source_config.get('display_name', source_config['name'])
+    chroma_collection = source_config['chroma_collection']
+
+    try:
+        chroma_storage = get_chromadb_storage()
+
+        # 批量删除孤立向量
+        batch_size = 100
+        deleted_count = 0
+        orphaned_list = list(orphaned_ids)
+
+        for i in range(0, len(orphaned_list), batch_size):
+            batch = orphaned_list[i:i + batch_size]
+
+            try:
+                success = chroma_storage.delete(
+                    collection_name=chroma_collection,
+                    ids=batch
+                )
+
+                if success:
+                    deleted_count += len(batch)
+                    logger.info(f"【向量清理】{source_name}: 已删除{len(batch)}个孤立向量 ({deleted_count}/{len(orphaned_list)})")
+                else:
+                    logger.warning(f"【向量清理】{source_name}: 批次删除失败")
+
+            except Exception as e:
+                logger.error(f"【向量清理】{source_name}: 删除批次失败 - {e}")
+                continue
+
+        logger.info(f"【向量清理】{source_name}: 清理完成，共删除{deleted_count}个孤立向量 ✓")
+        return deleted_count
+
+    except Exception as e:
+        logger.error(f"【向量清理】{source_name}: 清理失败 - {e}")
+        return 0
+
+
 async def sync_to_chromadb(
     records: List[Dict[str, Any]],
     source_config: Dict[str, Any]
@@ -236,12 +360,13 @@ async def sync_to_chromadb(
         return 0
 
 
-async def startup_vector_sync(full_sync: bool = None):
+async def startup_vector_sync(full_sync: bool = None, cleanup_orphaned: bool = True):
     """
     程序启动时的向量同步入口函数
 
     Args:
         full_sync: 是否全量同步（None=从配置读取，True=全量，False=增量）
+        cleanup_orphaned: 是否清理孤立向量（默认True）
     """
     try:
         if full_sync is None:
@@ -254,6 +379,8 @@ async def startup_vector_sync(full_sync: bool = None):
             vector_sync_config = config.get("vector_sync", {})
             mode = vector_sync_config.get("mode", "incremental")
             full_sync = (mode == "full")
+            # 从配置读取cleanup_orphaned设置（默认True）
+            cleanup_orphaned = vector_sync_config.get("cleanup_orphaned", True)
 
         # 从数据库读取激活的消息源（而非registry）
         with create_session() as db:
@@ -279,25 +406,41 @@ async def startup_vector_sync(full_sync: bool = None):
                 sources.append(source_data)
 
         total_synced = 0
+        total_cleaned = 0
 
         for source in sources:
             if not source.get('enabled', True):
                 continue
 
             try:
+                # 阶段1：检查并同步缺失的向量（MySQL → ChromaDB）
                 missing_records = await check_missing_records(source, full_sync=full_sync)
 
                 if missing_records:
                     synced_count = await sync_to_chromadb(missing_records, source)
                     total_synced += synced_count
 
+                # 阶段2：检查并清理孤立的向量（ChromaDB多余的）
+                if cleanup_orphaned:
+                    orphaned_ids = await check_orphaned_vectors(source)
+
+                    if orphaned_ids:
+                        cleaned_count = await cleanup_orphaned_vectors(orphaned_ids, source)
+                        total_cleaned += cleaned_count
+
             except Exception as e:
                 source_name = source.get('display_name', source.get('name', 'unknown'))
                 logger.error(f"【向量同步】{source_name}: 处理失败 - {e}")
                 continue
 
-        if total_synced > 0:
-            logger.info(f"【向量同步】全部完成，总计{total_synced}条 ✓")
+        # 汇总报告
+        if total_synced > 0 or total_cleaned > 0:
+            messages = []
+            if total_synced > 0:
+                messages.append(f"新增{total_synced}条向量")
+            if total_cleaned > 0:
+                messages.append(f"清理{total_cleaned}条孤立向量")
+            logger.info(f"【向量同步】全部完成，{', '.join(messages)} ✓")
         else:
             logger.info("【向量同步】检查完成，数据完整 ✓")
 

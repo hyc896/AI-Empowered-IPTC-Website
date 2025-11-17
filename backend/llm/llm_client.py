@@ -7,10 +7,21 @@ OpenAI-compatible LLM client for embedding and text generation
 
 from enum import Enum
 from openai import OpenAI, APIError, AsyncOpenAI
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 延迟导入token_metrics（避免循环导入）
+_token_metrics = None
+
+def _get_token_metrics():
+    """延迟加载token_metrics"""
+    global _token_metrics
+    if _token_metrics is None:
+        from backend.llm.token_metrics import get_token_metrics
+        _token_metrics = get_token_metrics()
+    return _token_metrics
 
 
 class LLMType(Enum):
@@ -75,35 +86,37 @@ class LLMClient:
         messages = [{"role": "user", "content": prompt}]
         return self.generate_with_messages(messages, **kwargs)
 
-    def generate_with_messages(self, messages: List[Dict[str, Any]], **kwargs):
+    def generate_with_messages(self, messages: List[Dict[str, Any]], source: Optional[str] = None, **kwargs):
         """
         使用消息列表生成响应（同步）
 
         Args:
             messages: 消息列表
+            source: 调用来源（用于Token统计）
             **kwargs: 其他参数（temperature, tools等）
 
         Returns:
             OpenAI响应对象
         """
         if self.llm_type == LLMType.CHAT:
-            return self._openai_chat_completion(messages, **kwargs)
+            return self._openai_chat_completion(messages, source=source, **kwargs)
         else:
             raise ValueError(f"Unsupported LLM type for message generation: {self.llm_type}")
 
-    async def generate_with_messages_async(self, messages: List[Dict[str, Any]], **kwargs):
+    async def generate_with_messages_async(self, messages: List[Dict[str, Any]], source: Optional[str] = None, **kwargs):
         """
         使用消息列表生成响应（异步）
 
         Args:
             messages: 消息列表
+            source: 调用来源（用于Token统计）
             **kwargs: 其他参数
 
         Returns:
             OpenAI响应对象
         """
         if self.llm_type == LLMType.CHAT:
-            return await self._openai_chat_completion_async(messages, **kwargs)
+            return await self._openai_chat_completion_async(messages, source=source, **kwargs)
         else:
             raise ValueError(f"Unsupported LLM type for message generation: {self.llm_type}")
 
@@ -138,7 +151,7 @@ class LLMClient:
         else:
             raise ValueError(f"Unsupported LLM type for embedding generation: {self.llm_type}")
 
-    def _openai_chat_completion(self, messages: List[Dict[str, Any]], **kwargs):
+    def _openai_chat_completion(self, messages: List[Dict[str, Any]], source: Optional[str] = None, **kwargs):
         """同步聊天完成"""
         try:
             temperature = kwargs.get("temperature", self.config.get("temperature", 0.7))
@@ -156,17 +169,22 @@ class LLMClient:
 
             response = self.client.chat.completions.create(**create_params)
 
+            # 记录Token使用
             if hasattr(response, 'usage') and response.usage:
-                logger.debug(f"Token usage - Prompt: {response.usage.prompt_tokens}, "
-                           f"Completion: {response.usage.completion_tokens}, "
-                           f"Total: {response.usage.total_tokens}")
+                token_metrics = _get_token_metrics()
+                token_metrics.record(
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                    total_tokens=response.usage.total_tokens,
+                    source=source or f"LLM:{self.model}"
+                )
 
             return response
         except APIError as e:
             logger.error(f"OpenAI API error: {e}")
             raise
 
-    async def _openai_chat_completion_async(self, messages: List[Dict[str, Any]], **kwargs):
+    async def _openai_chat_completion_async(self, messages: List[Dict[str, Any]], source: Optional[str] = None, **kwargs):
         """异步聊天完成"""
         try:
             temperature = kwargs.get("temperature", self.config.get("temperature", 0.7))
@@ -184,10 +202,15 @@ class LLMClient:
 
             response = await self.async_client.chat.completions.create(**create_params)
 
+            # 记录Token使用
             if hasattr(response, 'usage') and response.usage:
-                logger.debug(f"Token usage - Prompt: {response.usage.prompt_tokens}, "
-                           f"Completion: {response.usage.completion_tokens}, "
-                           f"Total: {response.usage.total_tokens}")
+                token_metrics = _get_token_metrics()
+                token_metrics.record(
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                    total_tokens=response.usage.total_tokens,
+                    source=source or f"LLM:{self.model}"
+                )
 
             return response
         except APIError as e:

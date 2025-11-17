@@ -361,12 +361,18 @@ class InvestingComCollector:
             # 预增强：在数据库事务外批量增强字段和翻译摘要
             logger.debug(f"【Investing.com】批量处理 {len(items)} 条消息（字段增强 + 摘要翻译）")
             for item in items:
+                # 提前生成message_id用于事件发布
+                message_id = str(uuid.uuid4())
+                item['message_id'] = message_id
+
                 # 1. 字段增强（region, industry_tags, ai_tag）
                 if self.field_enricher:
                     try:
                         enriched = await self.field_enricher.enrich_fields(
                             title=item['title'],
-                            content=item['content']
+                            content=item['content'],
+                            message_id=message_id,
+                            source_name="Investing.com"
                         )
                         item['region'] = enriched.get('region')
                         item['industry_tags'] = enriched.get('industry_tags')
@@ -388,7 +394,7 @@ class InvestingComCollector:
             with create_session() as db:
                 for item in items:
                     message = InvestingComMessage(
-                        id=str(uuid.uuid4()),
+                        id=item.get('message_id', str(uuid.uuid4())),
                         source_id=self.source_id,
                         external_id=item.get('external_id'),
                         title=item['title'],

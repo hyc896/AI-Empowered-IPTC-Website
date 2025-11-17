@@ -221,6 +221,34 @@ class RegionMessagesResponse(BaseModel):
     region: str = Field(..., description="查询的地区名")
 
 
+# AI日报相关模型
+class AIDailyReportResponse(BaseModel):
+    """AI日报响应模型"""
+    id: str = Field(..., description="报告ID")
+    report_date: str = Field(..., description="报告日期（YYYY-MM-DD）")
+    content: str = Field(..., description="报告内容（Markdown格式）")
+    statistics: Dict[str, Any] = Field(..., description="统计数据")
+    governance_count: int = Field(..., description="AI治理信息数量")
+    research_count: int = Field(..., description="AI科研信息数量")
+    industry_count: int = Field(..., description="AI产业信息数量")
+    total_messages: int = Field(..., description="消息总数")
+    generation_status: str = Field(..., description="生成状态（pending/completed/failed）")
+    error_message: Optional[str] = Field(None, description="错误信息")
+    generated_at: datetime = Field(..., description="生成时间")
+    model_version: str = Field(..., description="模型版本")
+
+    class Config:
+        from_attributes = True
+
+
+class AIDailyReportListResponse(BaseModel):
+    """AI日报列表响应模型"""
+    items: List[AIDailyReportResponse] = Field(..., description="报告列表")
+    total: int = Field(..., description="总数量")
+    limit: int = Field(..., description="返回数量限制")
+    offset: int = Field(..., description="偏移量")
+
+
 # 类型别名
 MessageSourceList = List[MessageSourceResponse]
 MessageList = List[MessageResponse]

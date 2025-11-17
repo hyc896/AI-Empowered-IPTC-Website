@@ -15,6 +15,7 @@
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,9 @@ class FieldEnricherService:
         # 延迟加载LLM客户端（避免循环导入）
         self._llm_client = None
 
+        # 延迟加载EventBus（避免循环导入）
+        self._event_bus = None
+
         # 429错误追踪（TPM限流）
         self._consecutive_429_count = 0  # 连续429错误计数
         self._total_429_count = 0  # 总429错误计数
@@ -67,6 +71,30 @@ class FieldEnricherService:
                 raise RuntimeError("Fast LLM client not initialized")
 
         return self._llm_client
+
+    def _get_event_bus(self):
+        """延迟加载EventBus实例"""
+        if self._event_bus is None:
+            from backend.services.event_bus import get_event_bus
+            self._event_bus = get_event_bus()
+        return self._event_bus
+
+    async def _publish_ai_tag_event(self, data: dict):
+        """
+        发布AI标签事件（内部方法）
+
+        设计原则：
+        - 失败不抛异常，仅记录日志
+        - 使用fire-and-forget模式
+        - 不阻塞主流程
+        """
+        try:
+            event_bus = self._get_event_bus()
+            await event_bus.publish("new_ai_message", data)
+            logger.debug(f"事件已发布: {data['ai_tag']} - {data['title'][:30]}")
+        except Exception as e:
+            # 事件发布失败不影响主流程
+            logger.warning(f"事件发布失败: {e}", exc_info=False)
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """
@@ -88,18 +116,17 @@ class FieldEnricherService:
 
     async def _handle_rate_limit(self):
         """
-        处理429速率限制错误（指数退避）
+        处理429速率限制错误（固定等待）
 
         每次遇到429：
         - 连续计数+1
-        - 退避时间翻倍（10秒 -> 20秒 -> 40秒 -> 80秒...）
-        - 最长等待300秒（5分钟）
+        - 统一等待60秒
         """
         self._consecutive_429_count += 1
         self._total_429_count += 1
 
-        # 指数退避：10秒 * 2^(连续次数-1)
-        self._backoff_seconds = min(10 * (2 ** (self._consecutive_429_count - 1)), 300)
+        # 固定等待60秒
+        self._backoff_seconds = 60
 
         logger.warning(
             f"【FieldEnricher】检测到TPM限流（429错误）"
@@ -122,7 +149,9 @@ class FieldEnricherService:
     async def enrich_fields(
         self,
         title: str,
-        content: str
+        content: str,
+        message_id: str = None,
+        source_name: str = None
     ) -> Dict[str, Optional[str]]:
         """
         增强字段（单条消息）
@@ -132,6 +161,8 @@ class FieldEnricherService:
         Args:
             title: 消息标题
             content: 消息内容
+            message_id: 消息ID（用于事件携带，可选）
+            source_name: 消息源名称（用于事件携带，可选）
 
         Returns:
             字典包含：
@@ -154,6 +185,17 @@ class FieldEnricherService:
         if industry_tags and "人工智能" in industry_tags:
             logger.debug(f"【FieldEnricher】检测到'人工智能'标签，执行AI分类")
             ai_tag = await self._classify_ai_tag(title, content)
+
+            # 如果生成了ai_tag，异步发布事件（fire-and-forget）
+            if ai_tag and message_id:
+                asyncio.create_task(self._publish_ai_tag_event({
+                    "message_id": message_id,
+                    "title": title,
+                    "summary": content[:200] + "..." if len(content) > 200 else content,
+                    "ai_tag": ai_tag,
+                    "source_name": source_name or "未知",
+                    "timestamp": datetime.now().isoformat()
+                }))
         else:
             logger.debug(f"【FieldEnricher】未检测到'人工智能'标签（industry_tags={industry_tags}），跳过AI分类")
 
@@ -235,7 +277,8 @@ class FieldEnricherService:
                     llm_client = self._get_llm_client()
                     response = await llm_client.generate_with_messages_async(
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=100
+                        max_tokens=100,
+                        source="FieldEnricher:region"
                     )
 
                     region = response.choices[0].message.content.strip()
@@ -310,7 +353,8 @@ class FieldEnricherService:
                     llm_client = self._get_llm_client()
                     response = await llm_client.generate_with_messages_async(
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=150
+                        max_tokens=150,
+                        source="FieldEnricher:industry"
                     )
 
                     tags = response.choices[0].message.content.strip()
@@ -492,7 +536,8 @@ class FieldEnricherService:
                     llm_client = self._get_llm_client()
                     response = await llm_client.generate_with_messages_async(
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=50
+                        max_tokens=50,
+                        source="FieldEnricher:ai_tag"
                     )
 
                     tag = response.choices[0].message.content.strip()
@@ -547,7 +592,7 @@ class FieldEnricherService:
         # 截取content前500字符
         content_excerpt = content[:500] if len(content) > 500 else content
 
-        prompt = f"""请为以下新闻进行AI相关分类，从三个类别中选择一个。
+        prompt = f"""请为以下AI相关新闻进行分类，从三个类别中选择一个。
 
 可选类别（只能选择其中一个）：
 1. AI治理信息 - AI相关的安全、法律、政策、监管、伦理、治理等内容
@@ -569,7 +614,7 @@ class FieldEnricherService:
 
 特殊情况处理：
 - 如果新闻同时涉及多个类别，优先选择AI治理信息
-- 如果新闻与AI无关，返回"AI产业信息"（作为默认类别）
+- 如果无法明确判断，默认选择AI产业信息
 
 示例：
 - "欧盟通过人工智能法案，加强AI监管" → "AI治理信息"

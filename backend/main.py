@@ -51,13 +51,6 @@ logging.getLogger('chromadb').setLevel(logging.WARNING)
 logging.getLogger('chromadb.telemetry.product.posthog').setLevel(logging.ERROR)
 logging.getLogger('arxiv').setLevel(logging.WARNING)
 
-class SearchRequest(BaseModel):
-    """搜索请求模型"""
-    query: str
-    source_type: str = "news"
-    limit: int = 20
-
-
 # 全局变量
 app_state: Dict[str, Any] = {}
 
@@ -126,11 +119,22 @@ async def startup():
             logger.warning(f"【向量同步】启动失败: {e}，将继续运行但无法自动同步向量")
 
         # 6. 加载完整的API路由
-        logger.info("【7/7】加载API路由...")
+        logger.info("【7/8】加载API路由...")
         load_api_routes()
         setup_basic_routes()
 
-        # 7. 显示数据库数据统计
+        # 7. 启动调度器服务
+        logger.info("【8/8】启动调度器服务...")
+        try:
+            from backend.services.scheduler_service import get_scheduler_service
+            scheduler = get_scheduler_service()
+            scheduler.start()
+            app_state["scheduler_service"] = scheduler
+            logger.info("【调度器】启动成功")
+        except Exception as e:
+            logger.warning(f"【调度器】启动失败: {e}，定时任务将不可用")
+
+        # 8. 显示数据库数据统计
         await display_database_stats()
 
         logger.info("=== 消息平台启动完成 ===")
@@ -149,6 +153,11 @@ async def shutdown():
     logger.info("=== 消息平台正在关闭 ===")
 
     try:
+        # 停止调度器服务
+        if "scheduler_service" in app_state:
+            logger.info("【关闭】正在停止调度器服务...")
+            app_state["scheduler_service"].shutdown(wait=True)
+
         # 停止采集器服务
         if "collector_service" in app_state:
             logger.info("【关闭】正在停止采集器服务...")
@@ -348,6 +357,18 @@ def load_api_routes():
             app.include_router(geo_router, prefix="/api/v1")
         except ImportError as e:
             logger.warning(f"地理路由加载失败: {e}")
+
+        try:
+            from backend.api.sse_routes import router as sse_router
+            app.include_router(sse_router, prefix="/api/v1", tags=["SSE事件流"])
+        except ImportError as e:
+            logger.warning(f"SSE路由加载失败: {e}")
+
+        try:
+            from backend.api.ai_report_routes import router as ai_report_router
+            app.include_router(ai_report_router, prefix="/api/v1")
+        except ImportError as e:
+            logger.warning(f"AI日报路由加载失败: {e}")
 
         app.include_router(search_router, prefix="/api/v1")
 

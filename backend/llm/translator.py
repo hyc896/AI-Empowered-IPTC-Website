@@ -170,7 +170,8 @@ class Translator:
                     llm_client = self._get_llm_client()
                     response = await llm_client.generate_with_messages_async(
                         messages=messages,
-                        max_tokens=max_tokens
+                        max_tokens=max_tokens,
+                        source="Translator"
                     )
 
                     elapsed = asyncio.get_event_loop().time() - start_time

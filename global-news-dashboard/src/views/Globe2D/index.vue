@@ -110,6 +110,12 @@
       autoresize
     />
 
+    <!-- AI标签实时观察栏 -->
+    <AITagsObserver />
+
+    <!-- AI日报抽屉 -->
+    <AIDailyReportDrawer />
+
     <!-- 消息详情抽屉 -->
     <el-drawer
       v-model="drawerVisible"
@@ -174,6 +180,8 @@ import { formatDateShort } from '@/utils/date'
 import * as geoApi from '@/api/geo'
 import { transformAPIStats, geoJSONToChinese } from '@/utils/countryMapping'
 import { geoNaturalEarth1 } from 'd3-geo'
+import AITagsObserver from '@/components/AITagsObserver.vue'
+import AIDailyReportDrawer from '@/components/AIDailyReportDrawer.vue'
 
 use([
   CanvasRenderer,
