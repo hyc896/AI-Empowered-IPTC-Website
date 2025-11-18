@@ -23,10 +23,16 @@ except ImportError:
     _chroma_available = False
 
 try:
-    from backend.llm import get_embedding_client
+    from backend.llm import get_embedding_client, get_translator
     _llm_available = True
 except ImportError:
     _llm_available = False
+
+try:
+    from backend.services import get_field_enricher
+    _field_enricher_available = True
+except ImportError:
+    _field_enricher_available = False
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +73,17 @@ class PartnershipAICollector:
 
         if _llm_available:
             self.embedding_client = get_embedding_client()
+            self.translator = get_translator()
         else:
             self.embedding_client = None
-            logger.warning("【Partnership AI】LLM服务不可用，将跳过向量化")
+            self.translator = None
+            logger.warning("【Partnership AI】LLM服务不可用，将跳过向量化和翻译")
+
+        if _field_enricher_available:
+            self.field_enricher = get_field_enricher()
+        else:
+            self.field_enricher = None
+            logger.warning("【Partnership AI】FieldEnricher不可用，将跳过字段增强")
 
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
@@ -166,6 +180,9 @@ class PartnershipAICollector:
                             logger.debug(f"[{idx}/{len(new_items)}] ⚠ 保持使用摘要: {item['url']}")
                     except Exception as e:
                         logger.error(f"[{idx}/{len(new_items)}] ✗ 详情页访问失败: {e}")
+
+                # 预处理（翻译+字段增强）
+                await self._preprocess_items(new_items)
 
                 await self._store_items(new_items)
                 logger.info(f"【Partnership AI】采集到 {len(new_items)} 篇新文章")
@@ -455,6 +472,100 @@ class PartnershipAICollector:
 
         return new_items
 
+    async def _preprocess_items(self, items: List[Dict[str, Any]]) -> None:
+        """
+        预处理：在数据库会话外并发执行翻译和字段增强
+
+        Args:
+            items: 文章列表（会被原地修改）
+
+        架构改进：
+        - 批内串行处理（不使用asyncio.gather），避免并发过载
+        - Translator内部的semaphore(2)已经控制并发
+        - 单条失败不影响其他，立即记录错误
+        """
+        if not items:
+            return
+
+        logger.info(f"【Partnership AI】开始预处理 {len(items)} 条消息（翻译 + 字段增强）")
+
+        # 串行处理每条消息（Translator内部有并发控制）
+        for idx, item in enumerate(items, 1):
+            # 提前生成message_id用于事件发布
+            message_id = str(uuid.uuid4())
+            item['message_id'] = message_id
+
+            try:
+                await self._preprocess_single_item(item, message_id)
+                logger.debug(f"【Partnership AI】预处理完成 [{idx}/{len(items)}]: {item.get('title', '')[:30]}")
+            except Exception as e:
+                logger.error(f"【Partnership AI】预处理失败 [{idx}/{len(items)}]: {e}")
+                # Fail Fast：失败时设置降级值，继续处理
+                item['summary'] = item.get('summary', '')[:500] if item.get('summary') else ''
+                item['region'] = None
+                item['industry_tags'] = None
+                item['ai_tag'] = None
+
+    async def _preprocess_single_item(self, item: Dict[str, Any], message_id: str) -> None:
+        """
+        预处理单条消息（翻译 + 字段增强）
+
+        Args:
+            item: 文章数据（会被原地修改）
+            message_id: 消息ID（用于事件发布）
+
+        架构改进：
+        - 串行执行翻译和字段增强（而非并发），降低API压力
+        - 翻译失败使用降级策略，不影响字段增强
+        - 详细记录每个步骤的失败信息
+        """
+        # 1. 翻译（单独try-catch，失败使用降级）
+        try:
+            summary = await self._generate_summary(item.get('summary', ''), item.get('content', ''))
+            item['summary'] = summary
+        except Exception as e:
+            logger.error(f"【Partnership AI】翻译失败 (url={item.get('url')}): {e}")
+            item['summary'] = item.get('summary', '')[:500] if item.get('summary') else ''
+
+        # 2. 字段增强（单独try-catch，失败设为None）
+        try:
+            enriched = await self._enrich_fields(item.get('title', ''), item.get('content', ''), message_id)
+            item['region'] = enriched.get('region')
+            item['industry_tags'] = enriched.get('industry_tags')
+            item['ai_tag'] = enriched.get('ai_tag')
+        except Exception as e:
+            logger.error(f"【Partnership AI】字段增强失败 (url={item.get('url')}): {e}")
+            item['region'] = None
+            item['industry_tags'] = None
+            item['ai_tag'] = None
+
+    async def _enrich_fields(self, title: str, content: str, message_id: str = None) -> Dict[str, Optional[str]]:
+        """
+        字段增强（region + industry_tags + ai_tag）
+
+        Args:
+            title: 标题
+            content: 内容
+            message_id: 消息ID（用于事件发布）
+
+        Returns:
+            包含region、industry_tags和ai_tag的字典
+        """
+        if not self.field_enricher:
+            return {"region": None, "industry_tags": None, "ai_tag": None}
+
+        try:
+            enriched = await self.field_enricher.enrich_fields(
+                title,
+                content,
+                message_id=message_id,
+                source_name="Partnership on AI"
+            )
+            return enriched
+        except Exception as e:
+            logger.error(f"【Partnership AI】字段增强失败: {e}")
+            return {"region": None, "industry_tags": None, "ai_tag": None}
+
     async def _store_items(self, items: List[Dict[str, Any]]) -> None:
         """
         并发存储到MySQL和ChromaDB
@@ -468,30 +579,30 @@ class PartnershipAICollector:
 
     async def _store_to_mysql(self, items: List[Dict[str, Any]]) -> None:
         """
-        存储到MySQL
+        存储到MySQL（已经过翻译和字段增强）
 
         Args:
-            items: 文章列表
+            items: 文章列表（已经过预处理）
         """
         try:
             with create_session() as db:
                 for item in items:
-                    summary = self._generate_summary(item.get('summary'), item.get('content', ''))
-
                     message = PartnershipAIMessage(
-                        id=str(uuid.uuid4()),
+                        id=item.get('message_id', str(uuid.uuid4())),
                         source_id=self.source_id,
                         external_id=item.get('external_id'),
                         title=item['title'],
                         content=item['content'],
-                        summary=summary,
+                        summary=item.get('summary'),  # 使用预处理的summary
                         provider=item.get('provider'),
                         published_at=item.get('published_at'),
                         crawled_at=datetime.now(),
                         url=item['url'],
                         region=item.get('region'),
                         category=item.get('category'),
-                        language=item.get('language')
+                        language=item.get('language'),
+                        industry_tags=item.get('industry_tags'),  # 新增
+                        ai_tag=item.get('ai_tag')  # 新增
                     )
 
                     try:
@@ -509,17 +620,17 @@ class PartnershipAICollector:
 
     async def _store_to_chroma(self, items: List[Dict[str, Any]]) -> None:
         """
-        存储到ChromaDB
+        存储到ChromaDB（已经过翻译和字段增强）
 
         Args:
-            items: 文章列表
+            items: 文章列表（已经过预处理）
         """
         if not self.chroma_storage or not self.embedding_client:
             return
 
         try:
             for item in items:
-                summary = self._generate_summary(item.get('summary'), item.get('content', ''))
+                summary = item.get('summary', '')  # 使用预处理的summary
                 document_text = f"{item['title']} {summary}"
 
                 embedding = self.embedding_client.generate_embedding(document_text)
@@ -547,26 +658,43 @@ class PartnershipAICollector:
         except Exception as e:
             logger.error(f"Failed to store to ChromaDB: {e}")
 
-    def _generate_summary(self, summary: Optional[str], content: str) -> str:
+    async def _generate_summary(self, summary: Optional[str], content: str) -> str:
         """
-        生成摘要
+        生成摘要（支持中文翻译）
 
-        优先使用网页excerpt，无则用content，content>1000字时取前1000字
+        优先使用网页excerpt，无则用content。外文内容自动翻译成中文
 
         Args:
             summary: 网页提取的摘要
             content: 正文内容
 
         Returns:
-            摘要文本
+            摘要文本（中文）
         """
-        if summary and len(summary.strip()) > 0:
-            return summary.strip()
+        # 1. 确定原始摘要来源
+        source_text = summary if summary and len(summary.strip()) > 0 else content
 
-        if len(content) <= 1000:
-            return content
+        if not source_text:
+            return ""
 
-        return content[:1000] + "..."
+        # 2. 外文内容：翻译成中文
+        if self.translator:
+            try:
+                # 全文翻译（不截断）
+                translated = await self.translator.translate(
+                    source_text,
+                    context="Partnership on AI博客文章摘要"
+                )
+                return translated
+            except Exception as e:
+                logger.error(f"【Partnership AI】翻译失败: {e}")
+                # 降级策略：返回截断原文
+                return source_text[:500] + "... [AI翻译暂不可用]"
+        else:
+            # 无翻译器：返回截断原文
+            if len(source_text) <= 1000:
+                return source_text
+            return source_text[:500] + "..."
 
     async def _close_browser(self) -> None:
         """关闭浏览器"""

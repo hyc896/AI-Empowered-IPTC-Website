@@ -29,6 +29,12 @@ try:
 except ImportError:
     _llm_available = False
 
+try:
+    from backend.services import get_field_enricher
+    _field_enricher_available = True
+except ImportError:
+    _field_enricher_available = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,6 +77,12 @@ class GCGAICollector:
             self.embedding_client = None
             self.translator = None
             logger.warning("【GCG】LLM服务不可用，将跳过向量化和翻译")
+
+        if _field_enricher_available:
+            self.field_enricher = get_field_enricher()
+        else:
+            self.field_enricher = None
+            logger.warning("【GCG】FieldEnricher不可用，将跳过字段增强")
 
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
@@ -560,37 +572,84 @@ class GCGAICollector:
         Args:
             items: 文章列表
         """
-        # 预处理：先完成所有翻译（在session外）
-        translated_summaries = []
-        for item in items:
-            summary = await self._generate_summary(item.get('summary'), item.get('content', ''))
-            translated_summaries.append(summary)
+        # 预处理：先完成翻译和字段增强（在session外）
+        logger.info(f"【GCG】开始预处理 {len(items)} 条消息（翻译 + 字段增强）")
+
+        for idx, item in enumerate(items, 1):
+            # 提前生成message_id用于事件发布
+            message_id = str(uuid.uuid4())
+            item['message_id'] = message_id
+
+            try:
+                # 1. 翻译
+                summary = await self._generate_summary(item.get('summary'), item.get('content', ''))
+                item['summary'] = summary
+
+                # 2. 字段增强
+                enriched = await self._enrich_fields(item.get('title', ''), item.get('content', ''), message_id)
+                item['industry_tags'] = enriched.get('industry_tags')
+                item['ai_tag'] = enriched.get('ai_tag')
+
+                logger.debug(f"【GCG】预处理完成 [{idx}/{len(items)}]: {item.get('title', '')[:30]}")
+            except Exception as e:
+                logger.error(f"【GCG】预处理失败 [{idx}/{len(items)}]: {e}")
+                # Fail Fast：失败时设置降级值
+                item['summary'] = item.get('summary', '')[:500] if item.get('summary') else ''
+                item['industry_tags'] = None
+                item['ai_tag'] = None
 
         # 存储到MySQL和ChromaDB
-        mysql_task = self._store_to_mysql(items, translated_summaries)
-        chroma_task = self._store_to_chroma(items, translated_summaries)
+        mysql_task = self._store_to_mysql(items)
+        chroma_task = self._store_to_chroma(items)
         await asyncio.gather(mysql_task, chroma_task, return_exceptions=True)
 
-    async def _store_to_mysql(self, items: List[Dict[str, Any]], translated_summaries: List[str]) -> None:
+    async def _enrich_fields(self, title: str, content: str, message_id: str = None) -> Dict[str, Optional[str]]:
         """
-        存储到MySQL
+        字段增强（industry_tags + ai_tag）
 
         Args:
-            items: 文章列表
-            translated_summaries: 预翻译的摘要列表
+            title: 标题
+            content: 内容
+            message_id: 消息ID（用于事件发布）
+
+        Returns:
+            包含industry_tags和ai_tag的字典
+        """
+        if not self.field_enricher:
+            return {"industry_tags": None, "ai_tag": None}
+
+        try:
+            enriched = await self.field_enricher.enrich_fields(
+                title,
+                content,
+                message_id=message_id,
+                source_name="GCG AI"
+            )
+            return {
+                "industry_tags": enriched.get('industry_tags'),
+                "ai_tag": enriched.get('ai_tag')
+            }
+        except Exception as e:
+            logger.error(f"【GCG】字段增强失败: {e}")
+            return {"industry_tags": None, "ai_tag": None}
+
+    async def _store_to_mysql(self, items: List[Dict[str, Any]]) -> None:
+        """
+        存储到MySQL（已经过翻译和字段增强）
+
+        Args:
+            items: 文章列表（已经过预处理）
         """
         try:
             with create_session() as db:
-                for idx, item in enumerate(items):
-                    summary = translated_summaries[idx]
-
+                for item in items:
                     message = GCGAIMessage(
-                        id=str(uuid.uuid4()),
+                        id=item.get('message_id', str(uuid.uuid4())),
                         source_id=self.source_id,
                         external_id=item.get('external_id'),
                         title=item['title'],
                         content=item['content'],
-                        summary=summary,
+                        summary=item.get('summary'),  # 使用预处理的summary
                         provider=item.get('provider'),
                         published_at=item.get('published_at'),
                         crawled_at=datetime.now(),
@@ -599,7 +658,9 @@ class GCGAICollector:
                         category=item.get('category'),
                         language=item.get('language'),
                         tags=item.get('tags'),
-                        pdf_url=item.get('pdf_url')
+                        pdf_url=item.get('pdf_url'),
+                        industry_tags=item.get('industry_tags'),  # 新增
+                        ai_tag=item.get('ai_tag')  # 新增
                     )
 
                     try:

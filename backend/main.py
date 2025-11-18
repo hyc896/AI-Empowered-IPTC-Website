@@ -31,16 +31,12 @@ except ImportError:
 # 添加项目路径 - 只使用消息平台自己的路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))  # 消息平台根目录
 
-# 配置日志（支持环境变量和配置文件）
-log_file = os.getenv('LOG_FILE', 'logs/platform.log')  # 可通过环境变量自定义
-os.makedirs(os.path.dirname(log_file), exist_ok=True)  # 确保日志目录存在
-
+# 配置日志（仅输出到控制台）
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(log_file, encoding='utf-8')
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -606,9 +602,6 @@ async def display_database_stats():
 
 # 开发模式启动
 if __name__ == "__main__":
-    # 确保日志目录存在
-    os.makedirs("logs", exist_ok=True)
-
     # 获取配置
     try:
         from backend.config.config_manager import ConfigManager

@@ -72,7 +72,15 @@
       "Bash(cat:*)",
       "Bash(npm install:*)",
       "Bash(git checkout:*)",
-      "Bash(\"D:\\TechWork\\message_platform\\backend\\database\\entities.py\")"
+      "Bash(\"D:\\TechWork\\message_platform\\backend\\database\\entities.py\")",
+      "WebFetch(domain:www.theguardian.com)",
+      "WebFetch(domain:www.koreaherald.com)",
+      "WebFetch(domain:economictimes.indiatimes.com)",
+      "WebFetch(domain:www.techinasia.com)",
+      "WebFetch(domain:www.arabnews.com)",
+      "WebFetch(domain:betakit.com)",
+      "WebFetch(domain:feeds.feedburner.com)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []

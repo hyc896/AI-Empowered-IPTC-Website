@@ -279,6 +279,36 @@ class InvestingComCollector:
             logger.error(f"Failed to parse RSS feed ({category}): {e}", exc_info=True)
             return []
 
+    def _extract_article_id(self, url: str) -> str:
+        """
+        从URL中提取文章ID
+
+        Args:
+            url: 完整URL
+
+        Returns:
+            文章ID（URL末尾的数字，或URL的哈希值）
+
+        示例：
+            'https://www.investing.com/news/category/title-4363155' -> '4363155'
+        """
+        try:
+            # 尝试提取URL末尾的数字ID
+            import re
+            match = re.search(r'-(\d+)$', url)
+            if match:
+                return match.group(1)
+
+            # 如果没有找到数字ID，使用URL的哈希值（前16位）
+            import hashlib
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
+            logger.warning(f"无法从URL提取文章ID，使用哈希值: {url_hash}")
+            return url_hash
+
+        except Exception as e:
+            logger.error(f"提取文章ID失败: {e}，使用URL前100字符")
+            return url[:100]
+
     def _extract_article_from_entry(self, entry: Any) -> Optional[Dict[str, Any]]:
         """
         从RSS条目中提取文章数据
@@ -293,7 +323,11 @@ class InvestingComCollector:
             # 必备字段
             title = entry.get('title', '').strip()
             link = entry.get('link', '').strip()
+
+            # 提取external_id：从URL末尾提取文章ID（如4363155）
+            # URL格式：https://www.investing.com/news/category/article-title-1234567
             guid = entry.get('guid', entry.get('id', link)).strip()
+            external_id = self._extract_article_id(guid)
 
             if not title or not link:
                 logger.warning("RSS条目缺少title或link，跳过")
@@ -331,7 +365,7 @@ class InvestingComCollector:
                 "provider": "Investing.com",
                 "published_at": published_at,
                 "url": link,
-                "external_id": guid,
+                "external_id": external_id,
                 "category": "General News"
             }
 

@@ -14,13 +14,13 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import StreamingResponse
 from backend.services.event_bus import get_event_bus
 from backend.database.connection import create_session
-from backend.database.entities import TongHuaShunMessage, Kr36Message
-from sqlalchemy import or_
+from backend.database.orm_registry import get_orm_registry
+from sqlalchemy import and_
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -114,10 +114,12 @@ async def get_event_stats():
 @router.get("/events/ai-tags/recent")
 async def get_recent_ai_tags(
     limit: int = Query(100, ge=10, le=500, description="每个标签最多返回N条消息"),
-    hours: Optional[int] = Query(24, ge=1, le=8760, description="时间范围（小时），不传或传0表示不限制")
+    hours: Optional[int] = Query(24, ge=0, le=8760, description="时间范围（小时），传0表示不限制")
 ):
     """
     获取最近的AI标签消息（用于页面初始化）
+
+    使用软注册机制：自动发现所有包含ai_tag字段的表
 
     Args:
         limit: 每个标签最多返回N条（默认100条）
@@ -142,51 +144,52 @@ async def get_recent_ai_tags(
         if hours and hours > 0:
             cutoff_time = datetime.now() - timedelta(hours=hours)
 
+        # 使用软注册机制获取所有ai_tag模型
+        registry = get_orm_registry()
+        ai_tag_models = registry.get_ai_tag_models()
+
+        logger.debug(f"【SSE API】扫描{len(ai_tag_models)}个ai_tag表：{registry.get_ai_tag_table_names()}")
+
         with create_session() as db:
-            # 为每个AI标签分别查询，确保每个标签都能获取到数据
-            for tag in ["AI治理信息", "AI科研信息", "AI产业信息"]:
-                # 查询同花顺消息
-                ths_query = db.query(TongHuaShunMessage).filter(
-                    TongHuaShunMessage.ai_tag == tag
-                )
-                if cutoff_time:
-                    ths_query = ths_query.filter(TongHuaShunMessage.crawled_at >= cutoff_time)
-                ths_msgs = ths_query.order_by(TongHuaShunMessage.crawled_at.desc()).limit(limit).all()
+            # 遍历所有包含ai_tag字段的表
+            for model_class in ai_tag_models:
+                table_name = model_class.__tablename__
 
-                for msg in ths_msgs:
-                    result[tag].append({
-                        "message_id": msg.id,
-                        "title": msg.title,
-                        "summary": msg.summary or msg.content[:200],
-                        "ai_tag": msg.ai_tag,
-                        "source_name": "同花顺快讯",
-                        "timestamp": msg.crawled_at.isoformat()
-                    })
+                try:
+                    # 为每个AI标签分别查询
+                    for tag in ["AI治理信息", "AI科研信息", "AI产业信息"]:
+                        # 构建查询条件
+                        filters = [model_class.ai_tag == tag]
+                        if cutoff_time:
+                            filters.append(model_class.crawled_at >= cutoff_time)
 
-                # 查询36氪消息
-                kr36_query = db.query(Kr36Message).filter(
-                    Kr36Message.ai_tag == tag
-                )
-                if cutoff_time:
-                    kr36_query = kr36_query.filter(Kr36Message.crawled_at >= cutoff_time)
-                kr36_msgs = kr36_query.order_by(Kr36Message.crawled_at.desc()).limit(limit).all()
+                        query = db.query(model_class).filter(and_(*filters))
+                        messages = query.order_by(model_class.crawled_at.desc()).limit(limit).all()
 
-                for msg in kr36_msgs:
-                    result[tag].append({
-                        "message_id": msg.id,
-                        "title": msg.title,
-                        "summary": msg.summary or msg.content[:200],
-                        "ai_tag": msg.ai_tag,
-                        "source_name": "36氪快讯",
-                        "timestamp": msg.crawled_at.isoformat()
-                    })
+                        # 转换为统一格式
+                        for msg in messages:
+                            result[tag].append({
+                                "message_id": str(msg.id),
+                                "title": getattr(msg, 'title', ''),
+                                "summary": getattr(msg, 'summary', '') or getattr(msg, 'content', '')[:200],
+                                "ai_tag": msg.ai_tag,
+                                "source_name": _get_source_name(table_name),
+                                "timestamp": msg.crawled_at.isoformat()
+                            })
 
-                # 按时间排序并限制数量
+                    logger.debug(f"【SSE API】{table_name}: 收集完成")
+
+                except Exception as e:
+                    logger.error(f"【SSE API】从{table_name}查询消息失败: {e}", exc_info=True)
+                    continue
+
+            # 对每个标签的消息按时间排序并限制数量
+            for tag in result.keys():
                 result[tag] = sorted(result[tag], key=lambda x: x['timestamp'], reverse=True)[:limit]
 
         time_range_desc = f"{hours}小时" if cutoff_time else "所有历史"
         logger.info(
-            f"返回AI标签消息（{time_range_desc}）: "
+            f"【SSE API】返回AI标签消息（{time_range_desc}）: "
             f"治理={len(result['AI治理信息'])}, "
             f"科研={len(result['AI科研信息'])}, "
             f"产业={len(result['AI产业信息'])}"
@@ -195,9 +198,32 @@ async def get_recent_ai_tags(
         return result
 
     except Exception as e:
-        logger.error(f"获取AI标签消息失败: {e}", exc_info=True)
+        logger.error(f"【SSE API】获取AI标签消息失败: {e}", exc_info=True)
         return {
             "AI治理信息": [],
             "AI科研信息": [],
             "AI产业信息": []
         }
+
+
+def _get_source_name(table_name: str) -> str:
+    """
+    根据表名推断消息源名称
+
+    Args:
+        table_name: 数据库表名
+
+    Returns:
+        消息源显示名称
+    """
+    source_name_map = {
+        "mp_tonghuashun_messages": "同花顺快讯",
+        "mp_kr36_messages": "36氪快讯",
+        "mp_arxiv_messages": "arXiv学术论文",
+        "mp_venturebeat_messages": "VentureBeat",
+        "mp_techcrunch_messages": "TechCrunch",
+        "mp_investing_com_messages": "Investing.com",
+        "mp_nikkei_asia_messages": "Nikkei Asia"
+    }
+
+    return source_name_map.get(table_name, table_name.replace("mp_", "").replace("_messages", ""))

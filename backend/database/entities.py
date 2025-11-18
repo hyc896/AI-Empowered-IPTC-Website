@@ -96,30 +96,15 @@ class MessageSource(Base):
     arxiv_messages = relationship("ArxivMessage", back_populates="source", cascade="all, delete-orphan")
     partnership_ai_messages = relationship("PartnershipAIMessage", back_populates="source", cascade="all, delete-orphan")
     govai_messages = relationship("GovAIMessage", back_populates="source", cascade="all, delete-orphan")
-    oecd_ai_messages = relationship("OECDAIMessage", back_populates="source", cascade="all, delete-orphan")
-    csis_messages = relationship("CSISMessage", back_populates="source", cascade="all, delete-orphan")
-    wef_publication_messages = relationship("WEFPublicationMessage", back_populates="source", cascade="all, delete-orphan")
-    cigi_messages = relationship("CIGIMessage", back_populates="source", cascade="all, delete-orphan")
-    cnas_messages = relationship("CNASMessage", back_populates="source", cascade="all, delete-orphan")
-    cset_messages = relationship("CSETMessage", back_populates="source", cascade="all, delete-orphan")
-    rand_messages = relationship("RANDMessage", back_populates="source", cascade="all, delete-orphan")
-    takshashila_messages = relationship("TakshashilaMessage", back_populates="source", cascade="all, delete-orphan")
-    icrier_messages = relationship("ICRIERMessage", back_populates="source", cascade="all, delete-orphan")
-    stellenbosch_messages = relationship("StellenboschMessage", back_populates="source", cascade="all, delete-orphan")
-    hse_ai_messages = relationship("HSEAIMessage", back_populates="source", cascade="all, delete-orphan")
-    obia_messages = relationship("OBIAMessage", back_populates="source", cascade="all, delete-orphan")
     gcg_ai_messages = relationship("GCGAIMessage", back_populates="source", cascade="all, delete-orphan")
-    ada_lovelace_messages = relationship("AdaLovelaceMessage", back_populates="source", cascade="all, delete-orphan")
-    ieai_messages = relationship("IEAIMessage", back_populates="source", cascade="all, delete-orphan")
-    fari_messages = relationship("FARIMessage", back_populates="source", cascade="all, delete-orphan")
-    kira_messages = relationship("KIRAMessage", back_populates="source", cascade="all, delete-orphan")
-    aisi_messages = relationship("AISIMessage", back_populates="source", cascade="all, delete-orphan")
-    future_society_messages = relationship("FutureSocietyMessage", back_populates="source", cascade="all, delete-orphan")
-    saif_messages = relationship("SAIFMessage", back_populates="source", cascade="all, delete-orphan")
     venturebeat_messages = relationship("VentureBeatMessage", back_populates="source", cascade="all, delete-orphan")
     nikkei_asia_ai_messages = relationship("NikkeiAsiaAIMessage", back_populates="source", cascade="all, delete-orphan")
     investing_com_messages = relationship("InvestingComMessage", back_populates="source", cascade="all, delete-orphan")
     techcrunch_messages = relationship("TechCrunchMessage", back_populates="source", cascade="all, delete-orphan")
+    korea_herald_messages = relationship("KoreaHeraldMessage", back_populates="source", cascade="all, delete-orphan")
+    techinasia_messages = relationship("TechInAsiaMessage", back_populates="source", cascade="all, delete-orphan")
+    guardian_messages = relationship("GuardianMessage", back_populates="source", cascade="all, delete-orphan")
+    betakit_messages = relationship("BetaKitMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
@@ -229,6 +214,10 @@ class ArxivMessage(Base):
     updated_at = Column(DateTime, comment="更新时间")
     crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
 
+    # AI标签字段（arXiv论文全部归类为AI科研信息）
+    industry_tags = Column(Text, default="人工智能", comment="行业标签（固定为'人工智能'）")
+    ai_tag = Column(String(50), default="AI科研信息", comment="AI分类标签（固定为'AI科研信息'）")
+
     # 关系
     source = relationship("MessageSource", back_populates="arxiv_messages")
 
@@ -247,6 +236,7 @@ class ArxivMessage(Base):
         Index("idx_primary_category", "primary_category"),
         Index("idx_doi", "doi"),
         Index("idx_updated_at", "updated_at"),
+        Index("idx_ai_tag", "ai_tag"),
     )
 
 
@@ -267,7 +257,9 @@ class PartnershipAIMessage(Base):
     url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
 
     # 扩展字段
-    region = Column(String(50), comment="地区（US/EU/UK/GLOBAL等）")
+    region = Column(String(200), comment="地区（中文格式，如'美国'、'全球'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
     category = Column(String(100), comment="分类（AI Governance/Policy/Research等）")
     language = Column(String(10), comment="语言（en/zh/fr等）")
     tags = Column(JSON, comment="标签列表（JSON数组）")
@@ -285,6 +277,7 @@ class PartnershipAIMessage(Base):
         Index("idx_external_id", "external_id"),
         Index("idx_region", "region"),
         Index("idx_category", "category"),
+        Index("idx_ai_tag", "ai_tag"),
     )
 
 
@@ -308,6 +301,8 @@ class GovAIMessage(Base):
     region = Column(String(50), default="GLOBAL", comment="地区（GLOBAL）")
     category = Column(String(100), comment="研究分类（Survey Research/Technical AI Governance等）")
     language = Column(String(10), default="en", comment="语言（en）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
     extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
 
     # 关系
@@ -322,340 +317,7 @@ class GovAIMessage(Base):
         Index("idx_url", "url"),
         Index("idx_external_id", "external_id"),
         Index("idx_category", "category"),
-    )
-
-
-class OECDAIMessage(Base):
-    """OECD Artificial Intelligence Policy Observatory（经合组织人工智能政策观察站）博客表"""
-    __tablename__ = "mp_oecd_ai_messages"
-
-    # 核心必备字段
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(100), comment="外部唯一标识（从URL路径提取）")
-    title = Column(String(500), nullable=False, comment="文章标题")
-    content = Column(Text, nullable=False, comment="文章正文内容")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者列表（逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="文章链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="GLOBAL", comment="地区（GLOBAL）")
-    category = Column(String(100), comment="文章分类（Academia/Civil society/Intergovernmental等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="oecd_ai_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class CSISMessage(Base):
-    """CSIS AI Topic（战略与国际研究中心-AI主题）文章表"""
-    __tablename__ = "mp_csis_messages"
-
-    # 核心必备字段
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(100), comment="外部唯一标识（从URL路径提取）")
-    title = Column(String(500), nullable=False, comment="文章标题")
-    content = Column(Text, nullable=False, comment="文章正文内容")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者列表（逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="文章链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="US", comment="地区（US）")
-    category = Column(String(100), comment="内容类型（Event/Commentary/Report/Podcast Episode等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="csis_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class WEFPublicationMessage(Base):
-    """World Economic Forum (WEF) AI Publications（世界经济论坛AI出版物）表"""
-    __tablename__ = "mp_wef_publication_messages"
-
-    # 核心必备字段
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(100), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="出版物标题")
-    content = Column(Text, nullable=False, comment="出版物正文内容")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="合作方（如Ministry of Economy of UAE等）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="出版物链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="GLOBAL", comment="地区（GLOBAL）")
-    category = Column(String(100), comment="出版物分类（如EMERGING TECHNOLOGIES等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="wef_publication_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class CNASMessage(Base):
-    """Center for a New American Security (CNAS)（新美国安全中心）文章表"""
-    __tablename__ = "mp_cnas_messages"
-
-    # 核心必备字段
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(100), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="文章标题")
-    content = Column(Text, nullable=False, comment="文章正文内容")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者列表（逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="文章链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="US", comment="地区（US）")
-    category = Column(String(100), comment="内容分类（Defense/Technology & National Security等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="cnas_messages")
-
-    # 索引
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class CSETMessage(Base):
-    """Center for Security and Emerging Technology (CSET)（安全与新兴技术中心-乔治城大学）研究论文表"""
-    __tablename__ = "mp_cset_messages"
-
-    # 核心必备字段
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(100), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="文章标题")
-    content = Column(Text, nullable=False, comment="文章正文内容（从详情页提取）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者列表（逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="文章链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="US", comment="地区（US-乔治城大学位于华盛顿）")
-    category = Column(String(100), comment="内容类型（Analysis/Report/Blog/Research等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="cset_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class CIGIMessage(Base):
-    """Centre for International Governance Innovation（国际治理创新中心）研究出版物表"""
-    __tablename__ = "mp_cigi_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容")
-    summary = Column(Text, comment="中文摘要（优先从网页提取，无则翻译content前1000字）")
-    provider = Column(String(500), comment="作者列表（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="CA", comment="地区（CA=Canada）")
-    content_type = Column(String(50), comment="内容类型（Publication/Opinion/News Releases/Multimedia/Event/Op-Eds）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    pdf_url = Column(String(500), comment="PDF下载链接（如果有）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="cigi_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_content_type", "content_type"),
-    )
-
-
-class RANDMessage(Base):
-    """RAND Corporation - Artificial Intelligence（兰德公司-人工智能）研究文章表"""
-    __tablename__ = "mp_rand_messages"
-
-    # 核心必备字段
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(100), comment="外部唯一标识（RAND content-id，如RRA4180-1）")
-    title = Column(String(500), nullable=False, comment="文章标题")
-    content = Column(Text, nullable=False, comment="文章正文内容")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者列表（逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="文章链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="US", comment="地区（US）")
-    category = Column(String(100), comment="出版类型（RESEARCH/COMMENTARY/DATA VIZ等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="rand_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class TakshashilaMessage(Base):
-    """Takshashila Institution（印度塔克沙希拉研究所）出版物表"""
-    __tablename__ = "mp_takshashila_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL文件名提取，如20251103-LEPF-Policy-Brief）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（从详情页提取）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者列表（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="IN", comment="地区（IN=India）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    publication_type = Column(String(100), comment="出版物类型（Policy Brief/Discussion Document/Working Paper/Journal Article等）")
-    categories = Column(JSON, comment="分类标签列表（如Geopolitics, Public Policy, Governance）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="takshashila_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_publication_type", "publication_type"),
-    )
-
-
-class ICRIERMessage(Base):
-    """ICRIER (Indian Council for Research on International Economic Relations) 出版物表"""
-    __tablename__ = "mp_icrier_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（URL slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（英文摘要）")
-    summary = Column(Text, comment="摘要（中文翻译）")
-    provider = Column(String(500), comment="作者（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="IN", comment="地区（IN=India）")
-    category = Column(String(100), comment="分类（Policy Briefs/Reports/Bulletins等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    pdf_url = Column(String(500), comment="PDF下载链接")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="icrier_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
+        Index("idx_ai_tag", "ai_tag"),
     )
 
 
@@ -709,120 +371,6 @@ def get_table_info():
     return tables
 
 
-class HSEAIMessage(Base):
-    """HSE University AI Research Centre 新闻消息表"""
-    __tablename__ = "mp_hse_ai_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL提取的数字ID）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（英文）")
-    summary = Column(Text, comment="摘要（中文翻译）")
-    provider = Column(String(500), comment="作者或主要人物（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="RU", comment="地区（RU=Russia）")
-    category = Column(String(100), comment="分类（Research & Expertise等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    tags = Column(JSON, comment="关键词标签（JSON数组）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="hse_ai_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class StellenboschMessage(Base):
-    """Policy Innovation Lab, Stellenbosch University（斯坦陵布什大学政策创新实验室）新闻文章表"""
-    __tablename__ = "mp_stellenbosch_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（从详情页提取）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者（From JSON-LD schema）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="ZA", comment="地区（ZA=South Africa 南非）")
-    category = Column(String(100), comment="分类（从articleSection提取，如Data Science & Public Policy/Goalkeepers stories/News等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    word_count = Column(Integer, comment="字数统计（从JSON-LD schema提取）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="stellenbosch_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-class OBIAMessage(Base):
-    """OBIA (Observatório Brasileiro de Inteligência Artificial) 巴西AI观测站研究出版物表"""
-    __tablename__ = "mp_obia_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从PDF URL提取data-guid）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（描述信息）")
-    summary = Column(Text, comment="摘要（中文翻译）")
-    provider = Column(String(500), comment="作者列表（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间（从PDF URL中的时间戳提取，格式：YYYYMMDDhhmmss）")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（PDF直链，用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="BR", comment="地区（BR=Brazil 巴西）")
-    category = Column(String(100), comment="分类（PANORAMA SETORIAL DA INTERNET/PESQUISAS TIC等）")
-    language = Column(String(10), default="pt", comment="语言（pt=葡萄牙语）")
-    pdf_url = Column(String(500), comment="PDF下载链接（与url相同）")
-    series = Column(String(100), comment="系列名称（Panorama Setorial/TIC Empresas/TIC Governo等）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="obia_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
 class GCGAIMessage(Base):
     """Global Center on AI Governance (GCG)（南非/非洲AI治理研究中心）研究报告表"""
     __tablename__ = "mp_gcg_ai_messages"
@@ -846,6 +394,8 @@ class GCGAIMessage(Base):
     tags = Column(JSON, comment="标签列表（如Technology、Public Policy等）")
     pdf_url = Column(String(500), comment="PDF下载链接（如果有）")
     extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
 
     # 关系
     source = relationship("MessageSource", back_populates="gcg_ai_messages")
@@ -859,275 +409,7 @@ class GCGAIMessage(Base):
         Index("idx_url", "url"),
         Index("idx_external_id", "external_id"),
         Index("idx_category", "category"),
-    )
-
-
-class AdaLovelaceMessage(Base):
-    """Ada Lovelace Institute（英国AI治理与伦理智库）博客文章表"""
-    __tablename__ = "mp_ada_lovelace_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（从详情页提取完整文章）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="UK", comment="地区（UK=United Kingdom 英国）")
-    category = Column(String(100), comment="内容类型（Commentary/Report/Blog Post等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    tags = Column(JSON, comment="标签列表（如AI policy、Data governance等）")
-    reading_time = Column(Integer, comment="预计阅读时间（分钟）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="ada_lovelace_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class IEAIMessage(Base):
-    """Institute for Ethics in AI (IEAI) - TUM（德国慕尼黑技术大学AI伦理研究所）文章表"""
-    __tablename__ = "mp_ieai_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（完整文章内容）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="DE", comment="地区（DE=Germany 德国）")
-    category = Column(String(100), comment="文章类型（News/Blog/Research等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    tags = Column(JSON, comment="标签列表（如AI Ethics、Cognitive Science等）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="ieai_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-    )
-
-
-class FARIMessage(Base):
-    """FARI - AI for the Common Good Institute（比利时AI公益研究所）新闻与出版物表"""
-    __tablename__ = "mp_fari_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（从详情页提取完整内容）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="BE", comment="地区（BE=Belgium 比利时）")
-    content_type = Column(String(100), comment="内容类型（News/Report/Journal Article/Conference Proceeding/Thesis）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    tags = Column(JSON, comment="主题标签（如Sustainable AI、Data & Robotics等）")
-    pdf_url = Column(String(500), comment="PDF下载链接（出版物）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="fari_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_content_type", "content_type"),
-    )
-
-
-class KIRAMessage(Base):
-    """KIRA Center（德国AI风险与影响研究中心）博客与报告表"""
-    __tablename__ = "mp_kira_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（从详情页提取完整内容）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="DE", comment="地区（DE=Germany 德国）")
-    content_type = Column(String(100), comment="内容类型（Blog/Report/Policy Analysis）")
-    language = Column(String(10), default="en", comment="语言（en/de）")
-    pdf_url = Column(String(500), comment="PDF报告下载链接")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="kira_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_content_type", "content_type"),
-    )
-
-
-class AISIMessage(Base):
-    """AI Security Institute（英国政府AI安全研究机构）研究与博客表"""
-    __tablename__ = "mp_aisi_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（从详情页提取完整内容）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="UK", comment="地区（UK=United Kingdom 英国）")
-    content_type = Column(String(100), comment="内容类型（Research/Blog/Technical Report）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    categories = Column(JSON, comment="分类标签（JSON数组，如Safeguards, Control, Alignment等）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="aisi_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_content_type", "content_type"),
-    )
-
-
-class FutureSocietyMessage(Base):
-    """The Future Society（跨大西洋AI治理智库）研究报告与政策简报表"""
-    __tablename__ = "mp_future_society_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（从详情页提取完整内容）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="GLOBAL", comment="地区（US+BE，设为GLOBAL）")
-    content_type = Column(String(100), comment="内容类型（Report/Policy Brief/Article等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    categories = Column(JSON, comment="分类标签（JSON数组，如AI Governance, EU AI Act等）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象，包括pdf_url等）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="future_society_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_content_type", "content_type"),
-    )
-
-
-class SAIFMessage(Base):
-    """Safe AI Forum (SAIF)（英国AI安全论坛）研究报告与政策指南表"""
-    __tablename__ = "mp_saif_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取slug）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（摘要或完整内容）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者（多个用逗号分隔）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 扩展字段
-    region = Column(String(50), default="UK", comment="地区（UK=United Kingdom 英国）")
-    content_type = Column(String(100), comment="内容类型（Research/Policy Guide/Primer/Report等）")
-    language = Column(String(10), default="en", comment="语言（en/zh=中英双语出版物）")
-    pdf_url = Column(String(500), comment="PDF下载链接")
-    updated_at = Column(DateTime, comment="文章更新时间")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="saif_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_content_type", "content_type"),
+        Index("idx_ai_tag", "ai_tag"),
     )
 
 
@@ -1295,6 +577,174 @@ class TechCrunchMessage(Base):
         Index("idx_external_id", "external_id"),
         Index("idx_category", "category"),
         Index("idx_region", "region"),
+    )
+
+
+class KoreaHeraldMessage(Base):
+    """Korea Herald科技新闻（韩国科技、半导体、AI领域新闻）消息表"""
+    __tablename__ = "mp_korea_herald_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取article ID）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容（从详情页提取）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者或信息提供方（The Korea Herald / Yonhap等）")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，多为'韩国'、'全球'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(100), comment="分类（Business/Technology/AI等）")
+    language = Column(String(10), default="en", comment="语言（en）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="korea_herald_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+    )
+
+
+class TechInAsiaMessage(Base):
+    """Tech in Asia科技新闻（东南亚科技创投新闻）消息表"""
+    __tablename__ = "mp_techinasia_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL slug提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容（从详情页提取完整文章）")
+    summary = Column(Text, comment="摘要（RSS description翻译为中文）")
+    provider = Column(String(500), comment="作者（多个用逗号分隔）")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，如'新加坡'、'印度尼西亚'、'全球'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(100), comment="分类（AI/Investments/Startups/Fintech等）")
+    language = Column(String(10), default='en', comment="语言（en）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="techinasia_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+    )
+
+
+class GuardianMessage(Base):
+    """The Guardian AI与科技新闻消息表"""
+    __tablename__ = "mp_guardian_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS guid）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容（RSS description或summary）")
+    summary = Column(Text, comment="摘要（中文翻译）")
+    provider = Column(String(500), comment="作者（多个用逗号分隔）")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，如'英国'、'全球'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(100), comment="分类（AI/Technology/Security等）")
+    language = Column(String(10), default='en', comment="语言（en）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="guardian_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+    )
+
+
+class BetaKitMessage(Base):
+    """BetaKit Canadian Tech News（加拿大科技新闻与创业生态）消息表"""
+    __tablename__ = "mp_betakit_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从RSS guid提取的post ID或URL slug）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容（从RSS content:encoded清理HTML后提取）")
+    summary = Column(Text, comment="摘要（中文翻译，来自RSS description）")
+    provider = Column(String(500), comment="作者（RSS dc:creator字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，主要为'加拿大'或'加拿大/省份'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(100), comment="分类（ai/machine-learning/funding/startups等）")
+    language = Column(String(10), default="en", comment="语言（en，可能包含法语）")
+    tags = Column(JSON, comment="RSS category标签列表（JSON数组）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="betakit_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
     )
 
 

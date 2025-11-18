@@ -576,24 +576,22 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 - 最终决策：改为独立表mp_partnership_ai_messages
 - 迁移记录：backend/scripts/migrate_partnership_ai_to_new_table.sql
 
-### 采集器实现规范（message_platform特有）
+### 采集器开发与维护（message_platform特有）
 
-**标准采集器流程**：
-1. 网页抓取（使用Playwright）
-2. 数据解析
-3. 去重检查（查询数据库）
-4. 数据入库
-5. 更新source.last_crawled_at
+**所有采集器相关任务必须委托给message-source-forge agent执行**：
+- 新建消息源采集器
+- 修复采集器错误
+- 调试采集问题
+- 优化采集性能
 
-**去重检查必做**：
-- 查询数据库检查唯一字段是否已存在
-- 使用try-except-continue模式，单条失败不影响批次
+**委托方式**：使用Task工具调用message-source-forge agent
 
-**错误处理**：
-- 网络请求必须设置timeout
-- 捕获Playwright的TimeoutError
-- 单个消息解析失败不应中断整体采集
-- 日志记录：新增数量、重复数量、失败数量
+**agent文档位置**：.claude/agents/message-source-forge.md
+
+**参照标准实现**：
+- 最佳实践：backend/sources/venturebeat/collector.py
+- 增量优化：backend/sources/nikkei_asia/collector.py
+- 反面教材：backend/sources/cigi/collector.py（禁止模仿）
 
 ### 生产环境失败案例教训（必须遵守）
 
@@ -813,35 +811,13 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 
 ### 消息源扩展指南（message_platform特有）
 
-**新增消息源标准流程**：
-1. 在backend/sources/new_source/目录创建采集器模块
-2. 实现采集器类（包含collect方法）
-3. 在CollectorService的COLLECTOR_REGISTRY注册
-4. 在数据库mp_message_sources表注册消息源配置
-5. 测试验证：采集、去重、入库、向量化
-6. PersonalAgent自动同步，无需修改代码
-
-**采集器必须实现**：
-- __init__方法接收source_id和config参数
-- collect方法返回List[Dict]格式的消息列表
-- 实现去重检查逻辑
-- 更新last_crawled_at时间戳
-- 调用FieldEnricherService为消息添加region和industry_tags字段
+**新增消息源由message-source-forge agent负责**，详见"采集器开发与维护"章节。
 
 **字段增强服务（FieldEnricherService）**：
 - 位置：backend/services/field_enricher_service.py
 - 功能：自动为消息添加region（地区）和industry_tags（行业标签）
-- 使用方式：
-  ```python
-  from backend.services import get_field_enricher
-
-  self.field_enricher = get_field_enricher()
-  enriched = await self.field_enricher.enrich_fields(title, content)
-  # enriched包含：{"region": "中国/广东省", "industry_tags": "人工智能,半导体"}
-  ```
-- 设计参考：类似translator.py（并发控制、重试机制、降级策略）
-- 地区格式：中文，斜杠分隔（如"中国/广东省/深圳市"、"全球"）
-- 行业标签：逗号分隔，最多3个（如"人工智能,半导体/芯片"）
+- 地区格式：中文斜杠分隔（如"中国/广东省"、"全球"）
+- 行业标签：逗号分隔，最多3个（如"人工智能,半导体"）
 - 参考实现：backend/sources/tonghuashun/collector.py
 
 ## 禁止事项（必须严格遵守）

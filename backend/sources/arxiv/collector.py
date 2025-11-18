@@ -303,7 +303,10 @@ class ArxivCollector:
                 doi=paper.doi,
                 journal_ref=paper.journal_ref,
                 comment=paper.comment,
-                updated_at=paper.updated
+                updated_at=paper.updated,
+                # arXiv论文全部归类为AI科研信息（不调用LLM打标）
+                industry_tags="人工智能",
+                ai_tag="AI科研信息"
             )
 
             try:
