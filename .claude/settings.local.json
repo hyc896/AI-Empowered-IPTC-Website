@@ -80,7 +80,8 @@
       "WebFetch(domain:www.arabnews.com)",
       "WebFetch(domain:betakit.com)",
       "WebFetch(domain:feeds.feedburner.com)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []
