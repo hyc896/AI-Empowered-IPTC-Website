@@ -81,7 +81,13 @@
       "WebFetch(domain:betakit.com)",
       "WebFetch(domain:feeds.feedburner.com)",
       "Bash(mkdir:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "WebFetch(domain:www.zaobao.com.sg)",
+      "WebFetch(domain:www.economist.com)",
+      "WebFetch(domain:www.stcn.com)",
+      "WebFetch(domain:www.businessinsider.com)",
+      "WebFetch(domain:www.wsj.com)",
+      "Bash(Get-Content d:/TechWork/message_platform/backend/sources/bloomberg/register.sql -Encoding UTF8)"
     ],
     "deny": [],
     "ask": []

@@ -353,9 +353,10 @@ class ArxivCollector:
             document_text = f"{message.title}\n\n{message.summary}"
             embedding = self.embedding_client.generate_embedding(document_text)
 
+            # 使用arxiv_id作为ChromaDB ID，确保与vector_sync一致（external_id映射到arxiv_id）
             self.chroma_storage.upsert(
                 collection_name=self.chroma_collection,
-                ids=[message.id],
+                ids=[message.arxiv_id],
                 documents=[document_text],
                 metadatas=[{
                     "arxiv_id": message.arxiv_id,

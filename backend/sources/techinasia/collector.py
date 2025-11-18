@@ -478,9 +478,10 @@ class TechInAsiaCollector:
                     if self.chroma_storage and self.chroma_storage.is_initialized() and self.embedding_client:
                         try:
                             embedding = await self.embedding_client.create_embedding(item['content'])
+                            # 使用external_id作为ChromaDB ID，确保与vector_sync一致
                             self.chroma_storage.upsert(
                                 collection_name=self.chroma_collection,
-                                ids=[message_id],
+                                ids=[external_id],
                                 documents=[item['content']],
                                 embeddings=[embedding],
                                 metadatas=[{

@@ -586,7 +586,8 @@ class BetaKitCollector:
 
                 embedding = self.embedding_client.generate_embedding(document_text)
 
-                chroma_id = item.get('url') or str(uuid.uuid4())
+                # 使用external_id作为ChromaDB ID，确保与vector_sync一致
+                chroma_id = item.get('external_id') or str(uuid.uuid4())
 
                 self.chroma_storage.upsert(
                     collection_name=self.chroma_collection,
