@@ -156,12 +156,17 @@ class LLMClient:
         try:
             temperature = kwargs.get("temperature", self.config.get("temperature", 0.7))
             tools = kwargs.get("tools", None)
+            max_tokens = kwargs.get("max_tokens", None)
 
             create_params = {
                 "model": self.model,
                 "messages": messages,
                 "temperature": temperature,
             }
+
+            # 添加max_tokens（如果提供）
+            if max_tokens:
+                create_params["max_tokens"] = max_tokens
 
             if tools:
                 create_params["tools"] = tools
@@ -189,12 +194,17 @@ class LLMClient:
         try:
             temperature = kwargs.get("temperature", self.config.get("temperature", 0.7))
             tools = kwargs.get("tools", None)
+            max_tokens = kwargs.get("max_tokens", None)
 
             create_params = {
                 "model": self.model,
                 "messages": messages,
                 "temperature": temperature,
             }
+
+            # 添加max_tokens（如果提供）
+            if max_tokens:
+                create_params["max_tokens"] = max_tokens
 
             if tools:
                 create_params["tools"] = tools

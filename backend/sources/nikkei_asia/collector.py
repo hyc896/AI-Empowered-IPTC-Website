@@ -12,11 +12,12 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import Browser, Page
 from sqlalchemy.exc import IntegrityError
 
 from backend.database.entities import NikkeiAsiaAIMessage
 from backend.database.connection import create_session
+from backend.collectors.base import PlaywrightCollectorBase
 
 try:
     from backend.storage import get_chromadb_storage
@@ -39,7 +40,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class NikkeiAsiaCollector:
+class NikkeiAsiaCollector(PlaywrightCollectorBase):
     """日经亚洲AI新闻采集器"""
 
     def __init__(self, config: Dict[str, Any]):
@@ -83,9 +84,10 @@ class NikkeiAsiaCollector:
                 f"修复建议: UPDATE mp_message_sources SET config = JSON_SET(config, '$.mysql_table', 'mp_nikkei_asia_ai_messages', '$.chroma_collection', 'nikkei_asia_ai') WHERE id = '{config['id']}';"
             )
 
-        self.config = config
-        self.source_id = config['id']
-        self.interval = nested_config.get('interval', 3600)
+        # 初始化基类（设置self.config, self.source_id, self.interval）
+        super().__init__(config)
+
+        # 采集器特有配置
         self.mysql_table = nested_config['mysql_table']
         self.chroma_collection = nested_config['chroma_collection']
         self.url = nested_config.get('url', 'https://asia.nikkei.com/Business/Technology/Artificial-intelligence')
@@ -109,12 +111,7 @@ class NikkeiAsiaCollector:
         else:
             self.field_enricher = None
             logger.warning("【Nikkei Asia】字段增强服务不可用")
-
-        self._playwright: Optional[Playwright] = None
-        self._browser: Optional[Browser] = None
-        self._running = False
-
-    async def initialize(self) -> bool:
+    async def _on_initialize(self) -> bool:
         """
         初始化采集器（Fail Fast：验证配置与代码一致性）
 
@@ -140,11 +137,6 @@ class NikkeiAsiaCollector:
 
         # 2. 验证Playwright依赖
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=['--disable-blink-features=AutomationControlled']
-            )
             logger.debug("【Nikkei Asia】Playwright启动成功")
         except Exception as e:
             errors.append(
@@ -175,28 +167,7 @@ class NikkeiAsiaCollector:
         logger.info(f"【Nikkei Asia】采集器初始化成功: {self.url}")
         return True
 
-    async def run(self) -> None:
-        """主循环：定时采集"""
-        if not await self.initialize():
-            logger.error("【Nikkei Asia】采集器初始化失败，退出")
-            return
 
-        self._running = True
-        logger.info(f"【Nikkei Asia】采集器已启动 (采集间隔={self.interval}秒)")
-
-        while self._running:
-            try:
-                await self._collect_once()
-            except Exception as e:
-                logger.error(f"【Nikkei Asia】采集失败: {e}", exc_info=True)
-
-            await asyncio.sleep(self.interval)
-
-    async def stop(self) -> None:
-        """停止采集器"""
-        self._running = False
-        await self._close_browser()
-        logger.info("【Nikkei Asia】采集器已停止")
 
     async def _collect_once(self) -> None:
         """
@@ -522,12 +493,3 @@ class NikkeiAsiaCollector:
         except Exception as e:
             logger.error(f"Failed to store to ChromaDB: {e}", exc_info=True)
 
-    async def _close_browser(self) -> None:
-        """关闭浏览器"""
-        try:
-            if self._browser:
-                await self._browser.close()
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception as e:
-            logger.error(f"Failed to close browser: {e}")

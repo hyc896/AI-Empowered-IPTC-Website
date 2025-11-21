@@ -11,11 +11,12 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import Browser, Page
 from sqlalchemy.exc import IntegrityError
 
 from backend.database.entities import GCGAIMessage
 from backend.database.connection import create_session
+from backend.collectors.base import PlaywrightCollectorBase
 
 try:
     from backend.storage import get_chromadb_storage
@@ -38,7 +39,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class GCGAICollector:
+class GCGAICollector(PlaywrightCollectorBase):
     """GCG AI治理研究中心采集器"""
 
     def __init__(self, config: Dict[str, Any]):
@@ -55,12 +56,11 @@ class GCGAICollector:
                 - region: 地区（ZA=South Africa/Africa）
                 - language: 语言（en）
         """
-        self.config = config
+        super().__init__(config)
         self.interval = config.get('interval', 604800)  # 默认7天
         self.mysql_table = config['mysql_table']
         self.chroma_collection = config['chroma_collection']
         self.url = config['config'].get('url', 'https://www.globalcenter.ai/research')
-        self.source_id = config.get('id', 'auto')
         self.region = config['config'].get('region', 'ZA')
         self.language = config['config'].get('language', 'en')
 
@@ -83,28 +83,14 @@ class GCGAICollector:
         else:
             self.field_enricher = None
             logger.warning("【GCG】FieldEnricher不可用，将跳过字段增强")
-
-        self._playwright: Optional[Playwright] = None
-        self._browser: Optional[Browser] = None
-        self._running = False
-
-    async def initialize(self) -> bool:
+    async def _on_initialize(self) -> bool:
         """
-        初始化采集器（启动Playwright浏览器）
+        子类初始化钩子：创建ChromaDB collection
 
         Returns:
             是否初始化成功
         """
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage'
-                ]
-            )
 
             if self.chroma_storage:
                 self.chroma_storage.create_collection(
@@ -117,32 +103,7 @@ class GCGAICollector:
             logger.error(f"【GCG】采集器初始化失败: {e}")
             return False
 
-    async def run(self) -> None:
-        """
-        主循环：定时采集
 
-        每隔interval秒执行一次采集
-        """
-        if not await self.initialize():
-            logger.error("【GCG】采集器初始化失败，退出")
-            return
-
-        self._running = True
-        logger.info(f"【GCG】采集器已启动 (采集间隔={self.interval}秒)")
-
-        while self._running:
-            try:
-                await self._collect_once()
-            except Exception as e:
-                logger.error(f"【GCG】采集失败: {e}")
-
-            await asyncio.sleep(self.interval)
-
-    async def stop(self) -> None:
-        """停止采集器"""
-        self._running = False
-        await self._close_browser()
-        logger.info("【GCG】采集器已停止")
 
     async def _collect_once(self) -> None:
         """
@@ -676,20 +637,19 @@ class GCGAICollector:
         except Exception as e:
             logger.error(f"Failed to store to MySQL: {e}")
 
-    async def _store_to_chroma(self, items: List[Dict[str, Any]], translated_summaries: List[str]) -> None:
+    async def _store_to_chroma(self, items: List[Dict[str, Any]]) -> None:
         """
         存储到ChromaDB
 
         Args:
-            items: 文章列表
-            translated_summaries: 预翻译的摘要列表
+            items: 文章列表（已包含预处理的summary）
         """
         if not self.chroma_storage or not self.embedding_client:
             return
 
         try:
             for idx, item in enumerate(items):
-                summary = translated_summaries[idx]
+                summary = item.get('summary', '')
                 document_text = f"{item['title']} {summary}"
 
                 embedding = self.embedding_client.generate_embedding(document_text)
@@ -787,12 +747,3 @@ class GCGAICollector:
         # 中文字符占比>30%判定为中文
         return (chinese_chars / total_chars) > 0.3
 
-    async def _close_browser(self) -> None:
-        """关闭浏览器"""
-        try:
-            if self._browser:
-                await self._browser.close()
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception as e:
-            logger.error(f"Failed to close browser: {e}")

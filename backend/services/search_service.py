@@ -357,6 +357,12 @@ class SearchService:
                         "table_name": table_name
                     }
 
+                    # Summary字段适配
+                    if hasattr(result, 'summary'):
+                        item["summary"] = result.summary
+                    else:
+                        item["summary"] = None
+
                     # URL字段适配
                     if hasattr(result, 'url'):
                         item["url"] = result.url
@@ -429,6 +435,12 @@ class SearchService:
                         "source_name": display_name,
                         "table_name": table_name
                     }
+
+                    # Summary字段适配
+                    if hasattr(result, 'summary'):
+                        item["summary"] = result.summary
+                    else:
+                        item["summary"] = None
 
                     # URL字段适配（兼容不同表的字段名）
                     if hasattr(result, 'url'):

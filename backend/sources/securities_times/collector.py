@@ -20,11 +20,12 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import Page
 from sqlalchemy.exc import IntegrityError
 
 from backend.database.entities import SecuritiesTimesMessage
 from backend.database.connection import create_session
+from backend.collectors.base import PlaywrightCollectorBase
 
 try:
     from backend.storage import get_chromadb_storage
@@ -47,7 +48,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class SecuritiesTimesCollector:
+class SecuritiesTimesCollector(PlaywrightCollectorBase):
     """证券时报财经新闻采集器"""
 
     # 栏目配置
@@ -66,26 +67,25 @@ class SecuritiesTimesCollector:
         Args:
             config: 配置字典，包含：
                 - interval: 采集间隔（秒）
-                - mysql_table: MySQL表名
-                - chroma_collection: ChromaDB collection名称
-                - categories: 要采集的栏目列表（默认全部）
-                - source_id: 消息源ID（关联message_sources表）
-                - region: 地区（CN=China 中国）
-                - language: 语言（zh）
+                - id: 消息源ID（关联message_sources表）
+                - config.mysql_table: MySQL表名
+                - config.chroma_collection: ChromaDB collection名称
+                - config.categories: 要采集的栏目列表（默认全部）
+                - config.region: 地区（CN=China 中国）
+                - config.language: 语言（zh）
         """
-        # 从配置顶层读取基础字段
-        self.source_id = config.get('id', 'auto')
+        # 调用父类初始化（必须在最前面）
+        super().__init__(config)
 
         # 从嵌套的config字段读取详细配置
-        self.config = config.get('config', {})
-        self.interval = self.config.get('interval', 86400)
-        self.mysql_table = self.config.get('mysql_table', 'mp_securities_times_messages')
-        self.chroma_collection = self.config.get('chroma_collection', 'securities_times')
-        self.region = self.config.get('region', 'CN')
-        self.language = self.config.get('language', 'zh')
+        nested_config = config.get('config', {})
+        self.mysql_table = nested_config.get('mysql_table', 'mp_securities_times_messages')
+        self.chroma_collection = nested_config.get('chroma_collection', 'securities_times')
+        self.region = nested_config.get('region', 'CN')
+        self.language = nested_config.get('language', 'zh')
 
         # 要采集的栏目（默认全部）
-        self.enabled_categories = self.config.get('categories', ['yw'])
+        self.enabled_categories = nested_config.get('categories', ['yw'])
 
         if _chroma_available:
             self.chroma_storage = get_chromadb_storage()
@@ -105,28 +105,14 @@ class SecuritiesTimesCollector:
             self.field_enricher = None
             logger.warning("【证券时报】FieldEnricher不可用，将跳过字段增强")
 
-        self._playwright: Optional[Playwright] = None
-        self._browser: Optional[Browser] = None
-        self._running = False
-
-    async def initialize(self) -> bool:
+    async def _on_initialize(self) -> bool:
         """
-        初始化采集器（启动Playwright浏览器）
+        子类初始化钩子：创建ChromaDB collection
 
         Returns:
             是否初始化成功
         """
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage'
-                ]
-            )
-
             if self.chroma_storage:
                 self.chroma_storage.create_collection(
                     collection_name=self.chroma_collection
@@ -137,34 +123,6 @@ class SecuritiesTimesCollector:
         except Exception as e:
             logger.error(f"【证券时报】采集器初始化失败: {e}")
             return False
-
-    async def run(self) -> None:
-        """
-        主循环：定时采集
-
-        每隔interval秒执行一次采集
-        """
-        if not await self.initialize():
-            logger.error("【证券时报】采集器初始化失败，退出")
-            return
-
-        self._running = True
-        logger.info(f"【证券时报】采集器已启动 (采集间隔={self.interval}秒)")
-
-        while self._running:
-            try:
-                await self._collect_once()
-            except Exception as e:
-                logger.error(f"【证券时报】采集失败: {e}")
-
-            await asyncio.sleep(self.interval)
-
-    async def stop(self) -> None:
-        """停止采集器"""
-        self._running = False
-        await self._close_browser()
-        logger.info("【证券时报】采集器已停止")
-
     async def _collect_once(self) -> None:
         """
         单次采集（流式处理架构）
@@ -847,12 +805,3 @@ class SecuritiesTimesCollector:
         except Exception as e:
             logger.error(f"【证券时报】Failed to store to ChromaDB: {e}")
 
-    async def _close_browser(self) -> None:
-        """关闭浏览器"""
-        try:
-            if self._browser:
-                await self._browser.close()
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception as e:
-            logger.error(f"【证券时报】Failed to close browser: {e}")

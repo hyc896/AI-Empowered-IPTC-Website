@@ -14,11 +14,12 @@ import feedparser
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import Browser, Page
 from sqlalchemy.exc import IntegrityError
 
 from backend.database.entities import TechInAsiaMessage
 from backend.database.connection import create_session
+from backend.collectors.base import PlaywrightCollectorBase
 try:
     from backend.storage import get_chromadb_storage
     _chroma_available = True
@@ -27,15 +28,20 @@ except ImportError:
 
 try:
     from backend.llm import get_embedding_client, get_translator
-    from backend.services import get_field_enricher
     _llm_available = True
 except ImportError:
     _llm_available = False
 
+try:
+    from backend.services import get_field_enricher
+    _field_enricher_available = True
+except ImportError:
+    _field_enricher_available = False
+
 logger = logging.getLogger(__name__)
 
 
-class TechInAsiaCollector:
+class TechInAsiaCollector(PlaywrightCollectorBase):
     """Tech in Asia东南亚科技创投新闻采集器"""
 
     RSS_FEED_URL = "https://feeds.feedburner.com/techinasia"
@@ -74,11 +80,9 @@ class TechInAsiaCollector:
                 - region: 地区（默认Southeast Asia）
                 - language: 语言（en）
         """
-        self.config = config
-        self.interval = config.get('interval', 3600)
+        super().__init__(config)
         self.mysql_table = config['mysql_table']
         self.chroma_collection = config['chroma_collection']
-        self.source_id = config.get('id', 'auto')
         self.region = config['config'].get('region', 'Southeast Asia')
         self.language = config['config'].get('language', 'en')
 
@@ -91,34 +95,25 @@ class TechInAsiaCollector:
         if _llm_available:
             self.embedding_client = get_embedding_client()
             self.translator = get_translator()
-            self.field_enricher = get_field_enricher()
         else:
             self.embedding_client = None
             self.translator = None
+            logger.warning("【TechInAsia】LLM服务不可用，将跳过向量化和翻译")
+
+        if _field_enricher_available:
+            self.field_enricher = get_field_enricher()
+        else:
             self.field_enricher = None
-            logger.warning("【TechInAsia】LLM服务不可用，将跳过向量化、翻译和字段增强")
+            logger.warning("【TechInAsia】FieldEnricher不可用，将跳过字段增强")
 
-        self._playwright: Optional[Playwright] = None
-        self._browser: Optional[Browser] = None
-        self._running = False
-
-    async def initialize(self) -> bool:
+    async def _on_initialize(self) -> bool:
         """
-        初始化采集器（启动Playwright浏览器）
+        子类初始化钩子：创建ChromaDB collection
 
         Returns:
             是否初始化成功
         """
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage'
-                ]
-            )
 
             if self.chroma_storage:
                 self.chroma_storage.create_collection(
@@ -130,44 +125,6 @@ class TechInAsiaCollector:
         except Exception as e:
             logger.error(f"【TechInAsia】采集器初始化失败: {e}")
             return False
-
-    async def run(self) -> None:
-        """
-        主循环：定时采集
-
-        每隔interval秒执行一次采集
-        """
-        if not await self.initialize():
-            logger.error("【TechInAsia】采集器初始化失败，退出")
-            return
-
-        self._running = True
-        logger.info(f"【TechInAsia】采集器已启动 (采集间隔={self.interval}秒)")
-
-        while self._running:
-            try:
-                await self._collect_once()
-            except Exception as e:
-                logger.error(f"【TechInAsia】采集失败: {e}")
-
-            await asyncio.sleep(self.interval)
-
-    async def stop(self) -> None:
-        """停止采集器"""
-        self._running = False
-        await self._close_browser()
-        logger.info("【TechInAsia】采集器已停止")
-
-    async def _close_browser(self) -> None:
-        """关闭浏览器"""
-        try:
-            if self._browser:
-                await self._browser.close()
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception as e:
-            logger.error(f"【TechInAsia】关闭浏览器失败: {e}")
-
     async def _collect_once(self) -> None:
         """
         单次采集
@@ -437,6 +394,10 @@ class TechInAsiaCollector:
         """
         批量存储到MySQL和ChromaDB
 
+        流程（VentureBeat模式）：
+        1. MySQL存储（仅DB操作）
+        2. ChromaDB存储（在DB session外，包含向量化）
+
         Args:
             items: 待存储的文章列表
         """
@@ -445,7 +406,9 @@ class TechInAsiaCollector:
 
         stored_count = 0
         duplicate_count = 0
+        stored_records = []  # 收集成功存储的记录信息
 
+        # ===== 阶段1: MySQL存储（仅DB操作） =====
         with create_session() as db:
             for item in items:
                 try:
@@ -475,27 +438,12 @@ class TechInAsiaCollector:
                     db.add(message)
                     db.commit()
 
-                    if self.chroma_storage and self.chroma_storage.is_initialized() and self.embedding_client:
-                        try:
-                            embedding = await self.embedding_client.create_embedding(item['content'])
-                            # 使用external_id作为ChromaDB ID，确保与vector_sync一致
-                            self.chroma_storage.upsert(
-                                collection_name=self.chroma_collection,
-                                ids=[external_id],
-                                documents=[item['content']],
-                                embeddings=[embedding],
-                                metadatas=[{
-                                    'id': message_id,
-                                    'source_id': self.source_id,
-                                    'title': item['title'][:500],
-                                    'summary': item.get('summary', '')[:1000],
-                                    'published_at': item.get('published_at').isoformat() if item.get('published_at') else '',
-                                    'url': item['url']
-                                }]
-                            )
-                        except Exception as e:
-                            logger.warning(f"向量化失败 {item['url']}: {e}")
-
+                    # 收集成功存储的记录信息（用于后续向量化）
+                    stored_records.append({
+                        'message_id': message_id,
+                        'external_id': external_id,
+                        'item': item
+                    })
                     stored_count += 1
 
                 except IntegrityError:
@@ -505,6 +453,30 @@ class TechInAsiaCollector:
                 except Exception as e:
                     db.rollback()
                     logger.error(f"存储失败 {item['url']}: {e}")
+
+        # ===== 阶段2: ChromaDB存储（在DB session外） =====
+        if self.chroma_storage and self.chroma_storage.is_initialized() and self.embedding_client:
+            for record in stored_records:
+                try:
+                    item = record['item']
+                    embedding = await self.embedding_client.create_embedding(item['content'])
+                    # 使用external_id作为ChromaDB ID，确保与vector_sync一致
+                    self.chroma_storage.upsert(
+                        collection_name=self.chroma_collection,
+                        ids=[record['external_id']],
+                        documents=[item['content']],
+                        embeddings=[embedding],
+                        metadatas=[{
+                            'id': record['message_id'],
+                            'source_id': self.source_id,
+                            'title': item['title'][:500],
+                            'summary': item.get('summary', '')[:1000],
+                            'published_at': item.get('published_at').isoformat() if item.get('published_at') else '',
+                            'url': item['url']
+                        }]
+                    )
+                except Exception as e:
+                    logger.warning(f"向量化失败 {item['url']}: {e}")
 
         if stored_count > 0:
             logger.info(f"【TechInAsia】成功存储 {stored_count} 条新记录")

@@ -218,7 +218,7 @@
 - _is_hallucination()方法检测多种幻觉模式
 - 检测到幻觉自动触发降级策略
 - 返回截断原文而非幻觉内容
-- 参考：backend/llm/translator.py第92-132行
+- 参考：backend/llm/translator.py的_is_hallucination方法
 
 ### SQL查询的细节陷阱
 
@@ -588,10 +588,26 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 
 **agent文档位置**：.claude/agents/message-source-forge.md
 
+**采集器架构标准（2025年强制要求）**：
+
+所有新采集器必须继承PlaywrightCollectorBase统一基类：
+- **位置**：backend/collectors/base/playwright_collector_base.py
+- **优势**：统一浏览器管理、浏览器池集成、生命周期托管、错误隔离
+- **子类职责**：仅实现`_collect_once()`业务逻辑，通过`self._browser`访问浏览器
+- **禁止事项**：禁止手动管理浏览器、Playwright实例、BrowserPool
+
+**浏览器池集成（自动化）**：
+- CollectorService启动时自动创建BrowserPool（配置：min=0, max=10, init=3）
+- 采集器初始化时自动注入浏览器池（通过set_browser_pool方法）
+- 浏览器从池中自动acquire/release，采用Least-Loaded分配策略
+- 详细配置和监控：参考browser_pool.py文档
+
 **参照标准实现**：
-- 最佳实践：backend/sources/venturebeat/collector.py
-- 增量优化：backend/sources/nikkei_asia/collector.py
-- 反面教材：backend/sources/cigi/collector.py（禁止模仿）
+- 最佳实践：backend/sources/venturebeat/collector.py（已迁移到新架构）
+- 增量优化：backend/sources/nikkei_asia/collector.py（智能停止策略）
+- 反面教材：backend/sources/cigi/collector.py（禁止模仿，会话内翻译）
+
+**详细架构说明**：参考项目规划.md"采集器架构"章节
 
 ### 生产环境失败案例教训（必须遵守）
 
@@ -690,19 +706,19 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 **当前项目的Golden Example（已验证）**：
 
 1. **异步编程最佳实践**：backend/sources/venturebeat/collector.py
-   - 预处理模式：_preprocess_items（第703-770行）在数据库会话外完成翻译和字段增强
-   - _store_to_mysql（第810-851行）仅做数据库写入，不调用任何异步外部服务
+   - 预处理模式：_preprocess_items方法在数据库会话外完成翻译和字段增强
+   - _store_to_mysql方法仅做数据库写入，不调用任何异步外部服务
    - 关注点分离：scrape → preprocess → store三阶段严格分离
    - 信任下游工具：全文传给translator，不提前截断
 
 2. **增量采集优化**：backend/sources/nikkei_asia/collector.py
-   - 智能停止：_scrape_articles（第244-289行）逐页检查，遇到latest_url立即停止后续页面
+   - 智能停止：_scrape_articles方法逐页检查，遇到latest_url立即停止后续页面
    - 页级+条级双重粒度控制
-   - Fail Fast配置验证：__init__方法检查所有必需字段（第44-83行）
+   - Fail Fast配置验证：__init__方法检查所有必需字段
 
 3. **反面教材**：backend/sources/cigi/collector.py（禁止模仿）
-   - _store_to_mysql（第489-529行）在数据库会话内调用await self._generate_summary()
-   - 违反异步编程铁律（第602-620行）：翻译耗时2-5秒，期间占用数据库连接
+   - _store_to_mysql方法在数据库会话内调用await self._generate_summary()
+   - 违反异步编程铁律：翻译耗时2-5秒，期间占用数据库连接
    - 多采集器并发时导致连接池耗尽
 
 **操作流程**：
@@ -834,6 +850,7 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 - 使用ls显示目录，而不是dir。牢记你在bash环境中。
 - 在Python代码的f-string或模板引擎中编写大模型提示词时，将花括号{和}用{{和}}转义，避免被解析为变量占位符。**此规则仅适用于提示词字面量**，不适用于：(1)Python字典定义 (2)文档中的API路径参数（应使用单花括号如{source_id}）
 - 不要在代码中加入emoji符号
+- **禁止用EOF、Python脚本或其他间接方式打印琐碎报告**：能直接文字输出解决的事情，直接输出文字。禁止用`cat <<EOF`、`python -c "print(...）"`等方式生成报告。这些工具仅用于实际的代码执行和系统操作，不是用来格式化输出给用户看的内容。
 
 ## 常见问题排查（message_platform特有）
 

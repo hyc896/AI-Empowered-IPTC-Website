@@ -84,19 +84,6 @@
       </el-card>
     </div>
 
-    <!-- 热力图图例 -->
-    <div class="legend-panel">
-      <el-card class="legend-card">
-        <div class="legend-title">新闻密度</div>
-        <div class="legend-gradient"></div>
-        <div class="legend-labels">
-          <span>少</span>
-          <span>中</span>
-          <span>多</span>
-        </div>
-      </el-card>
-    </div>
-
     <!-- ECharts地图容器 -->
     <v-chart
       v-if="mapReady"
@@ -122,6 +109,7 @@
       :title="`${selectedCountry} - ${selectedCountryNewsCount}条新闻`"
       direction="rtl"
       size="500px"
+      @close="handleDrawerClose"
     >
       <div v-if="selectedCountryMessages.length > 0" class="message-list">
         <el-card
@@ -134,7 +122,7 @@
           <h4 class="message-title">{{ message.title }}</h4>
           <div class="message-content">
             <p class="content-text">
-              {{ message.summary || truncateText(message.content, 150) }}
+              {{ truncateText(message.summary || message.content, 150) }}
             </p>
           </div>
           <div class="message-meta">
@@ -213,13 +201,11 @@ const mapData = ref<Array<{ name: string; value: number }>>([])
 
 const sources = computed<MessageSource[]>(() => messageStore.activeSources)
 
-// 颜色映射函数（与3D地图保持一致）
-const getHeatmapColor = (count: number): string => {
-  if (count === 0 || count === undefined) return 'rgba(30, 58, 138, 0.3)'
-  if (count < 100) return 'rgba(59, 130, 246, 0.5)'
-  if (count < 200) return 'rgba(251, 191, 36, 0.6)'
-  return 'rgba(239, 68, 68, 0.7)'
-}
+// 计算地图数据中的最大消息数量（用于对数映射）
+const maxCount = computed(() => {
+  if (mapData.value.length === 0) return 1
+  return Math.max(...mapData.value.map(item => item.value || 0))
+})
 
 const chartOption = computed(() => ({
   title: {
@@ -255,12 +241,14 @@ const chartOption = computed(() => ({
   visualMap: {
     type: 'piecewise',
     min: 0,
-    max: 500,
+    max: maxCount.value,
     text: ['高', '低'],
     pieces: [
-      { min: 200, label: '200+', color: 'rgba(239, 68, 68, 0.7)' },
-      { min: 100, max: 199, label: '100-199', color: 'rgba(251, 191, 36, 0.6)' },
-      { min: 1, max: 99, label: '1-99', color: 'rgba(59, 130, 246, 0.5)' },
+      { min: 200, label: '200+', color: 'rgba(239, 68, 68, 0.8)' },
+      { min: 100, max: 199, label: '100-199', color: 'rgba(251, 146, 60, 0.75)' },
+      { min: 50, max: 99, label: '50-99', color: 'rgba(251, 191, 36, 0.7)' },
+      { min: 10, max: 49, label: '10-49', color: 'rgba(96, 165, 250, 0.65)' },
+      { min: 1, max: 9, label: '1-9', color: 'rgba(37, 99, 235, 0.55)' },
       { value: 0, label: '无数据', color: 'rgba(30, 58, 138, 0.3)' }
     ],
     textStyle: {
@@ -314,10 +302,7 @@ const chartOption = computed(() => ({
       itemStyle: {
         borderColor: 'rgba(0, 212, 255, 0.3)',
         borderWidth: 0.5,
-        areaColor: (params: any) => {
-          const value = params.data?.value || 0
-          return getHeatmapColor(value)
-        }
+        areaColor: 'rgba(30, 58, 138, 0.3)'
       },
       label: {
         show: false
@@ -476,6 +461,18 @@ const handleMouseOut = (params: any) => {
   }
 }
 
+// 抽屉关闭时清除地图选中状态
+const handleDrawerClose = () => {
+  if (chartRef.value && selectedCountryGeoName.value) {
+    chartRef.value.dispatchAction({
+      type: 'unselect',
+      seriesIndex: 0,
+      name: selectedCountryGeoName.value
+    })
+    selectedCountryGeoName.value = ''
+  }
+}
+
 const handleFilterChange = async () => {
   // 清除选中状态
   selectedCountryGeoName.value = ''
@@ -608,47 +605,6 @@ onMounted(async () => {
             margin-left: 5px;
           }
         }
-      }
-    }
-  }
-
-  .legend-panel {
-    position: absolute;
-    bottom: 20px;
-    right: 20px;
-    z-index: 100;
-
-    .legend-card {
-      background: rgba(255, 255, 255, 0.05);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-
-      :deep(.el-card__body) {
-        background: transparent;
-        padding: 15px 20px;
-      }
-
-      .legend-title {
-        font-size: 11px;
-        color: rgba(255, 255, 255, 0.6);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 10px;
-      }
-
-      .legend-gradient {
-        width: 150px;
-        height: 20px;
-        background: linear-gradient(to right, #1e3a8a, #3b82f6, #fbbf24, #ef4444);
-        border-radius: 4px;
-      }
-
-      .legend-labels {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10px;
-        color: rgba(255, 255, 255, 0.7);
-        margin-top: 5px;
       }
     }
   }

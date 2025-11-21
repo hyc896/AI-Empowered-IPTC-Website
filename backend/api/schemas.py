@@ -65,6 +65,7 @@ class MessageResponse(BaseModel):
     id: str = Field(..., description="消息ID")
     title: str = Field(..., description="消息标题")
     content: str = Field(..., description="消息内容")
+    summary: Optional[str] = Field(None, description="消息摘要")
     url: Optional[str] = Field(None, description="消息链接")
     published_at: Optional[datetime] = Field(None, description="发布时间")
     provider: Optional[str] = Field(None, description="消息提供方")
@@ -226,6 +227,7 @@ class AIDailyReportResponse(BaseModel):
     """AI日报响应模型"""
     id: str = Field(..., description="报告ID")
     report_date: str = Field(..., description="报告日期（YYYY-MM-DD）")
+    report_type: str = Field(default='comprehensive', description="报告类型（comprehensive/governance/research/industry）")
     content: str = Field(..., description="报告内容（Markdown格式）")
     statistics: Dict[str, Any] = Field(..., description="统计数据")
     governance_count: int = Field(..., description="AI治理信息数量")

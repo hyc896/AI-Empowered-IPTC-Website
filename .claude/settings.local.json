@@ -87,7 +87,18 @@
       "WebFetch(domain:www.stcn.com)",
       "WebFetch(domain:www.businessinsider.com)",
       "WebFetch(domain:www.wsj.com)",
-      "Bash(Get-Content d:/TechWork/message_platform/backend/sources/bloomberg/register.sql -Encoding UTF8)"
+      "Bash(Get-Content d:/TechWork/message_platform/backend/sources/bloomberg/register.sql -Encoding UTF8)",
+      "WebFetch(domain:www.thehindu.com)",
+      "Bash(while read f)",
+      "Bash(do if grep -A 50 \"with create_session\" \"$f\")",
+      "Bash(then echo \"$f\")",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(for collector in techcrunch nikkei_asia kr36 tonghuashun partnership_ai gcg_ai govai korea_herald securities_times techinasia)",
+      "Bash(do python -m py_compile backend/sources/$collector/collector.py)",
+      "Bash(do echo \"=== Checking $collector ===\")",
+      "Bash(echo:*)",
+      "Bash(collector_new.py)"
     ],
     "deny": [],
     "ask": []

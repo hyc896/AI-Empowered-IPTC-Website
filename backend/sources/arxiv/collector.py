@@ -251,77 +251,77 @@ class ArxivCollector:
         """
         保存单篇论文到MySQL和ChromaDB
 
+        流程（VentureBeat模式 - 预处理与存储分离）：
+        1. 数据提取（纯计算，无IO）
+        2. 预处理：翻译摘要（在DB session外）
+        3. DB去重检查（快速SELECT）
+        4. DB INSERT（仅DB操作）
+        5. 向量存储（在DB session外）
+
         Args:
             paper: arxiv.Result对象
 
         Returns:
             是否保存成功
         """
-        with create_session() as db:
-            # 提取 arxiv_id
-            arxiv_id = paper.entry_id.split('/')[-1]
+        # ===== 阶段1：数据提取（无IO操作） =====
+        arxiv_id = paper.entry_id.split('/')[-1]
+        authors_list = [author.name for author in paper.authors]
+        provider = ', '.join(authors_list) if authors_list else "Anonymous"
+        abstract = paper.summary.strip()
+        url = paper.entry_id
 
-            # 检查是否已存在（去重）
+        # ===== 阶段2：预处理 - 翻译摘要（在DB session外） =====
+        if len(abstract) < self.summary_threshold:
+            summary = abstract
+        else:
+            summary = await self._generate_summary(abstract)
+
+        # ===== 阶段3：去重检查（快速SELECT） =====
+        with create_session() as db:
             existing = db.query(ArxivMessage).filter(
                 ArxivMessage.arxiv_id == arxiv_id
             ).first()
 
             if existing:
-                return False  # 跳过重复
+                return False
 
-            # 处理作者
-            authors_list = [author.name for author in paper.authors]
-            if authors_list:
-                provider = ', '.join(authors_list)
-            else:
-                provider = "Anonymous"
+        # ===== 阶段4：创建消息对象（无IO） =====
+        message = ArxivMessage(
+            id=str(uuid.uuid4()),
+            source_id=self.source_id,
+            arxiv_id=arxiv_id,
+            title=paper.title.strip(),
+            content=abstract,
+            summary=summary,
+            provider=provider,
+            published_at=paper.published,
+            url=url,
+            primary_category=paper.primary_category,
+            categories=paper.categories,
+            doi=paper.doi,
+            journal_ref=paper.journal_ref,
+            comment=paper.comment,
+            updated_at=paper.updated,
+            industry_tags="人工智能",
+            ai_tag="AI科研信息"
+        )
 
-            # 处理摘要
-            abstract = paper.summary.strip()
-            if len(abstract) < self.summary_threshold:
-                summary = abstract
-            else:
-                # 调用LLM生成简短摘要
-                summary = await self._generate_summary(abstract)
-
-            # 生成URL
-            url = paper.entry_id  # https://arxiv.org/abs/xxx
-
-            # 创建消息记录
-            message = ArxivMessage(
-                id=str(uuid.uuid4()),
-                source_id=self.source_id,
-                arxiv_id=arxiv_id,
-                title=paper.title.strip(),
-                content=abstract,
-                summary=summary,
-                provider=provider,
-                published_at=paper.published,
-                url=url,
-                primary_category=paper.primary_category,
-                categories=paper.categories,
-                doi=paper.doi,
-                journal_ref=paper.journal_ref,
-                comment=paper.comment,
-                updated_at=paper.updated,
-                # arXiv论文全部归类为AI科研信息（不调用LLM打标）
-                industry_tags="人工智能",
-                ai_tag="AI科研信息"
-            )
-
+        # ===== 阶段5：DB INSERT（仅DB操作，无async外部调用） =====
+        with create_session() as db:
             try:
                 db.add(message)
                 db.commit()
-
-                # 向量化并存入ChromaDB
-                await self._vectorize_and_store(message)
-
-                logger.info(f"【arXiv】保存论文: {message.title[:50]}...")
-                return True
-
+                logger.debug(f"【arXiv】MySQL插入成功: {message.title[:50]}...")
             except IntegrityError:
                 db.rollback()
                 return False
+
+        # ===== 阶段6：向量存储（在DB session外） =====
+        await self._vectorize_and_store(message)
+
+        logger.info(f"【arXiv】保存论文: {message.title[:50]}...")
+        return True
 
     async def _generate_summary(self, abstract: str) -> str:
         """

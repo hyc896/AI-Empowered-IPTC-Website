@@ -107,6 +107,16 @@ class MessageSource(Base):
     betakit_messages = relationship("BetaKitMessage", back_populates="source", cascade="all, delete-orphan")
     securities_times_messages = relationship("SecuritiesTimesMessage", back_populates="source", cascade="all, delete-orphan")
     bloomberg_messages = relationship("BloombergMessage", back_populates="source", cascade="all, delete-orphan")
+    wsj_messages = relationship("WSJMessage", back_populates="source", cascade="all, delete-orphan")
+    axios_messages = relationship("AxiosMessage", back_populates="source", cascade="all, delete-orphan")
+    wired_messages = relationship("WiredMessage", back_populates="source", cascade="all, delete-orphan")
+    cnbc_messages = relationship("CNBCMessage", back_populates="source", cascade="all, delete-orphan")
+    financial_times_messages = relationship("FinancialTimesMessage", back_populates="source", cascade="all, delete-orphan")
+    ars_technica_messages = relationship("ArsTechnicaMessage", back_populates="source", cascade="all, delete-orphan")
+    der_spiegel_messages = relationship("DerSpiegelMessage", back_populates="source", cascade="all, delete-orphan")
+    le_monde_messages = relationship("LeMondeMessage", back_populates="source", cascade="all, delete-orphan")
+    times_of_india_messages = relationship("TimesOfIndiaMessage", back_populates="source", cascade="all, delete-orphan")
+    the_hindu_messages = relationship("TheHinduMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
@@ -755,7 +765,8 @@ class AIDailyReport(Base):
     __tablename__ = "mp_ai_daily_reports"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), comment="UUID主键")
-    report_date = Column(Date, unique=True, nullable=False, index=True, comment="报告日期（YYYY-MM-DD）")
+    report_date = Column(Date, nullable=False, index=True, comment="报告日期（YYYY-MM-DD）")
+    report_type = Column(String(20), nullable=False, default='comprehensive', comment="报告类型（comprehensive/governance/research/industry）")
     content = Column(Text, nullable=False, comment="日报Markdown内容")
     statistics = Column(JSON, nullable=False, comment="统计数据（消息数量、地区分布等）")
     governance_count = Column(Integer, nullable=False, default=0, comment="AI治理信息数量")
@@ -768,7 +779,7 @@ class AIDailyReport(Base):
     model_version = Column(String(50), nullable=False, comment="LLM模型版本")
 
     __table_args__ = (
-        Index("idx_report_date", "report_date"),
+        Index("idx_report_date_type", "report_date", "report_type", unique=True),
         Index("idx_generated_at", "generated_at"),
         Index("idx_status", "generation_status"),
     )
@@ -796,7 +807,7 @@ class SecuritiesTimesMessage(Base):
     ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
 
     # 扩展字段
-    category = Column(String(100), comment="文章分类（要闻/快讯/股市/公司等）")
+    category = Column(String(500), comment="文章分类（要闻/快讯/股市/公司等）")
     language = Column(String(10), default="zh", comment="语言（zh=中文）")
     tags = Column(JSON, comment="标签列表（JSON数组，从页面提取）")
     extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
@@ -840,7 +851,7 @@ class BloombergMessage(Base):
     ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
 
     # 扩展字段
-    category = Column(String(100), comment="文章分类（RSS的category字段）")
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
     language = Column(String(10), default="en", comment="语言（en=英文）")
     media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
     tags = Column(JSON, comment="标签列表（JSON数组）")
@@ -848,6 +859,455 @@ class BloombergMessage(Base):
 
     # 关系
     source = relationship("MessageSource", back_populates="bloomberg_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class WSJMessage(Base):
+    """Wall Street Journal Technology科技新闻消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_wsj_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，如'美国'、'全球'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="en", comment="语言（en=英文）")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="wsj_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class AxiosMessage(Base):
+    """Axios新闻消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_axios_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，如'美国'、'全球'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="en", comment="语言（en=英文）")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="axios_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+class WiredMessage(Base):
+    """Wired科技新闻消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_wired_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，默认'美国'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="en", comment="语言（en=英文）")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="wired_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class CNBCMessage(Base):
+    """CNBC Technology消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_cnbc_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，默认'美国'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="en", comment="语言")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="cnbc_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class FinancialTimesMessage(Base):
+    """Financial Times Technology消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_financial_times_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，默认'英国'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="en", comment="语言")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="financial_times_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class ArsTechnicaMessage(Base):
+    """Ars Technica消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_ars_technica_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，默认'美国'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="en", comment="语言")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="ars_technica_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class DerSpiegelMessage(Base):
+    """Der Spiegel Netzwelt消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_der_spiegel_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，默认'德国'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="de", comment="语言")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="der_spiegel_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class LeMondeMessage(Base):
+    """Le Monde Pixels消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_le_monde_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，默认'法国'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="fr", comment="语言")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="le_monde_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class TimesOfIndiaMessage(Base):
+    """Times of India Tech消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_times_of_india_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，默认'印度'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="en", comment="语言")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="times_of_india_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class TheHinduMessage(Base):
+    """The Hindu Business消息表（基于RSS Feed采集）"""
+    __tablename__ = "mp_the_hindu_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（RSS的guid字段）")
+    title = Column(String(500), nullable=False, comment="标题（RSS的title字段）")
+    content = Column(Text, nullable=False, comment="正文内容（RSS的description字段）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者（RSS的author字段）")
+    published_at = Column(DateTime, comment="发布时间（RSS的pubDate字段）")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（RSS的link字段，用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，从文章内容提取，默认'印度'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类（RSS的category字段）")
+    language = Column(String(10), default="en", comment="语言")
+    media_content = Column(String(500), comment="媒体内容URL（RSS的media:content字段）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="the_hindu_messages")
 
     # 索引（强制要求）
     __table_args__ = (

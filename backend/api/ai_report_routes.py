@@ -26,31 +26,46 @@ router = APIRouter(
 
 
 @router.get("/latest", response_model=AIDailyReportResponse)
-async def get_latest_report():
+async def get_latest_report(
+    report_type: str = Query('comprehensive', description="报告类型（comprehensive/governance/research/industry）")
+):
     """
     获取最新的AI日报
 
-    返回最近生成的一份日报
+    Args:
+        report_type: 报告类型，默认为comprehensive
+
+    Returns:
+        最近生成的指定类型日报
     """
     try:
         with create_session() as db:
-            # 查询最新的已完成报告
+            # 查询最新的已完成报告（指定类型）
             report = db.query(AIDailyReport).filter(
-                AIDailyReport.generation_status == 'completed'
+                AIDailyReport.generation_status == 'completed',
+                AIDailyReport.report_type == report_type
             ).order_by(
                 AIDailyReport.report_date.desc()
             ).first()
 
             if not report:
+                report_type_names = {
+                    'comprehensive': '综合日报',
+                    'governance': '治理日报',
+                    'research': '科研日报',
+                    'industry': '产业日报'
+                }
+                report_name = report_type_names.get(report_type, report_type)
                 raise HTTPException(
                     status_code=404,
-                    detail="暂无可用的AI日报"
+                    detail=f"暂无可用的{report_name}"
                 )
 
             # 转换为响应格式
             return AIDailyReportResponse(
                 id=report.id,
                 report_date=report.report_date.strftime('%Y-%m-%d'),
+                report_type=report.report_type,
                 content=report.content,
                 statistics=report.statistics,
                 governance_count=report.governance_count,
@@ -74,15 +89,19 @@ async def get_latest_report():
 
 
 @router.get("/{report_date}", response_model=AIDailyReportResponse)
-async def get_report_by_date(report_date: str):
+async def get_report_by_date(
+    report_date: str,
+    report_type: str = Query('comprehensive', description="报告类型（comprehensive/governance/research/industry）")
+):
     """
     根据日期获取AI日报
 
     Args:
         report_date: 报告日期（YYYY-MM-DD格式）
+        report_type: 报告类型，默认为comprehensive
 
     Returns:
-        指定日期的AI日报
+        指定日期和类型的AI日报
     """
     try:
         # 解析日期
@@ -96,18 +115,27 @@ async def get_report_by_date(report_date: str):
 
         with create_session() as db:
             report = db.query(AIDailyReport).filter(
-                AIDailyReport.report_date == parsed_date
+                AIDailyReport.report_date == parsed_date,
+                AIDailyReport.report_type == report_type
             ).first()
 
             if not report:
+                report_type_names = {
+                    'comprehensive': '综合日报',
+                    'governance': '治理日报',
+                    'research': '科研日报',
+                    'industry': '产业日报'
+                }
+                report_name = report_type_names.get(report_type, report_type)
                 raise HTTPException(
                     status_code=404,
-                    detail=f"{report_date}的AI日报不存在"
+                    detail=f"{report_date}的{report_name}不存在"
                 )
 
             return AIDailyReportResponse(
                 id=report.id,
                 report_date=report.report_date.strftime('%Y-%m-%d'),
+                report_type=report.report_type,
                 content=report.content,
                 statistics=report.statistics,
                 governance_count=report.governance_count,
@@ -134,12 +162,13 @@ async def get_report_by_date(report_date: str):
 async def list_reports(
     limit: int = Query(10, ge=1, le=100, description="返回数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    status: Optional[str] = Query(None, description="生成状态过滤（pending/completed/failed）")
+    status: Optional[str] = Query(None, description="生成状态过滤（pending/completed/failed）"),
+    report_type: Optional[str] = Query(None, description="报告类型过滤（comprehensive/governance/research/industry）")
 ):
     """
     获取AI日报列表
 
-    支持分页和状态过滤
+    支持分页、状态过滤和类型过滤
     """
     try:
         with create_session() as db:
@@ -155,6 +184,15 @@ async def list_reports(
                     )
                 query = query.filter(AIDailyReport.generation_status == status)
 
+            # 类型过滤
+            if report_type:
+                if report_type not in ['comprehensive', 'governance', 'research', 'industry']:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="类型参数错误，应为comprehensive/governance/research/industry之一"
+                    )
+                query = query.filter(AIDailyReport.report_type == report_type)
+
             # 获取总数
             total = query.count()
 
@@ -168,6 +206,7 @@ async def list_reports(
                 AIDailyReportResponse(
                     id=report.id,
                     report_date=report.report_date.strftime('%Y-%m-%d'),
+                    report_type=report.report_type,
                     content=report.content,
                     statistics=report.statistics,
                     governance_count=report.governance_count,
@@ -200,9 +239,17 @@ async def list_reports(
 
 
 @router.post("/generate", response_model=dict)
-async def trigger_report_generation(background_tasks: BackgroundTasks):
+async def trigger_report_generation(
+    background_tasks: BackgroundTasks,
+    report_type: str = Query('comprehensive', description="报告类型（comprehensive/governance/research/industry）"),
+    report_date: Optional[str] = Query(None, description="报告日期（YYYY-MM-DD格式），默认为今天")
+):
     """
     手动触发AI日报生成
+
+    Args:
+        report_type: 报告类型，默认为comprehensive
+        report_date: 报告日期，默认为今天
 
     用于测试或补充生成，任务在后台异步执行
 
@@ -210,15 +257,56 @@ async def trigger_report_generation(background_tasks: BackgroundTasks):
         任务提交确认信息
     """
     try:
-        scheduler = get_scheduler_service()
+        # 验证report_type
+        if report_type not in ['comprehensive', 'governance', 'research', 'industry']:
+            raise HTTPException(
+                status_code=400,
+                detail="类型参数错误，应为comprehensive/governance/research/industry之一"
+            )
+
+        # 解析日期
+        target_date = None
+        if report_date:
+            try:
+                target_date = datetime.strptime(report_date, '%Y-%m-%d').date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="日期格式错误，应为YYYY-MM-DD格式"
+                )
+
+        from ..services.ai_report_generator import get_report_generator
+
+        report_type_names = {
+            'comprehensive': '综合日报',
+            'governance': '治理日报',
+            'research': '科研日报',
+            'industry': '产业日报'
+        }
+        report_name = report_type_names.get(report_type, report_type)
+
+        # 根据类型调用对应的生成方法
+        async def generate_task():
+            generator = get_report_generator()
+            if report_type == 'governance':
+                await generator.generate_governance_report(target_date)
+            elif report_type == 'research':
+                await generator.generate_research_report(target_date)
+            elif report_type == 'industry':
+                await generator.generate_industry_report(target_date)
+            else:  # comprehensive
+                await generator.generate_daily_report(target_date, 'comprehensive')
 
         # 在后台任务中执行生成
-        background_tasks.add_task(scheduler.trigger_daily_report_now)
+        background_tasks.add_task(generate_task)
 
-        logger.info("【AI日报】手动生成任务已提交")
+        date_info = f"（{report_date}）" if report_date else "（今天）"
+        logger.info(f"【AI日报】手动生成任务已提交：{report_name}{date_info}")
 
         return {
-            "message": "AI日报生成任务已提交，正在后台执行",
+            "message": f"{report_name}生成任务已提交{date_info}，正在后台执行",
+            "report_type": report_type,
+            "report_date": report_date or datetime.now().date().isoformat(),
             "timestamp": datetime.now().isoformat()
         }
 

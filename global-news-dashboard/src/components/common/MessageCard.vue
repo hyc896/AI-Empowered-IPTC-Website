@@ -10,7 +10,7 @@
       </div>
     </div>
     <div class="message-body">
-      <p v-if="message.summary" class="message-summary">{{ message.summary }}</p>
+      <p v-if="message.summary" class="message-summary">{{ truncateText(message.summary, 150) }}</p>
       <p v-else class="message-content">{{ truncateText(message.content, 150) }}</p>
     </div>
     <div v-if="message.url" class="message-footer">

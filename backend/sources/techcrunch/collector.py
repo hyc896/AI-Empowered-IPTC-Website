@@ -12,9 +12,10 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import Page
 from sqlalchemy.exc import IntegrityError
 
+from backend.collectors.base import PlaywrightCollectorBase
 from backend.database.entities import TechCrunchMessage
 from backend.database.connection import create_session
 try:
@@ -33,7 +34,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class TechCrunchCollector:
+class TechCrunchCollector(PlaywrightCollectorBase):
     """TechCrunch多分类科技新闻采集器"""
 
     CATEGORIES = {
@@ -61,11 +62,10 @@ class TechCrunchCollector:
                 - region: 地区（默认GLOBAL）
                 - language: 语言（en）
         """
-        self.config = config
-        self.interval = config.get('interval', 7200)
+        super().__init__(config)
+
         self.mysql_table = config['mysql_table']
         self.chroma_collection = config['chroma_collection']
-        self.source_id = config.get('id', 'auto')
         self.region = config['config'].get('region', 'GLOBAL')
         self.language = config['config'].get('language', 'en')
 
@@ -85,28 +85,14 @@ class TechCrunchCollector:
             self.field_enricher = None
             logger.warning("【TechCrunch】LLM服务不可用，将跳过向量化、翻译和字段增强")
 
-        self._playwright: Optional[Playwright] = None
-        self._browser: Optional[Browser] = None
-        self._running = False
-
-    async def initialize(self) -> bool:
+    async def _on_initialize(self) -> bool:
         """
-        初始化采集器（启动Playwright浏览器）
+        初始化钩子（创建ChromaDB collection）
 
         Returns:
             是否初始化成功
         """
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage'
-                ]
-            )
-
             if self.chroma_storage:
                 self.chroma_storage.create_collection(
                     collection_name=self.chroma_collection
@@ -117,43 +103,6 @@ class TechCrunchCollector:
         except Exception as e:
             logger.error(f"【TechCrunch】采集器初始化失败: {e}")
             return False
-
-    async def run(self) -> None:
-        """
-        主循环：定时采集
-
-        每隔interval秒执行一次采集
-        """
-        if not await self.initialize():
-            logger.error("【TechCrunch】采集器初始化失败，退出")
-            return
-
-        self._running = True
-        logger.info(f"【TechCrunch】采集器已启动 (采集间隔={self.interval}秒)")
-
-        while self._running:
-            try:
-                await self._collect_once()
-            except Exception as e:
-                logger.error(f"【TechCrunch】采集失败: {e}")
-
-            await asyncio.sleep(self.interval)
-
-    async def stop(self) -> None:
-        """停止采集器"""
-        self._running = False
-        await self._close_browser()
-        logger.info("【TechCrunch】采集器已停止")
-
-    async def _close_browser(self) -> None:
-        """关闭浏览器"""
-        try:
-            if self._browser:
-                await self._browser.close()
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception as e:
-            logger.error(f"【TechCrunch】关闭浏览器失败: {e}")
 
     async def _collect_once(self) -> None:
         """

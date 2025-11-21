@@ -9,7 +9,7 @@ llm:
     base_url: "${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}"
     api_key: "${LLM_API_KEY:sk-da598e8ebde449dfbb3d4578854b0502}"
     model: "${LLM_MODEL:qwen3-max}"
-    timeout: 60
+    timeout: 210
     temperature: 0.7
 
   # Embedding模型配置
@@ -25,7 +25,7 @@ llm:
     base_url: "${FAST_LLM_BASE_URL:https://api.siliconflow.cn/v1}"
     api_key: "${FAST_LLM_API_KEY:sk-tpnnprwtipwwbtojamuccbosjlezyhlqhvplyxnqmqyfiqyg}"
     model: "${FAST_LLM_MODEL:zai-org/GLM-4.5-Air}"
-    timeout: 30
+    timeout: 60
     temperature: 0.7
 
 # ========================
@@ -203,3 +203,25 @@ file_parsing:
     max_file_size_mb: 100  # 最大文件大小（MB）
     max_pages: 200         # 最大页数
     token_limit: 150000    # Token总限制
+
+# ========================
+# Browser Pool Configuration
+# ========================
+browser_pool:
+  enabled: true
+  capacity:
+    min_size: 0      # 最小浏览器数（空闲时自动缩容到0）
+    max_size: 10     # 最大浏览器数
+    init_size: 3     # 初始化时创建的浏览器数
+  lifecycle:
+    idle_timeout: 300         # 空闲超时（秒），5分钟无使用自动关闭
+    max_lifetime: 3600        # 最大生命周期（秒），1小时后强制替换
+    max_pages_per_browser: 50 # 每个浏览器最大页面数
+  launch:
+    headless: true   # 无头模式
+    args:
+      - --no-sandbox
+      - --disable-dev-shm-usage
+      - --disable-blink-features=AutomationControlled
+  health_check:
+    interval: 60     # 健康检查间隔（秒）

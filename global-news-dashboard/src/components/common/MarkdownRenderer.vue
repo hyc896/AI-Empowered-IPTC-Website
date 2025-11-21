@@ -31,21 +31,22 @@ const renderedContent = computed(() => {
   }
 
   h1 {
-    font-size: 24px;
+    font-size: 28px;
     border-bottom: 1px solid var(--border-base);
     padding-bottom: 8px;
   }
 
   h2 {
-    font-size: 20px;
+    font-size: 24px;
   }
 
   h3 {
-    font-size: 18px;
+    font-size: 20px;
   }
 
   p {
     margin: 8px 0;
+    font-size: 16px;
   }
 
   ul,
@@ -56,6 +57,7 @@ const renderedContent = computed(() => {
 
   li {
     margin: 4px 0;
+    font-size: 16px;
   }
 
   code {

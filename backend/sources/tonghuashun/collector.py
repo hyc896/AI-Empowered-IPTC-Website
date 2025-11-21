@@ -9,13 +9,14 @@ import re
 import uuid
 import asyncio
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from typing import Dict, Any, List, Optional
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import Browser, Page
 from sqlalchemy.exc import IntegrityError
 
 from backend.database.entities import TongHuaShunMessage
 from backend.database.connection import create_session
+from backend.collectors.base import PlaywrightCollectorBase
 try:
     from backend.storage import get_chromadb_storage
     _chroma_available = True
@@ -37,7 +38,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class TongHuaShunCollector:
+class TongHuaShunCollector(PlaywrightCollectorBase):
     """同花顺独立采集器"""
 
     def __init__(self, config: Dict[str, Any]):
@@ -52,13 +53,10 @@ class TongHuaShunCollector:
                 - url: 同花顺快讯URL
                 - source_id: 消息源ID（关联message_sources表）
         """
-        self.config = config
-        self.interval = config.get('interval', 15)
+        super().__init__(config)
         self.mysql_table = config['mysql_table']
         self.chroma_collection = config['chroma_collection']
         self.url = config['config'].get('url', 'https://news.10jqka.com.cn/realtimenews.html')
-        self.source_id = config.get('id', 'auto')
-
         # 优雅地处理缺失的依赖
         if _chroma_available:
             self.chroma_storage = get_chromadb_storage()
@@ -78,21 +76,14 @@ class TongHuaShunCollector:
             self.field_enricher = None
             logger.warning("【同花顺】FieldEnricher不可用，将跳过字段增强")
 
-        self._playwright: Optional[Playwright] = None
-        self._browser: Optional[Browser] = None
-        self._running = False
-
-    async def initialize(self) -> bool:
+    async def _on_initialize(self) -> bool:
         """
-        初始化采集器（启动Playwright浏览器）
+        子类初始化钩子：创建ChromaDB collection
 
         Returns:
             是否初始化成功
         """
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(headless=True)
-
             self.chroma_storage.create_collection(
                 collection_name=self.chroma_collection
             )
@@ -103,32 +94,7 @@ class TongHuaShunCollector:
             logger.error(f"【同花顺】采集器初始化失败: {e}")
             return False
 
-    async def run(self) -> None:
-        """
-        主循环：定时采集
 
-        每隔interval秒执行一次采集
-        """
-        if not await self.initialize():
-            logger.error("【同花顺】采集器初始化失败，退出")
-            return
-
-        self._running = True
-        logger.info(f"【同花顺】采集器已启动 (采集间隔={self.interval}秒)")
-
-        while self._running:
-            try:
-                await self._collect_once()
-            except Exception as e:
-                logger.error(f"【同花顺】采集失败: {e}")
-
-            await asyncio.sleep(self.interval)
-
-    async def stop(self) -> None:
-        """停止采集器"""
-        self._running = False
-        await self._close_browser()
-        logger.info("【同花顺】采集器已停止")
 
     async def _collect_once(self) -> None:
         """
@@ -506,12 +472,3 @@ class TongHuaShunCollector:
             return content
         return content[:1000] + "..."
 
-    async def _close_browser(self) -> None:
-        """关闭浏览器"""
-        try:
-            if self._browser:
-                await self._browser.close()
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception as e:
-            logger.error(f"Failed to close browser: {e}")

@@ -18,6 +18,7 @@ The Guardian RSS Collector
 - 预处理模式：翻译+字段增强在数据库会话外完成
 """
 
+import re
 import uuid
 import asyncio
 import logging
@@ -293,6 +294,31 @@ class GuardianCollector:
             logger.error(f"Failed to parse RSS feed ({category}): {e}", exc_info=True)
             return []
 
+    def _clean_html(self, text: str) -> str:
+        """
+        清理HTML标签
+
+        Args:
+            text: 原始文本（可能包含HTML）
+
+        Returns:
+            清理后的文本
+        """
+        if not text:
+            return ''
+
+        text = re.sub(r'<br\s*/?\s*>', '\n', text)
+        text = re.sub(r'<[^>]+>', '', text)
+        text = re.sub(r'&nbsp;', ' ', text)
+        text = re.sub(r'&quot;', '"', text)
+        text = re.sub(r'&amp;', '&', text)
+        text = re.sub(r'&lt;', '<', text)
+        text = re.sub(r'&gt;', '>', text)
+
+        text = '\n'.join([line.strip() for line in text.split('\n') if line.strip()])
+
+        return text.strip()
+
     def _extract_article_from_entry(self, entry: Any) -> Optional[Dict[str, Any]]:
         """
         从RSS条目中提取文章数据
@@ -313,8 +339,9 @@ class GuardianCollector:
                 logger.warning("RSS条目缺少title或link，跳过")
                 return None
 
-            # 内容字段映射
+            # 内容字段映射（清理HTML标签）
             description = entry.get('description', entry.get('summary', '')).strip()
+            description = self._clean_html(description)  # 清理HTML
             content = description if description else title
             summary = description if description else title
 

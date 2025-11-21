@@ -48,25 +48,85 @@ class SchedulerService:
         else:
             logger.info(f"【Scheduler】任务执行成功: {event.job_id}")
 
-    async def _generate_daily_report_job(self):
+    async def _generate_comprehensive_report_job(self):
         """
-        定时任务：生成AI日报
+        定时任务：生成AI综合日报
 
-        每晚8点自动执行
+        每天凌晨2点自动执行
         """
-        logger.info("【Scheduler】开始执行AI日报生成任务")
+        logger.info("【Scheduler】开始执行AI综合日报生成任务")
 
         try:
             report_generator = get_report_generator()
-            report_id = await report_generator.generate_daily_report()
+            report_id = await report_generator.generate_daily_report(report_type='comprehensive')
 
             if report_id:
-                logger.info(f"【Scheduler】AI日报生成成功（ID: {report_id}）")
+                logger.info(f"【Scheduler】AI综合日报生成成功（ID: {report_id}）")
             else:
-                logger.warning("【Scheduler】AI日报生成失败或无数据")
+                logger.warning("【Scheduler】AI综合日报生成失败或无数据")
 
         except Exception as e:
-            logger.error(f"【Scheduler】AI日报生成任务异常: {e}", exc_info=True)
+            logger.error(f"【Scheduler】AI综合日报生成任务异常: {e}", exc_info=True)
+
+    async def _generate_industry_report_job(self):
+        """
+        定时任务：生成AI产业日报
+
+        每天早上7点自动执行
+        """
+        logger.info("【Scheduler】开始执行AI产业日报生成任务")
+
+        try:
+            report_generator = get_report_generator()
+            report_id = await report_generator.generate_industry_report()
+
+            if report_id:
+                logger.info(f"【Scheduler】AI产业日报生成成功（ID: {report_id}）")
+            else:
+                logger.warning("【Scheduler】AI产业日报生成失败或无数据")
+
+        except Exception as e:
+            logger.error(f"【Scheduler】AI产业日报生成任务异常: {e}", exc_info=True)
+
+    async def _generate_governance_report_job(self):
+        """
+        定时任务：生成AI治理日报
+
+        每天中午12点自动执行
+        """
+        logger.info("【Scheduler】开始执行AI治理日报生成任务")
+
+        try:
+            report_generator = get_report_generator()
+            report_id = await report_generator.generate_governance_report()
+
+            if report_id:
+                logger.info(f"【Scheduler】AI治理日报生成成功（ID: {report_id}）")
+            else:
+                logger.warning("【Scheduler】AI治理日报生成失败或无数据")
+
+        except Exception as e:
+            logger.error(f"【Scheduler】AI治理日报生成任务异常: {e}", exc_info=True)
+
+    async def _generate_research_report_job(self):
+        """
+        定时任务：生成AI科研日报
+
+        每天下午13点自动执行
+        """
+        logger.info("【Scheduler】开始执行AI科研日报生成任务")
+
+        try:
+            report_generator = get_report_generator()
+            report_id = await report_generator.generate_research_report()
+
+            if report_id:
+                logger.info(f"【Scheduler】AI科研日报生成成功（ID: {report_id}）")
+            else:
+                logger.warning("【Scheduler】AI科研日报生成失败或无数据")
+
+        except Exception as e:
+            logger.error(f"【Scheduler】AI科研日报生成任务异常: {e}", exc_info=True)
 
     def start(self):
         """
@@ -96,17 +156,47 @@ class SchedulerService:
             EVENT_JOB_EXECUTED | EVENT_JOB_ERROR
         )
 
-        # 注册任务：每晚8点生成AI日报
+        # 注册任务1：每天凌晨2点生成AI综合日报
         self.scheduler.add_job(
-            self._generate_daily_report_job,
-            trigger=CronTrigger(hour=20, minute=0),  # 每晚20:00
-            id='generate_ai_daily_report',
-            name='生成AI日报',
+            self._generate_comprehensive_report_job,
+            trigger=CronTrigger(hour=2, minute=0),
+            id='generate_comprehensive_report',
+            name='生成AI综合日报',
+            replace_existing=True
+        )
+
+        # 注册任务2：每天早上7点生成AI产业日报
+        self.scheduler.add_job(
+            self._generate_industry_report_job,
+            trigger=CronTrigger(hour=7, minute=0),
+            id='generate_industry_report',
+            name='生成AI产业日报',
+            replace_existing=True
+        )
+
+        # 注册任务3：每天中午12点生成AI治理日报
+        self.scheduler.add_job(
+            self._generate_governance_report_job,
+            trigger=CronTrigger(hour=12, minute=0),
+            id='generate_governance_report',
+            name='生成AI治理日报',
+            replace_existing=True
+        )
+
+        # 注册任务4：每天下午13点生成AI科研日报
+        self.scheduler.add_job(
+            self._generate_research_report_job,
+            trigger=CronTrigger(hour=13, minute=0),
+            id='generate_research_report',
+            name='生成AI科研日报',
             replace_existing=True
         )
 
         logger.info("【Scheduler】已注册任务：")
-        logger.info("  - 生成AI日报: 每晚20:00执行")
+        logger.info("  - 生成AI综合日报: 每天02:00执行")
+        logger.info("  - 生成AI产业日报: 每天07:00执行")
+        logger.info("  - 生成AI治理日报: 每天12:00执行")
+        logger.info("  - 生成AI科研日报: 每天13:00执行")
 
         # 启动调度器
         self.scheduler.start()

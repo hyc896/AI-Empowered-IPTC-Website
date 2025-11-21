@@ -1,0 +1,1 @@
+export { governanceConfig } from './config'

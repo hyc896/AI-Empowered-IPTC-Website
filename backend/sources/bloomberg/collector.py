@@ -205,6 +205,11 @@ class BloombergCollector:
                     if isinstance(media_content, list) and len(media_content) > 0:
                         media_url = media_content[0].get('url', '')
 
+                # 处理category：连接所有标签，限制最大长度为490字符（防止超过数据库VARCHAR(500)限制）
+                category_str = ', '.join(categories) if categories else None
+                if category_str and len(category_str) > 490:
+                    category_str = category_str[:490]
+
                 item = {
                     'external_id': guid,
                     'title': title,
@@ -212,7 +217,7 @@ class BloombergCollector:
                     'url': url,
                     'provider': author,
                     'published_at': published_at,
-                    'category': ', '.join(categories) if categories else None,
+                    'category': category_str,
                     'media_content': media_url,
                     'tags': categories
                 }
@@ -424,6 +429,7 @@ class BloombergCollector:
             documents = []
             metadatas = []
 
+            embeddings = []
             for item in items:
                 doc_id = item.get('external_id') or item['url']
                 ids.append(doc_id)
@@ -444,7 +450,9 @@ class BloombergCollector:
                 }
                 metadatas.append(metadata)
 
-            embeddings = await self.embedding_client.embed_documents(documents)
+                # 生成embedding（同步方法，不需要await）
+                embedding = self.embedding_client.generate_embedding(doc_text)
+                embeddings.append(embedding)
 
             self.chroma_storage.upsert(
                 collection_name=self.chroma_collection,

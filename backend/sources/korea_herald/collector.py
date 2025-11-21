@@ -21,12 +21,13 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import Browser, Page
 from sqlalchemy.exc import IntegrityError
 import aiohttp
 
 from backend.database.entities import KoreaHeraldMessage
 from backend.database.connection import create_session
+from backend.collectors.base import PlaywrightCollectorBase
 
 try:
     from backend.storage import get_chromadb_storage
@@ -44,17 +45,18 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class KoreaHeraldCollector:
+class KoreaHeraldCollector(PlaywrightCollectorBase):
     """Korea Herald科技新闻采集器"""
 
     # RSS feed URL
     RSS_FEED_URL = "https://www.koreaherald.com/rss/kh_Business"
 
     # 科技相关关键词（用于过滤Business feed中的科技内容）
+    # 注意：如果发现采集数据量过少，可以考虑注释掉_parse_rss_feed中的关键词过滤逻辑（第326-329行）
     TECH_KEYWORDS = [
         # AI相关
         'ai', 'artificial intelligence', 'machine learning', 'deep learning',
-        'neural network', 'chatgpt', 'generative ai', 'llm',
+        'neural network', 'chatgpt', 'generative ai', 'llm', 'openai',
         # 半导体/芯片
         'semiconductor', 'chip', 'chipmaker', 'foundry', 'fab', 'wafer',
         'samsung electronics', 'sk hynix', 'tsmc', 'memory chip', 'dram', 'nand',
@@ -63,13 +65,20 @@ class KoreaHeraldCollector:
         'data center', 'server', 'processor', 'gpu', 'cpu',
         # 网络安全
         'cybersecurity', 'security', 'hacking', 'breach', 'encryption',
-        # 创新/投资
+        # 创新/投资（科技相关）
         'innovation', 'startup', 'venture', 'funding', 'investment',
+        'ipo', 'merger', 'acquisition', 'partnership',
         # 电子/制造
         'electronics', 'manufacturing', 'automation', 'robotics',
-        '5g', '6g', 'wireless', 'telecom',
+        '5g', '6g', 'wireless', 'telecom', 'network',
         # 韩国科技巨头
-        'naver', 'kakao', 'lg electronics', 'sk telecom'
+        'naver', 'kakao', 'lg electronics', 'sk telecom',
+        # 泛化科技关键词
+        'digital', 'internet', 'online', 'platform', 'app', 'mobile',
+        'smart', 'iot', 'blockchain', 'crypto', 'metaverse',
+        'quantum', 'biotech', 'fintech', 'e-commerce',
+        # 韩国本地科技术语
+        'korea tech', 'korean innovation', 'k-tech'
     ]
 
     def __init__(self, config: Dict[str, Any]):
@@ -85,11 +94,10 @@ class KoreaHeraldCollector:
                 - region: 地区（KR=Korea 韩国）
                 - language: 语言（en）
         """
-        self.config = config
+        super().__init__(config)
         self.interval = config.get('interval', 14400)  # 默认4小时一次
         self.mysql_table = config['mysql_table']
         self.chroma_collection = config['chroma_collection']
-        self.source_id = config.get('id', 'auto')
         self.region = config['config'].get('region', 'KR')
         self.language = config['config'].get('language', 'en')
 
@@ -109,27 +117,14 @@ class KoreaHeraldCollector:
             self.field_enricher = None
             logger.warning("【Korea Herald】LLM服务不可用，将跳过向量化、翻译和字段增强")
 
-        self._playwright: Optional[Playwright] = None
-        self._browser: Optional[Browser] = None
-        self._running = False
-
-    async def initialize(self) -> bool:
+    async def _on_initialize(self) -> bool:
         """
-        初始化采集器（启动Playwright浏览器）
+        子类初始化钩子：创建ChromaDB collection
 
         Returns:
             是否初始化成功
         """
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage'
-                ]
-            )
 
             if self.chroma_storage:
                 self.chroma_storage.create_collection(
@@ -142,42 +137,8 @@ class KoreaHeraldCollector:
             logger.error(f"【Korea Herald】采集器初始化失败: {e}")
             return False
 
-    async def run(self) -> None:
-        """
-        主循环：定时采集
 
-        每隔interval秒执行一次采集
-        """
-        if not await self.initialize():
-            logger.error("【Korea Herald】采集器初始化失败，退出")
-            return
 
-        self._running = True
-        logger.info(f"【Korea Herald】采集器已启动 (采集间隔={self.interval}秒)")
-
-        while self._running:
-            try:
-                await self._collect_once()
-            except Exception as e:
-                logger.error(f"【Korea Herald】采集失败: {e}", exc_info=True)
-
-            await asyncio.sleep(self.interval)
-
-    async def stop(self) -> None:
-        """停止采集器"""
-        self._running = False
-        await self._close_browser()
-        logger.info("【Korea Herald】采集器已停止")
-
-    async def _close_browser(self) -> None:
-        """关闭浏览器"""
-        try:
-            if self._browser:
-                await self._browser.close()
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception as e:
-            logger.warning(f"【Korea Herald】关闭浏览器失败: {e}")
 
     async def _collect_once(self) -> None:
         """
@@ -321,12 +282,12 @@ class KoreaHeraldCollector:
                         logger.info(f"【Korea Herald】遇到已存储文章，停止解析: {link}")
                         break
 
-                    # 科技内容过滤
-                    if not self._is_tech_related(title, description):
-                        logger.debug(f"【Korea Herald】跳过非科技文章: {title[:50]}")
-                        continue
+                    # 科技内容过滤（已禁用，接受所有Business新闻）
+                    # if not self._is_tech_related(title, description):
+                    #     logger.debug(f"【Korea Herald】跳过非科技文章: {title[:50]}")
+                    #     continue
 
-                    logger.debug(f"【Korea Herald】匹配到科技文章: {title[:50]}")
+                    logger.debug(f"【Korea Herald】采集文章: {title[:50]}")
 
                     # 解析发布时间
                     published_at = None
@@ -520,6 +481,10 @@ class KoreaHeraldCollector:
         """
         存储文章到MySQL和ChromaDB
 
+        流程（VentureBeat模式）：
+        1. MySQL存储（仅DB操作）
+        2. ChromaDB存储（在DB session外）
+
         Args:
             items: 预处理后的文章列表
 
@@ -527,8 +492,9 @@ class KoreaHeraldCollector:
             成功存储的数量
         """
         stored_count = 0
+        stored_messages = []  # 收集成功存储的messages
 
-        # 存储到MySQL
+        # ===== 阶段1: MySQL存储（仅DB操作） =====
         try:
             with create_session() as db:
                 for item in items:
@@ -554,10 +520,7 @@ class KoreaHeraldCollector:
                         db.add(message)
                         db.commit()
                         stored_count += 1
-
-                        # 存储到ChromaDB
-                        if self.chroma_storage and self.embedding_client:
-                            await self._store_to_chromadb(message)
+                        stored_messages.append(message)  # 收集成功存储的message
 
                     except IntegrityError:
                         db.rollback()
@@ -567,7 +530,15 @@ class KoreaHeraldCollector:
                         logger.error(f"【Korea Herald】存储失败 {item.get('url')}: {e}")
 
         except Exception as e:
-            logger.error(f"【Korea Herald】批量存储失败: {e}", exc_info=True)
+            logger.error(f"【Korea Herald】MySQL批量存储失败: {e}", exc_info=True)
+
+        # ===== 阶段2: ChromaDB存储（在DB session外） =====
+        if self.chroma_storage and self.embedding_client:
+            for message in stored_messages:
+                try:
+                    await self._store_to_chromadb(message)
+                except Exception as e:
+                    logger.error(f"【Korea Herald】ChromaDB存储失败 {message.url}: {e}")
 
         return stored_count
 
@@ -584,7 +555,7 @@ class KoreaHeraldCollector:
 
             # 生成embedding
             text_for_embedding = f"{message.title}\n\n{message.summary or message.content[:500]}"
-            embedding = await self.embedding_client.get_embedding(text_for_embedding)
+            embedding = self.embedding_client.generate_embedding(text_for_embedding)
 
             # 存储到ChromaDB
             self.chroma_storage.upsert(

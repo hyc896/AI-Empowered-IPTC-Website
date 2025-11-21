@@ -93,8 +93,31 @@ async def startup():
         logger.info("【5/7】初始化LLM客户端...")
         await init_llm()
 
-        # 5. 启动采集器服务
-        logger.info("【6/7】启动采集器服务...")
+        # 5. 初始化浏览器池
+        logger.info("【6/8】初始化浏览器池...")
+        try:
+            from backend.services import initialize_browser_pool
+            config = app_state.get("config", {})
+            browser_pool_config = config.get("browser_pool", {})
+
+            if browser_pool_config.get("enabled", True):
+                # 合并配置（capacity + lifecycle + launch）
+                pool_config = {
+                    **browser_pool_config.get('capacity', {}),
+                    **browser_pool_config.get('lifecycle', {}),
+                    **browser_pool_config.get('launch', {}),
+                    'health_check_interval': browser_pool_config.get('health_check', {}).get('interval', 60)
+                }
+                browser_pool = await initialize_browser_pool(pool_config)
+                app_state["browser_pool"] = browser_pool
+                logger.info(f"【浏览器池】初始化成功 (当前浏览器数: {len(browser_pool._browsers)})")
+            else:
+                logger.info("【浏览器池】已禁用")
+        except Exception as e:
+            logger.warning(f"【浏览器池】初始化失败: {e}，采集器将使用独立浏览器")
+
+        # 6. 启动采集器服务
+        logger.info("【7/8】启动采集器服务...")
         await start_collector_service()
 
         # 5.5. 启动向量同步检查（后台任务）
@@ -115,12 +138,12 @@ async def startup():
             logger.warning(f"【向量同步】启动失败: {e}，将继续运行但无法自动同步向量")
 
         # 6. 加载完整的API路由
-        logger.info("【7/8】加载API路由...")
+        logger.info("【8/9】加载API路由...")
         load_api_routes()
         setup_basic_routes()
 
         # 7. 启动调度器服务
-        logger.info("【8/8】启动调度器服务...")
+        logger.info("【9/9】启动调度器服务...")
         try:
             from backend.services.scheduler_service import get_scheduler_service
             scheduler = get_scheduler_service()
@@ -159,6 +182,12 @@ async def shutdown():
             logger.info("【关闭】正在停止采集器服务...")
             await app_state["collector_service"].stop()
 
+        # 关闭浏览器池
+        if "browser_pool" in app_state:
+            logger.info("【关闭】正在关闭浏览器池...")
+            from backend.services import shutdown_browser_pool
+            await shutdown_browser_pool()
+
         # 关闭数据库连接
         if "db_config" in app_state:
             logger.info("【关闭】数据库配置已清理")
@@ -167,6 +196,14 @@ async def shutdown():
         if "storage" in app_state:
             logger.info("【关闭】正在关闭存储连接...")
             # ChromaDB会自动关闭
+
+        # 输出Token统计摘要（新增）
+        try:
+            from backend.llm.token_metrics import get_token_metrics
+            token_metrics = get_token_metrics()
+            token_metrics.print_message_source_summary()
+        except Exception as e:
+            logger.warning(f"【关闭】Token统计输出失败: {e}")
 
         logger.info("=== 消息平台已停止 ===")
 
@@ -247,7 +284,7 @@ async def init_storage():
 
 
 async def init_llm():
-    """初始化Embedding和Fast LLM客户端（消息平台不需要Chat主模型）"""
+    """初始化LLM客户端（Chat、Embedding、Fast）"""
     try:
         from backend.llm.global_llm_manager import GlobalLLMManager
 
@@ -259,14 +296,15 @@ async def init_llm():
             logger.info("LLM配置为空，跳过初始化")
             return
 
-        # 消息平台只需要embedding和fast客户端，不需要chat主模型
+        # 获取所有LLM配置（AI日报生成需要Chat主模型）
+        chat_config = llm_config.get("chat", {})
         embedding_config = llm_config.get("embedding", {})
         fast_config = llm_config.get("fast", {})
 
         # 初始化GlobalLLMManager
         llm_manager = GlobalLLMManager.get_instance()
         llm_manager.initialize(
-            chat_config=None,  # 消息平台不需要Chat主模型
+            chat_config=chat_config,  # AI日报生成需要Chat主模型
             embedding_config=embedding_config,
             fast_config=fast_config
         )
@@ -275,10 +313,13 @@ async def init_llm():
 
         # 记录初始化成功的客户端（显示完整配置信息）
         logger.info("LLM客户端初始化成功:")
+        if chat_config:
+            logger.info(f"  Chat: {chat_config.get('model')} @ {chat_config.get('base_url')} (timeout: {chat_config.get('timeout', 60)}s)")
+            logger.info(f"  Chat模型用途: AI日报生成")
         if embedding_config:
             logger.info(f"  Embedding: {embedding_config.get('model')} @ {embedding_config.get('base_url')}")
         if fast_config:
-            logger.info(f"  Fast: {fast_config.get('model')} @ {fast_config.get('base_url')}")
+            logger.info(f"  Fast: {fast_config.get('model')} @ {fast_config.get('base_url')} (timeout: {fast_config.get('timeout', 30)}s)")
             logger.info(f"  Fast模型用途: arXiv论文摘要翻译")
 
     except Exception as e:
@@ -290,8 +331,14 @@ async def init_llm():
 async def start_collector_service():
     """启动采集器服务"""
     try:
-        from backend.services.collector_service import collector_service
+        from backend.services.collector_service import initialize_collector_service
 
+        # 获取浏览器池（如果已初始化）
+        browser_pool = app_state.get("browser_pool")
+        
+        # 初始化采集器服务并传入浏览器池
+        collector_service = initialize_collector_service(browser_pool=browser_pool)
+        
         await collector_service.start()
         app_state["collector_service"] = collector_service
 
@@ -631,7 +678,7 @@ if __name__ == "__main__":
 
     # 启动服务
     uvicorn.run(
-        "main:app",
+        "backend.main:app",
         host=host,
         port=port,
         workers=workers,

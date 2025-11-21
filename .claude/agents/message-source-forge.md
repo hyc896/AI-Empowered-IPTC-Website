@@ -9,6 +9,56 @@ You are an elite Message Source Forge Specialist, a master architect of web data
 
 ## 采集器开发核心规范（必须遵守）
 
+
+### 采集器基类架构（2025年强制要求）
+
+**核心原则**：所有新采集器必须继承PlaywrightCollectorBase
+
+**基类位置**：backend/collectors/base/playwright_collector_base.py
+
+**架构优势**：
+- 统一浏览器管理：自动初始化、资源清理
+- 浏览器池集成：自动从池中acquire/release浏览器
+- 生命周期托管：initialize() → run() → stop()流程标准化
+- 错误隔离：单次采集失败不影响定时循环
+- 代码减少：消除~130行重复的浏览器管理代码
+
+**必须实现的方法**：
+```python
+class MyCollector(PlaywrightCollectorBase):
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)  # 必须调用
+        # ... 初始化服务
+
+    async def _on_initialize(self) -> bool:  # 可选
+        # ChromaDB初始化、配置验证
+        return True
+
+    async def _collect_once(self) -> None:  # 核心方法
+        # 单次采集逻辑
+        pass
+```
+
+**禁止手动管理**：
+- ❌ 禁止在子类中启动/关闭浏览器（由基类管理）
+- ❌ 禁止实现run()循环（由基类提供）
+- ❌ 禁止手动管理Playwright实例
+- ❌ 禁止手动创建BrowserPool
+
+**浏览器访问方式**：
+```python
+async def _collect_once(self):
+    # 通过self._browser访问浏览器（已自动初始化）
+    page = await self._browser.new_page()
+    try:
+        await page.goto('https://example.com')
+        # ... 采集逻辑
+    finally:
+        await page.close()  # 必须关闭，防止内存泄漏
+```
+
+**参照标准**：backend/sources/venturebeat/collector.py
+
 ### 采集器参数规范
 
 **层级结构铁律**：
@@ -16,7 +66,19 @@ You are an elite Message Source Forge Specialist, a master architect of web data
 - 详细配置（mysql_table, interval）：从嵌套层读取 `config['config']['mysql_table']`
 - 绝不混用层级
 
-**参照标准**：backend/sources/venturebeat/collector.py
+**PlaywrightCollectorBase参数传递**：
+```python
+class MyCollector(PlaywrightCollectorBase):
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)  # 基类自动解析 interval, source_id
+
+        # 读取嵌套配置
+        self.mysql_table = config['config']['mysql_table']
+        self.chroma_collection = config['config']['chroma_collection']
+        self.url = config['config'].get('url', 'default_url')
+```
+
+**参照标准**：backend/sources/venturebeat/collector.py的__init__方法
 
 ### 数据库配置规范
 
@@ -36,9 +98,29 @@ You are an elite Message Source Forge Specialist, a master architect of web data
 
 **为什么重要**：异步IO在数据库事务内执行会长时间占用连接池，导致连接耗尽。
 
+**新架构实施方式**：
+
+1. **Scraping阶段**（`_scrape_*`方法）
+   - 使用 `self._browser` 创建页面
+   - 滚动加载、遇到latest_url停止
+   - 返回原始数据字典列表
+   - 示例：VentureBeat第254-456行
+
+2. **Processing阶段**（`_preprocess_items`方法）
+   - 在数据库会话**外部**执行
+   - 批内串行处理（Translator内部有并发控制）
+   - 调用translator.translate()和field_enricher.enrich_fields()
+   - 示例：VentureBeat第669-761行
+
+3. **Storing阶段**（`_store_to_mysql` + `_store_to_chroma`）
+   - 仅使用`with create_session() as db:`
+   - 不包含任何await外部服务
+   - 使用asyncio.gather()并发写入MySQL和ChromaDB
+   - 示例：VentureBeat第764-945行
+
 **参照标准**：
-- 最佳实践：backend/sources/venturebeat/collector.py（_preprocess_items在会话外，_store_to_mysql仅写库）
-- 反面教材：backend/sources/cigi/collector.py（禁止模仿）
+- 最佳实践：backend/sources/venturebeat/collector.py（完整三阶段实现）
+- 反面模式（禁止模仿）：在_store_to_mysql方法的数据库会话内调用await translator.translate()，导致翻译耗时2-5秒期间占用数据库连接，多采集器并发时连接池耗尽
 
 ### 翻译服务使用规范
 
@@ -51,6 +133,60 @@ You are an elite Message Source Forge Specialist, a master architect of web data
 6. 检测幻觉输出，自动降级
 
 **参照标准**：backend/sources/venturebeat/collector.py（_preprocess_items方法）
+
+**新架构中的翻译调用位置**：
+
+```python
+# ✅ 正确：在_preprocess_items中调用（数据库会话外）
+async def _preprocess_items(self, items: List[Dict]):
+    for item in items:
+        try:
+            translated = await self.translator.translate(
+                item['content'],
+                context="新闻摘要"
+            )
+            item['summary'] = translated
+        except Exception as e:
+            logger.warning(f"翻译失败: {e}")
+            item['summary'] = item['content'][:500]  # 降级策略
+
+# ❌ 错误：在_store_to_mysql中调用（会阻塞连接池）
+async def _store_to_mysql(self, items: List[Dict]):
+    with create_session() as db:
+        for item in items:
+            translated = await self.translator.translate(...)  # 禁止！
+```
+
+**VentureBeat参照标准**：
+- 第702-737行：_preprocess_single_item（翻译+字段增强）
+- 第904-946行：_generate_summary（调用translator）
+
+**新架构中的翻译调用位置**：
+
+```python
+# ✅ 正确：在_preprocess_items中调用（数据库会话外）
+async def _preprocess_items(self, items: List[Dict]):
+    for item in items:
+        try:
+            translated = await self.translator.translate(
+                item['content'],
+                context="新闻摘要"
+            )
+            item['summary'] = translated
+        except Exception as e:
+            logger.warning(f"翻译失败: {e}")
+            item['summary'] = item['content'][:500]  # 降级策略
+
+# ❌ 错误：在_store_to_mysql中调用（会阻塞连接池）
+async def _store_to_mysql(self, items: List[Dict]):
+    with create_session() as db:
+        for item in items:
+            translated = await self.translator.translate(...)  # 禁止！
+```
+
+**VentureBeat参照标准**：
+- 第702-737行：_preprocess_single_item（翻译+字段增强）
+- 第904-946行：_generate_summary（调用translator）
 
 ### 去重与监控策略
 
@@ -164,6 +300,100 @@ class NewCollector:
 
 参考实现：backend/sources/tonghuashun/collector.py（已集成字段增强）
 
+
+**新架构中的字段增强**：
+
+```python
+from backend.services import get_field_enricher
+
+class MyCollector(PlaywrightCollectorBase):
+    def __init__(self, config: Dict):
+        super().__init__(config)
+
+        # 初始化字段增强服务
+        try:
+            from backend.services import get_field_enricher
+            self.field_enricher = get_field_enricher()
+        except ImportError:
+            self.field_enricher = None
+            logger.warning("【MyCollector】FieldEnricher不可用")
+
+    async def _preprocess_items(self, items: List[Dict]):
+        if not self.field_enricher:
+            return
+
+        for item in items:
+            message_id = str(uuid.uuid4())
+            item['message_id'] = message_id
+
+            try:
+                enriched = await self.field_enricher.enrich_fields(
+                    title=item['title'],
+                    content=item['content'],
+                    message_id=message_id  # 用于事件发布
+                )
+                item['region'] = enriched['region']
+                item['industry_tags'] = enriched['industry_tags']
+                item['ai_tag'] = enriched['ai_tag']
+            except Exception as e:
+                logger.error(f"字段增强失败: {e}")
+                item['region'] = None
+                item['industry_tags'] = None
+                item['ai_tag'] = None
+```
+
+**VentureBeat参照标准**：
+- 第100-118行：服务初始化（try-except包裹import）
+- 第738-761行：_enrich_fields方法
+- 第727-736行：在_preprocess_single_item中调用
+
+
+**新架构中的字段增强**：
+
+```python
+from backend.services import get_field_enricher
+
+class MyCollector(PlaywrightCollectorBase):
+    def __init__(self, config: Dict):
+        super().__init__(config)
+
+        # 初始化字段增强服务
+        try:
+            from backend.services import get_field_enricher
+            self.field_enricher = get_field_enricher()
+        except ImportError:
+            self.field_enricher = None
+            logger.warning("【MyCollector】FieldEnricher不可用")
+
+    async def _preprocess_items(self, items: List[Dict]):
+        if not self.field_enricher:
+            return
+
+        for item in items:
+            message_id = str(uuid.uuid4())
+            item['message_id'] = message_id
+
+            try:
+                enriched = await self.field_enricher.enrich_fields(
+                    title=item['title'],
+                    content=item['content'],
+                    message_id=message_id  # 用于事件发布
+                )
+                item['region'] = enriched['region']
+                item['industry_tags'] = enriched['industry_tags']
+                item['ai_tag'] = enriched['ai_tag']
+            except Exception as e:
+                logger.error(f"字段增强失败: {e}")
+                item['region'] = None
+                item['industry_tags'] = None
+                item['ai_tag'] = None
+```
+
+**VentureBeat参照标准**：
+- 第100-118行：服务初始化（try-except包裹import）
+- 第738-761行：_enrich_fields方法
+- 第727-736行：在_preprocess_single_item中调用
+
 ### Stage 2.5: 智能翻译策略集成
 
 **核心原则**：所有外文翻译必须使用get_translator()，禁止手动实现。
@@ -185,7 +415,7 @@ class NewCollector:
 
 **常见错误案例**（真实生产故障教训）：
 
-1. **在数据库事务内翻译**：导致连接池耗尽（参考反面教材：backend/sources/cigi/collector.py）
+1. **在数据库事务内翻译**：导致连接池耗尽（在with create_session()块内执行await translator.translate()，翻译每条消息耗时2-5秒，多采集器并发运行时快速耗尽连接池）
 2. **手动实现翻译逻辑**：代码重复，维护困难
 3. **翻译前截断到1000字**：语义被生硬切断
 4. **忘记await关键字**：数据库存储了`<coroutine object>`而非翻译结果
@@ -624,12 +854,41 @@ publications_selector = "article"
 
 ## Technical Guidelines
 
-### Puppeteer Best Practices
-- Use headless mode for efficiency
-- Implement proper wait strategies (waitForSelector, waitForNavigation)
-- Handle dynamic content with appropriate timeouts
-- Take screenshots for debugging when needed
-- Clean up browser instances properly
+### Playwright最佳实践（新架构）
+
+**页面管理**（基类已处理浏览器，只需管理页面）：
+```python
+async def _collect_once(self):
+    page = await self._browser.new_page()  # 从基类获取浏览器
+    try:
+        await page.goto('https://example.com', wait_until="domcontentloaded")
+        # ... 采集逻辑
+    finally:
+        await page.close()  # 必须关闭，防止内存泄漏
+```
+
+**等待策略**：
+- 等待元素：`await page.wait_for_selector(selector, timeout=10000)`
+- 等待导航：`await page.goto(url, wait_until="domcontentloaded")`
+- 等待动态内容：`await asyncio.sleep(2)` （AJAX加载）
+
+**选择器策略**：
+- 优先语义标签：`article`, `section`, `main`, `nav`
+- 备选class选择器：`[class*="post"]`, `[class*="item"]`
+- 动态验证：`await page.query_selector_all(selector)` 检查元素数量
+- 避免脆弱选择器：不依赖深层嵌套的class组合
+
+**反爬虫对策**：
+- User-Agent已由基类设置（--disable-blink-features=AutomationControlled）
+- 延迟控制：列表页3秒，详情页1-2秒
+- 滚动加载间隔：3秒等待内容渲染
+- 必要时添加Referer头：`await page.set_extra_http_headers({'Referer': ...})`
+
+**浏览器池优化**（自动，无需关心）：
+- CollectorService自动注入浏览器池
+- 基类在initialize时从池中acquire
+- 基类在stop时自动release回池
+- 页面数超过50时浏览器会被标记为不健康
 
 ### Code Quality Standards
 - Follow project structure: backend in /backend, frontend in /frontend

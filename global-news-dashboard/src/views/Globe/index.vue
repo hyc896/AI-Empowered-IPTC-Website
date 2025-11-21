@@ -165,7 +165,7 @@
             </div>
             <div v-else class="content-preview">
               <p class="content-text">
-                {{ message.summary || truncateText(message.content, 150) }}
+                {{ truncateText(message.summary || message.content, 150) }}
               </p>
               <el-link
                 v-if="message.content && message.content.length > 150"
