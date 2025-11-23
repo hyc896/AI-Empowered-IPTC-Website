@@ -831,6 +831,14 @@ defineExpose({
     animation: scan-horizontal 3s linear infinite;
   }
 
+  :deep(.markdown-content) {
+    color: #ffffff !important;
+
+    p, li, td, th, span, div {
+      color: #ffffff !important;
+    }
+  }
+
   :deep(h1) {
     position: relative;
     color: #ffffff;

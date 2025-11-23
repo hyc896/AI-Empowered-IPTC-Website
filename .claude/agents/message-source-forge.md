@@ -429,9 +429,9 @@ class MyCollector(PlaywrightCollectorBase):
 6. 显式大于隐式（设计决策文档化）
 
 **参照标准实现（Golden Example）**：
-- 异步编程最佳实践：backend/sources/venturebeat/collector.py
-- 增量采集优化：backend/sources/nikkei_asia/collector.py
-- 反面教材（禁止模仿）：backend/sources/cigi/collector.py
+- 异步编程最佳实践：backend/sources/venturebeat/collector.py（预处理模式，数据库会话外完成所有翻译和字段增强）
+- 增量采集优化：backend/sources/nikkei_asia/collector.py（智能停止策略，遇到latest_url立即停止）
+- 反面模式警示：绝不在数据库会话内调用异步外部服务（翻译、HTTP请求、文件IO等）
 
 ---
 
@@ -849,6 +849,75 @@ publications_selector = "article"
 - Log warnings when element count is unexpected
 - Add health checks to detect broken collectors
 - Version check page structure before each collection (optional)
+
+---
+
+### Lesson 6: Selector and URL Pattern Validation (Production Failure Analysis)
+
+**Context**: Five collectors failed to collect any data. Puppeteer analysis revealed selector and URL pattern errors.
+
+**Three Common Failure Patterns**:
+
+1. **URL Path Assumptions** (La Nación)
+   - Assumed article URLs contain `/inteligencia-artificial/`
+   - Actually `/tecnologia/...` - confused topic page with article URLs
+   - Result: Zero matches despite 39 articles on page
+
+2. **Selector Guessing** (Securities Times)
+   - Tried 5 selectors copied from other sites, all returned 0 elements
+   - Never verified with browser DevTools
+   - Missing: fallback strategy and error logging
+
+3. **Timeout Without Diagnosis** (MDZ Online)
+   - Puppeteer timeout but HTTP 200 OK
+   - Root cause: Cookie dialog and region selection required
+   - Missing: layered diagnosis (network → JS → content)
+
+**Eight Critical Rules**:
+
+**6.1 Never Write Selectors Without Browser Verification**
+- ALWAYS use DevTools Console: `$$('selector').length` must return > 0
+- Time cost: 5min verification vs 1day debugging
+
+**6.2 URL Patterns Need Sample Verification**
+- Copy 3-5 real article URLs before assuming patterns
+- Distinguish topic page URLs from article URLs
+
+**6.3 Selectors Need Fallback + Logging**
+- Try 2-3 selectors (specific class → semantic tag → generic)
+- Log when selector returns 0 elements
+- Error if all fallbacks fail
+
+**6.4 Timeouts Need Layered Diagnosis**
+- L1 Network: `curl -I URL` (200 OK = server fine)
+- L2 JavaScript: Increase timeout to 60s
+- L3 Content: Check for Cookie/login requirements
+
+**6.5 Never Copy Selectors From Other Sites**
+- Each site has unique HTML structure
+- Always inspect THIS website's actual DOM
+
+**6.6 Mandatory Checklist**
+- PRE-CODE: DevTools inspection, test selectors in Console, sample 3-5 article URLs
+- CODING: Fallback selectors, validation logging, 60s timeout, retry mechanism
+- TESTING: Puppeteer verify, check logs, inspect first record
+- DEPLOY: Monitor logs, alert on 3 empty runs
+
+**6.7 Error Pattern Table**
+
+| Symptom | Root Cause | Fix |
+|---------|-----------|-----|
+| Selector returns 0 | Wrong HTML assumption | DevTools Console test |
+| URL filter no match | Path assumption wrong | Sample real URLs |
+| Puppeteer timeout | Anti-bot or JS slow | Layered diagnosis |
+| DB empty, no errors | Silent fallback failure | Add error logging |
+
+**6.8 Code Review Questions**
+- "How was selector determined?" (DevTools inspection = PASS, guessing = REJECT)
+- "Why this URL pattern?" (URL samples = PASS, feeling = REJECT)
+- "What if selector fails?" (Log + fallback = PASS, empty return = REJECT)
+
+**IRON RULE**: Never write selectors without browser verification. All 5 failures were "guessed" not "observed".
 
 ---
 

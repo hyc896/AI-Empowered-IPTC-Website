@@ -98,7 +98,14 @@
       "Bash(do python -m py_compile backend/sources/$collector/collector.py)",
       "Bash(do echo \"=== Checking $collector ===\")",
       "Bash(echo:*)",
-      "Bash(collector_new.py)"
+      "Bash(collector_new.py)",
+      "WebFetch(domain:www.mdzol.com)",
+      "WebFetch(domain:www.lanacion.com.ar)",
+      "WebFetch(domain:inteligenciaargentina.ar)",
+      "Bash(Get-Content \"d:\\TechWork\\message_platform\\backend\\sources\\inteligencia_argentina\\register.sql\" -Encoding UTF8)",
+      "Bash(Get-Content d:/TechWork/message_platform/backend/sources/lanacion/register.sql -Encoding UTF8)",
+      "Bash(nul)",
+      "Bash(sc qc:*)"
     ],
     "deny": [],
     "ask": []

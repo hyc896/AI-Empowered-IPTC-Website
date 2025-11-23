@@ -101,12 +101,12 @@ class MessageSource(Base):
     nikkei_asia_ai_messages = relationship("NikkeiAsiaAIMessage", back_populates="source", cascade="all, delete-orphan")
     investing_com_messages = relationship("InvestingComMessage", back_populates="source", cascade="all, delete-orphan")
     techcrunch_messages = relationship("TechCrunchMessage", back_populates="source", cascade="all, delete-orphan")
-    korea_herald_messages = relationship("KoreaHeraldMessage", back_populates="source", cascade="all, delete-orphan")
     techinasia_messages = relationship("TechInAsiaMessage", back_populates="source", cascade="all, delete-orphan")
     guardian_messages = relationship("GuardianMessage", back_populates="source", cascade="all, delete-orphan")
     betakit_messages = relationship("BetaKitMessage", back_populates="source", cascade="all, delete-orphan")
     securities_times_messages = relationship("SecuritiesTimesMessage", back_populates="source", cascade="all, delete-orphan")
     bloomberg_messages = relationship("BloombergMessage", back_populates="source", cascade="all, delete-orphan")
+    inteligencia_argentina_messages = relationship("InteligenciaArgentinaMessage", back_populates="source", cascade="all, delete-orphan")
     wsj_messages = relationship("WSJMessage", back_populates="source", cascade="all, delete-orphan")
     axios_messages = relationship("AxiosMessage", back_populates="source", cascade="all, delete-orphan")
     wired_messages = relationship("WiredMessage", back_populates="source", cascade="all, delete-orphan")
@@ -117,6 +117,7 @@ class MessageSource(Base):
     le_monde_messages = relationship("LeMondeMessage", back_populates="source", cascade="all, delete-orphan")
     times_of_india_messages = relationship("TimesOfIndiaMessage", back_populates="source", cascade="all, delete-orphan")
     the_hindu_messages = relationship("TheHinduMessage", back_populates="source", cascade="all, delete-orphan")
+    lanacion_messages = relationship("LaNacionMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
@@ -578,48 +579,6 @@ class TechCrunchMessage(Base):
 
     # 关系
     source = relationship("MessageSource", back_populates="techcrunch_messages")
-
-    # 索引（强制要求）
-    __table_args__ = (
-        Index("idx_source_id", "source_id"),
-        Index("idx_published_at", "published_at"),
-        Index("idx_crawled_at", "crawled_at"),
-        Index("idx_source_published", "source_id", "published_at"),
-        Index("idx_url", "url"),
-        Index("idx_external_id", "external_id"),
-        Index("idx_category", "category"),
-        Index("idx_region", "region"),
-    )
-
-
-class KoreaHeraldMessage(Base):
-    """Korea Herald科技新闻（韩国科技、半导体、AI领域新闻）消息表"""
-    __tablename__ = "mp_korea_herald_messages"
-
-    # 核心必备字段（遵循2025统一标准）
-    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
-    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
-    external_id = Column(String(200), comment="外部唯一标识（从URL路径提取article ID）")
-    title = Column(String(500), nullable=False, comment="标题")
-    content = Column(Text, nullable=False, comment="正文内容（从详情页提取）")
-    summary = Column(Text, comment="中文摘要（翻译后）")
-    provider = Column(String(500), comment="作者或信息提供方（The Korea Herald / Yonhap等）")
-    published_at = Column(DateTime, comment="发布时间")
-    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
-    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
-
-    # 新增必备字段（2025年强制要求）
-    region = Column(String(200), comment="地区（中文格式，多为'韩国'、'全球'等）")
-    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
-    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
-
-    # 扩展字段
-    category = Column(String(100), comment="分类（Business/Technology/AI等）")
-    language = Column(String(10), default="en", comment="语言（en）")
-    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
-
-    # 关系
-    source = relationship("MessageSource", back_populates="korea_herald_messages")
 
     # 索引（强制要求）
     __table_args__ = (
@@ -1318,6 +1277,90 @@ class TheHinduMessage(Base):
         Index("idx_url", "url"),
         Index("idx_external_id", "external_id"),
         Index("idx_category", "category"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class InteligenciaArgentinaMessage(Base):
+    """Inteligencia Argentina AI分类（阿根廷情报与分析网站AI专栏）消息表"""
+    __tablename__ = "mp_inteligencia_argentina_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取slug）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容（从详情页提取的完整文章）")
+    summary = Column(Text, comment="中文摘要（翻译后）")
+    provider = Column(String(500), comment="作者")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，如'阿根廷'、'阿根廷/布宜诺斯艾利斯'、'全球'等）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(100), default="inteligencia-artificial", comment="文章分类（固定为AI类）")
+    language = Column(String(10), default="es", comment="语言（西班牙语）")
+    excerpt = Column(Text, comment="摘要（从列表页提取的excerpt）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="inteligencia_argentina_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
+class LaNacionMessage(Base):
+    """La Nación AI专题消息表（阿根廷主流媒体AI新闻）"""
+    __tablename__ = "mp_lanacion_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取，如nid12345）")
+    title = Column(String(500), nullable=False, comment="标题（中文翻译）")
+    content = Column(Text, nullable=False, comment="正文内容（中文翻译）")
+    summary = Column(Text, comment="摘要（中文翻译）")
+    provider = Column(String(500), comment="作者")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), comment="地区（中文格式，默认'阿根廷'，通过FieldEnricher动态提取）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个，涉及AI必须包含'人工智能'标签）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    language = Column(String(10), default="es", comment="原始语言（西班牙语）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="lanacion_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
         Index("idx_region", "region"),
         Index("idx_ai_tag", "ai_tag"),
     )

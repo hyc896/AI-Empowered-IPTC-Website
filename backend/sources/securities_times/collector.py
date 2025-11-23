@@ -277,25 +277,29 @@ class SecuritiesTimesCollector(PlaywrightCollectorBase):
             return []
 
         try:
-            # 证券时报使用article标签或列表项元素
+            # 证券时报使用ul.list.infinite-list > li结构
+            # 实际HTML: <ul class="list infinite-list"><li><div class="content"><div class="tt"><a href="/article/detail/...">
             selectors_to_try = [
-                'article',
-                '.news-item',
-                '.article-item',
-                '[class*="news"]',
-                'li[class*="item"]'
+                'ul.list.infinite-list > li',  # 精确选择器
+                'ul.list li',                   # 稍宽松
+                'li',                           # 最宽松
             ]
 
             selected_selector = None
             for selector in selectors_to_try:
                 try:
-                    await page.wait_for_selector(selector, timeout=10000)
-                    test_elements = await page.query_selector_all(selector)
-                    if test_elements:
-                        selected_selector = selector
-                        logger.debug(f"【证券时报】使用选择器: {selector}")
-                        break
-                except Exception:
+                    elements = await page.query_selector_all(selector)
+                    if elements and len(elements) > 0:
+                        # 验证第一个元素是否包含文章链接
+                        first_link = await elements[0].query_selector('a[href*="/article/detail/"]')
+                        if first_link:
+                            logger.info(f"【证券时报】✓ 使用选择器: {selector}，找到{len(elements)}个元素")
+                            selected_selector = selector
+                            break
+                        else:
+                            logger.debug(f"【证券时报】✗ 选择器{selector}找到{len(elements)}个元素但无有效链接")
+                except Exception as e:
+                    logger.debug(f"【证券时报】选择器{selector}失败: {e}")
                     continue
 
             if not selected_selector:

@@ -13,7 +13,7 @@ from collections import defaultdict
 import uuid
 
 from sqlalchemy import and_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from backend.database.connection import create_session
 from backend.database.entities import AIDailyReport
@@ -104,8 +104,8 @@ class AIReportGenerator:
                 if ai_tag_filter:
                     conditions.append(model_class.ai_tag == ai_tag_filter)
 
-                # 查询过去24小时且符合条件的消息
-                query = db.query(model_class).filter(and_(*conditions)).order_by(model_class.crawled_at.desc())
+                # 查询过去24小时且符合条件的消息（预加载source关系避免N+1查询）
+                query = db.query(model_class).options(joinedload(model_class.source)).filter(and_(*conditions)).order_by(model_class.crawled_at.desc())
 
                 records = query.all()
 
@@ -118,7 +118,7 @@ class AIReportGenerator:
                         'title': getattr(record, 'title', ''),
                         'summary': getattr(record, 'summary', '') or getattr(record, 'content', '')[:200],
                         'content': getattr(record, 'content', ''),
-                        'source_name': getattr(record, 'source_name', 'unknown'),
+                        'source_name': (record.source.display_name or record.source.name) if record.source else 'unknown',
                         'region': getattr(record, 'region', None),
                         'industry_tags': getattr(record, 'industry_tags', None),
                         'published_at': getattr(record, 'published_at', None),
@@ -197,9 +197,9 @@ class AIReportGenerator:
         messages_by_tag: Dict[str, List[Dict]],
         stats: Dict[str, Any],
         report_date: date
-    ) -> List[Dict[str, str]]:
+    ) -> tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
         """
-        构建日报生成提示词
+        构建日报生成提示词（带引用系统）
 
         Args:
             messages_by_tag: 按标签分类的消息
@@ -207,9 +207,20 @@ class AIReportGenerator:
             report_date: 报告日期
 
         Returns:
-            消息列表（system/user格式）
+            (messages, reference_list)
+            - messages: 消息列表（system/user格式）
+            - reference_list: 引用列表（用于后处理添加参考来源）
         """
-        # System消息：定义角色和报告规范
+        # 1. 收集所有消息并构建引用映射（每条消息独立编号）
+        all_messages = []
+        for tag, msgs in messages_by_tag.items():
+            all_messages.extend(msgs)
+
+        message_index, reference_list = self._build_message_references(all_messages)
+
+        logger.info(f"【AIReportGenerator】构建了{len(reference_list)}条消息引用")
+
+        # System消息：定义角色和报告规范（使用序号引用格式）
         system_content = """你是一位专业的AI行业分析师，擅长撰写结构化的AI日报。
 
 报告要求：
@@ -225,10 +236,12 @@ class AIReportGenerator:
 
 内容撰写与消息源引用规范（必须严格遵守）：
 1. 切记不要过度压缩：针对每条新闻不要只用一句话概括，要铺开阐释，深入展开背景、细节、影响等
-2. 对每个事件都必须明确标注消息源，用括号包裹，如：（Bloomberg）、（Reuters）
-3. 如果同一事件来自多个消息源，用逗号分隔，如：（Bloomberg, Reuters, Financial Times）
-4. 多个消息源的信息要都体现在描述中，不要遗漏任何来源
-5. 引用格式示例："根据多家媒体报道（Bloomberg, Reuters），OpenAI宣布了新的GPT-5模型。该模型在推理能力上有显著提升，特别是在数学和代码生成方面。这一突破标志着大语言模型在复杂任务处理上迈出了重要一步，预计将对AI应用开发产生深远影响。"
+2. 每个事件后必须用方括号标注引用序号，如：[1]、[2]、[1][3]（多个来源）
+3. 引用序号对应输入数据中的"引用X"标记，请务必准确匹配
+4. 如果同一事件来自多个消息源，连续标注多个序号：[1][2][5]
+5. 引用格式示例："OpenAI宣布了新的GPT-5模型[1][3]。该模型在推理能力上有显著提升，特别是在数学和代码生成方面。"
+6. 不要在方括号中写消息源名称，只写序号
+7. 参考来源列表会由系统自动添加，你不需要在报告中生成
 
 客观性与中立性原则：
 1. 对涉及中国的负面信息，必须保持中性和怀疑的态度
@@ -321,10 +334,20 @@ class AIReportGenerator:
             f"每板块:{tokens_per_section}"
         )
 
-        # 格式化消息详情（带token限制）
-        governance_section = f"\n## AI治理信息详情（全部{stats['governance_count']}条）\n{self._format_messages(messages_by_tag.get('AI治理信息', []), max_tokens=tokens_per_section)}"
-        research_section = f"\n## AI科研信息详情（全部{stats['research_count']}条）\n{self._format_messages(messages_by_tag.get('AI科研信息', []), max_tokens=tokens_per_section)}"
-        industry_section = f"\n## AI产业信息详情（全部{stats['industry_count']}条）\n{self._format_messages(messages_by_tag.get('AI产业信息', []), max_tokens=tokens_per_section)}"
+        # 格式化消息详情（带token限制和引用序号）
+        governance_text, governance_ids = self._format_messages(messages_by_tag.get('AI治理信息', []), max_tokens=tokens_per_section, message_index=message_index)
+        research_text, research_ids = self._format_messages(messages_by_tag.get('AI科研信息', []), max_tokens=tokens_per_section, message_index=message_index)
+        industry_text, industry_ids = self._format_messages(messages_by_tag.get('AI产业信息', []), max_tokens=tokens_per_section, message_index=message_index)
+
+        governance_section = f"\n## AI治理信息详情（全部{stats['governance_count']}条）\n{governance_text}"
+        research_section = f"\n## AI科研信息详情（全部{stats['research_count']}条）\n{research_text}"
+        industry_section = f"\n## AI产业信息详情（全部{stats['industry_count']}条）\n{industry_text}"
+
+        # 收集所有实际使用的消息ID
+        all_used_ids = governance_ids + research_ids + industry_ids
+
+        # 过滤reference_list，只保留实际使用的消息（保持原序号）
+        filtered_reference_list = self._filter_references(reference_list, all_used_ids)
 
         # 组装完整的user_content
         user_content = f"""{header_text}
@@ -340,10 +363,12 @@ class AIReportGenerator:
         total_tokens = system_tokens + self._estimate_tokens(user_content)
         logger.info(f"【AIReportGenerator】实际总tokens: {total_tokens} / {self.MAX_INPUT_TOKENS}")
 
-        return [
+        messages = [
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content}
         ]
+
+        return messages, filtered_reference_list
 
     def _estimate_tokens(self, text: str) -> int:
         """
@@ -379,29 +404,154 @@ class AIReportGenerator:
             lines.append(f"- {key}: {count}条")
         return "\n".join(lines)
 
-    def _format_messages(self, messages: List[Dict], max_tokens: Optional[int] = None) -> str:
+    def _build_message_references(self, messages: List[Dict]) -> tuple[Dict[str, int], List[Dict[str, Any]]]:
         """
-        格式化消息列表
+        构建消息级引用映射表（每条消息独立编号）
+
+        Args:
+            messages: 消息列表
+
+        Returns:
+            (message_index, reference_list)
+            - message_index: {message_id: 序号}
+            - reference_list: [{id, title, source_name, url, published_at}, ...]
+        """
+        message_index = {}
+        reference_list = []
+
+        for idx, msg in enumerate(messages, 1):
+            msg_id = msg.get('id', '')
+
+            # 为每条消息分配唯一序号
+            message_index[msg_id] = idx
+
+            # 构建引用条目（包含message_id用于后续过滤）
+            reference_list.append({
+                'id': idx,
+                'message_id': msg_id,  # 保存message_id用于过滤
+                'title': msg.get('title', '无标题'),
+                'source_name': msg.get('source_name', 'unknown'),
+                'url': msg.get('url', ''),
+                'published_at': msg.get('published_at')
+            })
+
+        return message_index, reference_list
+
+    def _filter_references(
+        self,
+        reference_list: List[Dict[str, Any]],
+        used_message_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        过滤未使用的引用（保持原有编号）
+
+        Args:
+            reference_list: 原始引用列表（包含所有消息）
+            used_message_ids: 实际使用的消息ID列表（按使用顺序）
+
+        Returns:
+            filtered_list: 过滤后的引用列表（保持原有序号）
+        """
+        # 构建message_id到reference的映射
+        id_to_ref = {}
+        for ref in reference_list:
+            id_to_ref[ref['message_id']] = ref
+
+        # 按used_message_ids的顺序重新构建引用列表（保持原有序号）
+        filtered_list = []
+        used_ids_set = set(used_message_ids)  # 转为集合加速查找
+
+        for ref in reference_list:
+            if ref['message_id'] in used_ids_set:
+                filtered_list.append(ref)
+
+        logger.info(
+            f"【AIReportGenerator】过滤引用：原始{len(reference_list)}条 → 实际使用{len(filtered_list)}条"
+        )
+
+        return filtered_list
+
+    def _append_references(self, content: str, reference_list: List[Dict[str, Any]]) -> str:
+        """
+        在报告内容后添加参考文献列表（每条消息独立编号）
+
+        Args:
+            content: LLM生成的报告内容
+            reference_list: 引用列表 [{id, title, source_name, url, published_at}, ...]
+
+        Returns:
+            添加了参考文献的完整报告
+        """
+        if not reference_list:
+            return content
+
+        # 构建参考文献章节
+        references_section = "\n\n---\n\n## 参考文献\n\n"
+
+        for ref in reference_list:
+            ref_id = ref['id']
+            title = ref['title']
+            source_name = ref['source_name']
+            url = ref['url']
+            published_at = ref['published_at']
+
+            # 格式化发布时间
+            if published_at:
+                time_str = published_at.strftime('%Y-%m-%d %H:%M')
+            else:
+                time_str = '未知时间'
+
+            # 格式：[1] 文章标题 - 消息源名称
+            #      https://example.com
+            #      发布时间：2025-12-21 10:30
+            references_section += f"[{ref_id}] {title} - {source_name}\n"
+            if url:
+                references_section += f"     {url}\n"
+            references_section += f"     发布时间：{time_str}\n\n"
+
+        return content + references_section
+
+    def _format_messages(
+        self,
+        messages: List[Dict],
+        max_tokens: Optional[int] = None,
+        message_index: Optional[Dict[str, int]] = None
+    ) -> tuple[str, List[str]]:
+        """
+        格式化消息列表（带引用序号）
 
         Args:
             messages: 消息列表
             max_tokens: 最大token数限制（可选），超过则截断
+            message_index: 消息序号映射 {message_id: 序号}，用于标注引用
 
         Returns:
-            格式化后的文本
+            (formatted_text, used_message_ids)
+            - formatted_text: 格式化后的文本
+            - used_message_ids: 实际使用的消息ID列表（用于过滤参考文献）
         """
         if not messages:
-            return "（无数据）"
+            return "（无数据）", []
 
         lines = []
         total_tokens = 0
+        used_message_ids = []  # 记录实际使用的消息ID
 
         for i, msg in enumerate(messages, 1):
             published_at = msg.get('published_at')
             time_str = published_at.strftime('%m-%d %H:%M') if published_at else '未知时间'
 
-            # 标题行
-            line = f"\n{i}. [{msg['source_name']}] {msg['title']}"
+            msg_id = msg.get('id', '')
+            source_name = msg.get('source_name', 'unknown')
+
+            # 如果提供了message_index，使用消息序号标注；否则使用消息源名称
+            if message_index and msg_id in message_index:
+                ref_id = message_index[msg_id]
+                # 标题行：列表序号 + 引用序号
+                line = f"\n{i}. [引用{ref_id}] {msg['title']}"
+            else:
+                line = f"\n{i}. [{source_name}] {msg['title']}"
+
             if msg.get('region'):
                 line += f" | 地区：{msg['region']}"
             line += f" | {time_str}"
@@ -428,21 +578,26 @@ class AIReportGenerator:
                 total_tokens += line_tokens
 
             lines.append(line)
+            used_message_ids.append(msg_id)  # 记录使用的消息ID
 
-        return "\n".join(lines)
+        return "\n".join(lines), used_message_ids
 
     def _build_governance_prompt(
         self,
         messages_by_tag: Dict[str, List[Dict]],
         stats: Dict[str, Any],
         report_date: date
-    ) -> List[Dict[str, str]]:
+    ) -> tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
         """
-        构建AI治理日报提示词（专注政策、法律、监管、伦理）
+        构建AI治理日报提示词（专注政策、法律、监管、伦理，带引用系统）
         """
         # 只获取治理信息
         governance_messages = messages_by_tag.get('AI治理信息', [])
         date_str = report_date.strftime('%Y年%m月%d日')
+
+        # 构建引用映射（每条消息独立编号）
+        message_index, reference_list = self._build_message_references(governance_messages)
+        logger.info(f"【AIReportGenerator:治理日报】构建了{len(reference_list)}条消息引用")
 
         system_content = """你是一位专业的AI治理政策分析师，长期跟踪全球AI监管动态、政策演变和伦理讨论。
 
@@ -458,9 +613,11 @@ class AIReportGenerator:
 
 内容撰写与消息源引用规范（必须严格遵守）：
 1. 针对每条新闻深入展开，阐释政策背景、细节、影响等，不要过度压缩
-2. 每个事件必须标注消息源，如（Partnership on AI）、（OECD）
-3. 多个消息源用逗号分隔，如（EU AI Act, OECD Policy Brief）
-4. 引用示例："根据OECD最新报告（OECD），欧盟AI法案的实施细则进一步明确了高风险AI系统的定义，这将对全球AI监管产生示范效应。"
+2. 每个事件后必须用方括号标注引用序号，如：[1]、[2]、[1][3]（多个来源）
+3. 引用序号对应输入数据中的"引用X"标记，请务必准确匹配
+4. 引用格式示例："欧盟AI法案的实施细则进一步明确了高风险AI系统的定义[1][3]，这将对全球AI监管产生示范效应。"
+5. 不要在方括号中写消息源名称，只写序号
+6. 参考来源列表会由系统自动添加，你不需要在报告中生成
 
 客观性与中立性原则：
 1. 对涉及中国的负面信息，保持中性和怀疑态度
@@ -538,8 +695,13 @@ class AIReportGenerator:
             f"消息可用:{available_tokens}"
         )
 
-        # 格式化消息详情（带token限制）
-        messages_section = f"\n## 治理信息详情（全部{len(governance_messages)}条）\n{self._format_messages(governance_messages, max_tokens=available_tokens)}"
+        # 格式化消息详情（带token限制和引用序号），并收集实际使用的消息ID
+        messages_text, used_message_ids = self._format_messages(
+            governance_messages,
+            max_tokens=available_tokens,
+            message_index=message_index
+        )
+        messages_section = f"\n## 治理信息详情（全部{len(governance_messages)}条）\n{messages_text}"
 
         # 组装完整的user_content
         user_content = f"""{header_text}
@@ -553,23 +715,32 @@ class AIReportGenerator:
         total_tokens = system_tokens + self._estimate_tokens(user_content)
         logger.info(f"【AIReportGenerator:治理日报】实际总tokens: {total_tokens} / {self.MAX_INPUT_TOKENS}")
 
-        return [
+        messages = [
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content}
         ]
+
+        # 过滤引用列表：只保留实际使用的消息
+        filtered_reference_list = self._filter_references(reference_list, used_message_ids)
+
+        return messages, filtered_reference_list
 
     def _build_research_prompt(
         self,
         messages_by_tag: Dict[str, List[Dict]],
         stats: Dict[str, Any],
         report_date: date
-    ) -> List[Dict[str, str]]:
+    ) -> tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
         """
-        构建AI科研日报提示词（专注论文、研究、算法、技术突破）
+        构建AI科研日报提示词（专注论文、研究、算法、技术突破，带引用系统）
         """
         # 只获取科研信息
         research_messages = messages_by_tag.get('AI科研信息', [])
         date_str = report_date.strftime('%Y年%m月%d日')
+
+        # 构建引用映射（每条消息独立编号）
+        message_index, reference_list = self._build_message_references(research_messages)
+        logger.info(f"【AIReportGenerator:科研日报】构建了{len(reference_list)}条消息引用")
 
         system_content = """你是一位资深的AI技术研究员，专注于前沿AI技术、学术进展和科研趋势。
 
@@ -585,8 +756,11 @@ class AIReportGenerator:
 
 内容撰写与消息源引用规范（必须严格遵守）：
 1. 针对每篇论文/研究深入展开技术细节、创新点、实验结果
-2. 每个研究必须标注来源，如（arXiv）、（Nature）
-3. 引用示例："根据最新发表的论文（arXiv:2025.12345），研究团队提出了新的注意力机制，在多个基准测试上实现了SOTA性能。"
+2. 每个研究后必须用方括号标注引用序号，如：[1]、[2]、[1][3]（多个来源）
+3. 引用序号对应输入数据中的"引用X"标记，请务必准确匹配
+4. 引用格式示例："研究团队提出了新的注意力机制[1]，在多个基准测试上实现了SOTA性能。"
+5. 不要在方括号中写消息源名称，只写序号
+6. 参考来源列表会由系统自动添加，你不需要在报告中生成
 
 技术准确性原则：
 1. 使用准确的技术术语和概念
@@ -664,9 +838,14 @@ class AIReportGenerator:
             f"消息可用:{available_tokens}"
         )
 
-        # 格式化消息详情（带token限制）
+        # 格式化消息详情（带token限制和引用序号），并收集实际使用的消息ID
+        messages_text, used_message_ids = self._format_messages(
+            research_messages,
+            max_tokens=available_tokens,
+            message_index=message_index
+        )
         messages_section = f"""## 科研信息详情（全部{len(research_messages)}条）
-{self._format_messages(research_messages, max_tokens=available_tokens)}"""
+{messages_text}"""
 
         # 组装完整的user_content
         user_content = f"""{header_text}
@@ -680,23 +859,32 @@ class AIReportGenerator:
         total_tokens = system_tokens + self._estimate_tokens(user_content)
         logger.info(f"【AIReportGenerator:科研日报】实际总tokens: {total_tokens} / {self.MAX_INPUT_TOKENS}")
 
-        return [
+        messages = [
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content}
         ]
+
+        # 过滤引用列表：只保留实际使用的消息
+        filtered_reference_list = self._filter_references(reference_list, used_message_ids)
+
+        return messages, filtered_reference_list
 
     def _build_industry_prompt(
         self,
         messages_by_tag: Dict[str, List[Dict]],
         stats: Dict[str, Any],
         report_date: date
-    ) -> List[Dict[str, str]]:
+    ) -> tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
         """
-        构建AI产业日报提示词（专注企业、投资、产品、应用、商业动态）
+        构建AI产业日报提示词（专注企业、投资、产品、应用、商业动态，带引用系统）
         """
         # 只获取产业信息
         industry_messages = messages_by_tag.get('AI产业信息', [])
         date_str = report_date.strftime('%Y年%m月%d日')
+
+        # 构建引用映射（每条消息独立编号）
+        message_index, reference_list = self._build_message_references(industry_messages)
+        logger.info(f"【AIReportGenerator:产业日报】构建了{len(reference_list)}条消息引用")
 
         system_content = """你是一位资深的AI产业分析师和投资顾问，专注于AI商业化、市场动态和投资趋势。
 
@@ -712,8 +900,11 @@ class AIReportGenerator:
 
 内容撰写与消息源引用规范（必须严格遵守）：
 1. 针对每条商业新闻深入展开战略分析、财务分析、竞争分析
-2. 每个事件必须标注来源，如（Bloomberg）、（TechCrunch）
-3. 引用示例："据Bloomberg报道（Bloomberg），OpenAI最新一轮融资估值达到1000亿美元，这标志着投资者对通用人工智能（AGI）商业化前景的强烈信心。"
+2. 每个事件后必须用方括号标注引用序号，如：[1]、[2]、[1][3]（多个来源）
+3. 引用序号对应输入数据中的"引用X"标记，请务必准确匹配
+4. 引用格式示例："OpenAI最新一轮融资估值达到1000亿美元[1]，这标志着投资者对通用人工智能（AGI）商业化前景的强烈信心。"
+5. 不要在方括号中写消息源名称，只写序号
+6. 参考来源列表会由系统自动添加，你不需要在报告中生成
 
 商业客观性原则：
 1. 区分公司公关稿和实质性商业新闻
@@ -792,9 +983,14 @@ class AIReportGenerator:
             f"消息可用:{available_tokens}"
         )
 
-        # 格式化消息详情（带token限制）
+        # 格式化消息详情（带token限制和引用序号），并收集实际使用的消息ID
+        messages_text, used_message_ids = self._format_messages(
+            industry_messages,
+            max_tokens=available_tokens,
+            message_index=message_index
+        )
         messages_section = f"""## 产业信息详情（全部{len(industry_messages)}条）
-{self._format_messages(industry_messages, max_tokens=available_tokens)}"""
+{messages_text}"""
 
         # 组装完整的user_content
         user_content = f"""{header_text}
@@ -808,10 +1004,15 @@ class AIReportGenerator:
         total_tokens = system_tokens + self._estimate_tokens(user_content)
         logger.info(f"【AIReportGenerator:产业日报】实际总tokens: {total_tokens} / {self.MAX_INPUT_TOKENS}")
 
-        return [
+        messages = [
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content}
         ]
+
+        # 过滤引用列表：只保留实际使用的消息
+        filtered_reference_list = self._filter_references(reference_list, used_message_ids)
+
+        return messages, filtered_reference_list
 
     async def _generate_report_content(
         self,
@@ -820,7 +1021,7 @@ class AIReportGenerator:
         report_date: date
     ) -> str:
         """
-        调用LLM生成报告内容
+        调用LLM生成报告内容（带引用系统）
 
         Args:
             messages_by_tag: 按标签分类的消息
@@ -828,10 +1029,10 @@ class AIReportGenerator:
             report_date: 报告日期
 
         Returns:
-            生成的报告内容（Markdown格式）
+            生成的报告内容（Markdown格式，包含参考来源）
         """
         llm_client = self._get_llm_client()
-        messages = self._build_report_prompt(messages_by_tag, stats, report_date)
+        messages, reference_list = self._build_report_prompt(messages_by_tag, stats, report_date)
 
         try:
             logger.info("【AIReportGenerator】调用LLM生成报告...")
@@ -846,7 +1047,12 @@ class AIReportGenerator:
             if hasattr(response, 'choices') and len(response.choices) > 0:
                 content = response.choices[0].message.content
                 logger.info(f"【AIReportGenerator】报告生成成功（长度：{len(content)}字符）")
-                return content
+
+                # 后处理：添加参考来源列表
+                final_content = self._append_references(content, reference_list)
+                logger.info(f"【AIReportGenerator】添加了{len(reference_list)}个参考来源")
+
+                return final_content
             else:
                 raise ValueError("LLM返回格式异常")
 
@@ -903,12 +1109,12 @@ class AIReportGenerator:
         report_date: date
     ) -> str:
         """
-        生成AI治理日报内容
+        生成AI治理日报内容（带引用系统）
 
         专注于政策、法律、监管、伦理相关内容
         """
         llm_client = self._get_llm_client()
-        messages = self._build_governance_prompt(messages_by_tag, stats, report_date)
+        messages, reference_list = self._build_governance_prompt(messages_by_tag, stats, report_date)
 
         try:
             logger.info("【AIReportGenerator】调用LLM生成治理日报...")
@@ -920,7 +1126,12 @@ class AIReportGenerator:
             if hasattr(response, 'choices') and len(response.choices) > 0:
                 content = response.choices[0].message.content
                 logger.info(f"【AIReportGenerator】治理日报生成成功（长度：{len(content)}字符）")
-                return content
+
+                # 后处理：添加参考来源列表
+                final_content = self._append_references(content, reference_list)
+                logger.info(f"【AIReportGenerator:治理日报】添加了{len(reference_list)}个参考来源")
+
+                return final_content
             else:
                 raise ValueError("LLM返回格式异常")
 
@@ -935,12 +1146,12 @@ class AIReportGenerator:
         report_date: date
     ) -> str:
         """
-        生成AI科研日报内容
+        生成AI科研日报内容（带引用系统）
 
         专注于论文、研究、算法、技术突破相关内容
         """
         llm_client = self._get_llm_client()
-        messages = self._build_research_prompt(messages_by_tag, stats, report_date)
+        messages, reference_list = self._build_research_prompt(messages_by_tag, stats, report_date)
 
         try:
             logger.info("【AIReportGenerator】调用LLM生成科研日报...")
@@ -952,7 +1163,12 @@ class AIReportGenerator:
             if hasattr(response, 'choices') and len(response.choices) > 0:
                 content = response.choices[0].message.content
                 logger.info(f"【AIReportGenerator】科研日报生成成功（长度：{len(content)}字符）")
-                return content
+
+                # 后处理：添加参考来源列表
+                final_content = self._append_references(content, reference_list)
+                logger.info(f"【AIReportGenerator:科研日报】添加了{len(reference_list)}个参考来源")
+
+                return final_content
             else:
                 raise ValueError("LLM返回格式异常")
 
@@ -967,12 +1183,12 @@ class AIReportGenerator:
         report_date: date
     ) -> str:
         """
-        生成AI产业日报内容
+        生成AI产业日报内容（带引用系统）
 
         专注于企业、投资、产品、应用、商业动态相关内容
         """
         llm_client = self._get_llm_client()
-        messages = self._build_industry_prompt(messages_by_tag, stats, report_date)
+        messages, reference_list = self._build_industry_prompt(messages_by_tag, stats, report_date)
 
         try:
             logger.info("【AIReportGenerator】调用LLM生成产业日报...")
@@ -984,7 +1200,12 @@ class AIReportGenerator:
             if hasattr(response, 'choices') and len(response.choices) > 0:
                 content = response.choices[0].message.content
                 logger.info(f"【AIReportGenerator】产业日报生成成功（长度：{len(content)}字符）")
-                return content
+
+                # 后处理：添加参考来源列表
+                final_content = self._append_references(content, reference_list)
+                logger.info(f"【AIReportGenerator:产业日报】添加了{len(reference_list)}个参考来源")
+
+                return final_content
             else:
                 raise ValueError("LLM返回格式异常")
 

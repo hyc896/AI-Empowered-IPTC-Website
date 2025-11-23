@@ -69,7 +69,8 @@ class PlaywrightCollectorBase(ABC):
             '--no-sandbox',
             '--disable-dev-shm-usage'
         ]
-        self.headless: bool = True
+        # 临时修改：Windows环境headless_shell未安装，使用非headless模式
+        self.headless: bool = False
 
     async def initialize(self) -> bool:
         """

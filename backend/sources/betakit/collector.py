@@ -27,6 +27,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from html import unescape
 import aiohttp
+import requests
 from sqlalchemy.exc import IntegrityError
 
 from backend.database.entities import BetaKitMessage
@@ -137,7 +138,21 @@ class BetaKitCollector:
             是否初始化成功
         """
         try:
-            self._session = aiohttp.ClientSession()
+            # 创建HTTP session with proper headers and timeout
+            timeout = aiohttp.ClientTimeout(total=60, connect=30, sock_read=30)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+            }
+            connector = aiohttp.TCPConnector(limit=10, limit_per_host=5, ttl_dns_cache=300)
+            self._session = aiohttp.ClientSession(
+                timeout=timeout,
+                headers=headers,
+                connector=connector
+            )
 
             if self.chroma_storage:
                 self.chroma_storage.create_collection(
@@ -211,23 +226,18 @@ class BetaKitCollector:
                 articles_list = await self._parse_rss_feed(feed_url, feed_key, latest_url)
 
                 if not articles_list:
-                    logger.debug(f"【{feed_name}】No new items to collect")
+                    logger.debug(f"【{feed_name}】无新文章")
                     continue
 
-                new_items = self._filter_new_items(articles_list, latest_url)
+                logger.info(f"【{feed_name}】发现 {len(articles_list)} 篇新文章")
 
-                if new_items:
-                    logger.info(f"【{feed_name}】Found {len(new_items)} new articles")
+                # 预处理：翻译 + 字段增强（在session外）
+                await self._preprocess_items(articles_list)
 
-                    # 预处理：翻译 + 字段增强（在session外）
-                    await self._preprocess_items(new_items)
-
-                    # 存储
-                    await self._store_items(new_items)
-                    total_new_articles += len(new_items)
-                    logger.info(f"【{feed_name}】采集到 {len(new_items)} 篇新文章")
-                else:
-                    logger.debug(f"【{feed_name}】所有文章已存在，无新数据")
+                # 存储
+                await self._store_items(articles_list)
+                total_new_articles += len(articles_list)
+                logger.info(f"【{feed_name}】成功采集 {len(articles_list)} 篇新文章")
 
                 await asyncio.sleep(2)
 
@@ -284,33 +294,42 @@ class BetaKitCollector:
             文章列表
         """
         try:
-            async with self._session.get(feed_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status != 200:
-                    logger.error(f"Failed to fetch RSS feed {feed_url}: HTTP {response.status}")
-                    return []
+            # 使用requests代替aiohttp（Windows环境下aiohttp连接问题的workaround）
+            def fetch_rss():
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+                }
+                response = requests.get(feed_url, headers=headers, timeout=30)
+                return response.status_code, response.text
 
-                xml_content = await response.text()
-                root = ET.fromstring(xml_content)
+            status_code, xml_content = await asyncio.to_thread(fetch_rss)
 
-                # 查找所有<item>元素
-                items = root.findall('.//item')
-                logger.info(f"【{feed_category}】RSS feed包含 {len(items)} 个条目")
+            if status_code != 200:
+                logger.error(f"Failed to fetch RSS feed {feed_url}: HTTP {status_code}")
+                return []
 
-                articles = []
-                for idx, item_elem in enumerate(items, 1):
-                    article_data = self._extract_article_from_item(item_elem, feed_category)
-                    if article_data:
-                        articles.append(article_data)
+            root = ET.fromstring(xml_content)
 
-                        # 遇到已存在URL立即停止
-                        if latest_url and article_data.get('url') == latest_url:
-                            logger.debug(f"【{feed_category}】遇到已存在URL，停止解析")
-                            break
-                    else:
-                        logger.debug(f"【{feed_category}】Item {idx} extraction failed (returned None)")
+            # 查找所有<item>元素
+            items = root.findall('.//item')
+            logger.info(f"【{feed_category}】RSS feed包含 {len(items)} 个条目")
 
-                logger.debug(f"【{feed_category}】成功提取 {len(articles)} 篇文章")
-                return articles
+            articles = []
+            for idx, item_elem in enumerate(items, 1):
+                article_data = self._extract_article_from_item(item_elem, feed_category)
+                if article_data:
+                    # 遇到已存在URL立即停止（不包含该URL）
+                    if latest_url and article_data.get('url') == latest_url:
+                        logger.debug(f"【{feed_category}】遇到已存在URL，停止解析")
+                        break
+
+                    articles.append(article_data)
+                else:
+                    logger.debug(f"【{feed_category}】Item {idx} extraction failed (returned None)")
+
+            logger.debug(f"【{feed_category}】成功提取 {len(articles)} 篇新文章")
+            return articles
 
         except Exception as e:
             logger.error(f"Failed to parse RSS feed {feed_url}: {e}", exc_info=True)
@@ -333,7 +352,8 @@ class BetaKitCollector:
             link_elem = item_elem.find('link')
             guid_elem = item_elem.find('guid')
 
-            if not title_elem or not link_elem:
+            # 必须使用 is None 检查，因为ElementTree.Element在boolean上下文中可能为False
+            if title_elem is None or link_elem is None:
                 logger.debug(f"【{feed_category}】缺少title或link元素")
                 return None
 
