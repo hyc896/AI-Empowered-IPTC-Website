@@ -1,21 +1,24 @@
 # -*- coding: utf-8 -*-
 
 """
-采集器控制API路由
-提供采集器的启动、停止、状态查询等功能
+采集器控制API路由（Celery版本）
+提供采集器的触发、状态查询等功能
 """
 
 import logging
 from datetime import datetime
+from typing import Dict, Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from ..services.collector_service import collector_service
-from ..api.schemas import (
-    CollectorStatusResponse, CollectorStatsResponse, CollectorActionResponse,
-    ErrorResponse
-)
+# 导入Celery任务
+from backend.tasks.collector_tasks import run_collector
+from backend.tasks import app as celery_app
+
+from ..database.connection import create_session
+from ..database.entities import MessageSource
+from ..api.schemas import CollectorActionResponse
 
 logger = logging.getLogger(__name__)
 
@@ -26,46 +29,31 @@ router = APIRouter(
 )
 
 
-@router.get("/status", response_model=CollectorStatusResponse)
-async def get_collector_status():
-    """
-    获取采集器服务状态
-
-    返回所有采集器的运行状态和健康信息
-    """
-    try:
-        if not collector_service.is_running():
-            return CollectorStatusResponse(
-                status="stopped",
-                collectors=[],
-                healthy_collectors=0,
-                total_collectors=0,
-                startup_time=None
-            )
-
-        # 获取健康检查结果
-        health_result = await collector_service.health_check()
-
-        return CollectorStatusResponse(**health_result)
-
-    except Exception as e:
-        logger.error(f"获取采集器状态失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取采集器状态失败: {str(e)}"
-        )
-
-
-@router.get("/list", response_model=list)
-async def get_collector_list():
+@router.get("/list")
+async def get_collector_list() -> List[Dict[str, Any]]:
     """
     获取采集器列表
 
-    返回所有可用的采集器名称
+    返回所有激活的消息源采集器信息
     """
     try:
-        status = collector_service.get_status()
-        return status.get("collectors", [])
+        with create_session() as db:
+            sources = db.query(MessageSource).filter(
+                MessageSource.is_active == True
+            ).all()
+
+            collector_list = []
+            for source in sources:
+                config = source.config or {}
+                collector_list.append({
+                    "name": source.name,
+                    "display_name": source.display_name or source.name,
+                    "category": source.category,
+                    "interval": config.get("interval", 300),
+                    "last_crawled_at": source.last_crawled_at.isoformat() if source.last_crawled_at else None
+                })
+
+            return collector_list
 
     except Exception as e:
         logger.error(f"获取采集器列表失败: {e}", exc_info=True)
@@ -75,263 +63,143 @@ async def get_collector_list():
         )
 
 
-@router.get("/{source_name}/stats", response_model=CollectorStatsResponse)
-async def get_collector_stats(source_name: str):
-    """
-    获取指定采集器的统计信息
-
-    返回采集器的运行统计和性能指标
-    """
-    try:
-        stats = collector_service.get_collector_stats(source_name)
-        stats["name"] = source_name  # 确保名称一致
-
-        return CollectorStatsResponse(**stats)
-
-    except Exception as e:
-        logger.error(f"获取采集器统计失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取采集器统计失败: {str(e)}"
-        )
-
-
-@router.post("/{source_name}/start", response_model=CollectorActionResponse)
-async def start_collector(source_name: str):
-    """
-    启动指定采集器
-
-    启动指定的消息源采集器
-    """
-    try:
-        # 检查服务是否运行
-        if not collector_service.is_running():
-            # 先启动整个服务
-            await collector_service.start()
-
-        # 如果采集器已经在运行，返回成功
-        if source_name in collector_service._collectors:
-            return CollectorActionResponse(
-                success=True,
-                message=f"采集器 {source_name} 已在运行中"
-            )
-
-        # 重新加载配置并启动采集器
-        success = await collector_service.restart_collector(source_name)
-
-        if success:
-            return CollectorActionResponse(
-                success=True,
-                message=f"采集器 {source_name} 启动成功"
-            )
-        else:
-            return CollectorActionResponse(
-                success=False,
-                message=f"采集器 {source_name} 启动失败"
-            )
-
-    except Exception as e:
-        logger.error(f"启动采集器失败 {source_name}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"启动采集器失败: {str(e)}"
-        )
-
-
-@router.post("/{source_name}/stop", response_model=CollectorActionResponse)
-async def stop_collector(source_name: str):
-    """
-    停止指定采集器
-
-    停止指定的消息源采集器
-    """
-    try:
-        success = await collector_service.stop_collector(source_name)
-
-        if success:
-            return CollectorActionResponse(
-                success=True,
-                message=f"采集器 {source_name} 停止成功"
-            )
-        else:
-            return CollectorActionResponse(
-                success=False,
-                message=f"采集器 {source_name} 停止失败，可能不存在或未运行"
-            )
-
-    except Exception as e:
-        logger.error(f"停止采集器失败 {source_name}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"停止采集器失败: {str(e)}"
-        )
-
-
 @router.post("/{source_name}/trigger", response_model=CollectorActionResponse)
-async def trigger_manual_collect(source_name: str):
+async def trigger_manual_collect(source_name: str) -> CollectorActionResponse:
     """
-    手动触发采集
+    手动触发采集（异步）
 
-    触发指定消息源的一次手动采集
+    立即将采集任务提交到Celery队列，返回task_id
+
+    Args:
+        source_name: 消息源名称
+
+    Returns:
+        {
+            "success": True,
+            "message": "采集任务已提交",
+            "task_id": "celery-task-id"
+        }
     """
     try:
-        success = await collector_service.trigger_manual_collect(source_name)
+        # 1. 验证消息源是否存在且激活
+        with create_session() as db:
+            source = db.query(MessageSource).filter(
+                MessageSource.name == source_name,
+                MessageSource.is_active == True
+            ).first()
 
-        if success:
-            return CollectorActionResponse(
-                success=True,
-                message=f"采集器 {source_name} 手动采集已触发"
-            )
-        else:
-            return CollectorActionResponse(
-                success=False,
-                message=f"采集器 {source_name} 手动采集触发失败"
-            )
+            if not source:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"消息源 '{source_name}' 不存在或未激活"
+                )
 
-    except Exception as e:
-        logger.error(f"触发手动采集失败 {source_name}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"触发手动采集失败: {str(e)}"
+        # 2. 提交Celery任务
+        task = run_collector.apply_async(
+            args=(source_name,),
+            queue='collector',
+            priority=5  # 手动触发优先级稍高
         )
 
-
-@router.post("/{source_name}/restart", response_model=CollectorActionResponse)
-async def restart_collector(source_name: str):
-    """
-    重启指定采集器
-
-    重启指定的消息源采集器
-    """
-    try:
-        success = await collector_service.restart_collector(source_name)
-
-        if success:
-            return CollectorActionResponse(
-                success=True,
-                message=f"采集器 {source_name} 重启成功"
-            )
-        else:
-            return CollectorActionResponse(
-                success=False,
-                message=f"采集器 {source_name} 重启失败"
-            )
-
-    except Exception as e:
-        logger.error(f"重启采集器失败 {source_name}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"重启采集器失败: {str(e)}"
-        )
-
-
-@router.post("/{source_name}/trigger", response_model=CollectorActionResponse)
-async def trigger_manual_collect(source_name: str):
-    """
-    手动触发采集
-
-    立即执行一次采集任务
-    """
-    try:
-        success = await collector_service.trigger_manual_collect(source_name)
-
-        if success:
-            return CollectorActionResponse(
-                success=True,
-                message=f"手动触发采集 {source_name} 成功"
-            )
-        else:
-            return CollectorActionResponse(
-                success=False,
-                message=f"手动触发采集 {source_name} 失败"
-            )
-
-    except Exception as e:
-        logger.error(f"手动触发采集失败 {source_name}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"手动触发采集失败: {str(e)}"
-        )
-
-
-@router.post("/start-all", response_model=CollectorActionResponse)
-async def start_all_collectors():
-    """
-    启动所有采集器
-
-    启动所有激活的消息源采集器
-    """
-    try:
-        if collector_service.is_running():
-            return CollectorActionResponse(
-                success=True,
-                message="采集器服务已在运行中"
-            )
-
-        await collector_service.start()
-
-        status = collector_service.get_status()
-        collector_count = status.get("collector_count", 0)
+        logger.info(f"【API】手动触发采集任务: {source_name}, task_id: {task.id}")
 
         return CollectorActionResponse(
             success=True,
-            message=f"已启动 {collector_count} 个采集器"
+            message=f"采集任务已提交到队列: {source_name}",
+            task_id=task.id
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"启动所有采集器失败: {e}", exc_info=True)
+        logger.error(f"触发采集任务失败 {source_name}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"启动所有采集器失败: {str(e)}"
+            detail=f"触发采集任务失败: {str(e)}"
         )
 
 
-@router.post("/stop-all", response_model=CollectorActionResponse)
-async def stop_all_collectors():
+@router.get("/{source_name}/task/{task_id}")
+async def get_task_status(source_name: str, task_id: str) -> Dict[str, Any]:
     """
-    停止所有采集器
+    查询Celery任务状态
 
-    停止所有运行的采集器
+    Args:
+        source_name: 消息源名称
+        task_id: Celery任务ID
+
+    Returns:
+        {
+            "task_id": str,
+            "state": str,  # PENDING/STARTED/SUCCESS/FAILURE/RETRY
+            "result": Any,
+            "info": str
+        }
     """
     try:
-        await collector_service.stop()
+        from celery.result import AsyncResult
 
-        return CollectorActionResponse(
-            success=True,
-            message="所有采集器已停止"
-        )
+        task_result = AsyncResult(task_id, app=celery_app)
+
+        response = {
+            "task_id": task_id,
+            "state": task_result.state,
+            "result": None,
+            "info": None
+        }
+
+        if task_result.state == 'SUCCESS':
+            response["result"] = task_result.result
+        elif task_result.state == 'FAILURE':
+            response["info"] = str(task_result.info)
+        elif task_result.state == 'PENDING':
+            response["info"] = "任务等待执行"
+        elif task_result.state == 'STARTED':
+            response["info"] = "任务执行中"
+
+        return response
 
     except Exception as e:
-        logger.error(f"停止所有采集器失败: {e}", exc_info=True)
+        logger.error(f"查询任务状态失败 {task_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"停止所有采集器失败: {str(e)}"
+            detail=f"查询任务状态失败: {str(e)}"
         )
 
 
 @router.get("/health")
-async def collector_health_check():
+async def collector_health_check() -> Dict[str, Any]:
     """
     采集器服务健康检查
 
-    检查采集器服务的运行状态
+    检查Celery worker状态
     """
     try:
-        if not collector_service.is_running():
+        # 使用Celery Inspect API检查worker状态
+        inspect = celery_app.control.inspect()
+
+        # 获取活跃worker
+        active_workers = inspect.active()
+        stats = inspect.stats()
+
+        if not active_workers or not stats:
             return JSONResponse(
                 status_code=503,
                 content={
-                    "status": "stopped",
+                    "status": "unhealthy",
                     "service": "collector",
-                    "message": "采集器服务未运行",
+                    "message": "没有活跃的Celery worker",
                     "timestamp": datetime.now().isoformat()
                 }
             )
 
-        health_result = await collector_service.health_check()
-        health_result["timestamp"] = datetime.now().isoformat()
-
-        return health_result
+        return {
+            "status": "healthy",
+            "service": "collector",
+            "workers": list(stats.keys()) if stats else [],
+            "worker_count": len(stats) if stats else 0,
+            "timestamp": datetime.now().isoformat()
+        }
 
     except Exception as e:
         logger.error(f"采集器健康检查失败: {e}", exc_info=True)
@@ -343,61 +211,4 @@ async def collector_health_check():
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }
-        )
-
-
-@router.get("/{source_name}/logs")
-async def get_collector_logs(
-    source_name: str,
-    lines: int = 100,
-    level: str = "INFO"
-):
-    """
-    获取采集器日志
-
-    返回指定采集器的最近日志
-    """
-    try:
-        # 这里可以实现日志获取逻辑
-        # 暂时返回模拟日志
-        return {
-            "source_name": source_name,
-            "logs": [
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "level": "INFO",
-                    "message": f"采集器 {source_name} 日志功能待实现"
-                }
-            ],
-            "total_lines": 1
-        }
-
-    except Exception as e:
-        logger.error(f"获取采集器日志失败 {source_name}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取采集器日志失败: {str(e)}"
-        )
-
-
-@router.post("/{source_name}/test", response_model=CollectorActionResponse)
-async def test_collector(source_name: str):
-    """
-    测试采集器配置
-
-    测试指定采集器的配置是否正确
-    """
-    try:
-        # 这里可以实现采集器配置测试逻辑
-        # 暂时返回成功
-        return CollectorActionResponse(
-            success=True,
-            message=f"采集器 {source_name} 配置测试通过"
-        )
-
-    except Exception as e:
-        logger.error(f"测试采集器配置失败 {source_name}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"测试采集器配置失败: {str(e)}"
         )

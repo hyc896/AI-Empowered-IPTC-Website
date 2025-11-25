@@ -83,7 +83,7 @@ web:
 
 ```bash
 # 开发模式启动
-conda activate personal_agent; python backend/main.py
+conda activate personal_agent; python start.py
 cd global-news-dashboard; npm install; npm run dev
 
 ```

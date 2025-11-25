@@ -29,8 +29,14 @@ logs/
 
 # Database files
 data/chromadb_mp/
+data/chromadb/
 *.sqlite3
 *.db
+
+# Celery runtime files
+data/celerybeat-schedule
+data/celerybeat-schedule-shm
+data/celerybeat-schedule-wal
 
 # OS
 .DS_Store
@@ -56,3 +62,4 @@ htmlcov/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+betakit_debug_output.txt

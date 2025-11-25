@@ -41,9 +41,9 @@ class ChromaDBStorage:
             mode = config.get('mode', 'local')
 
             if mode == 'server':
-                # 服务器模式
+                # 服务器模式（Celery worker使用）
                 host = config.get('host', 'localhost')
-                port = config.get('port', 11522)
+                port = config.get('port', 11530)
                 logger.info(f"【ChromaDB】服务器模式初始化: {host}:{port}")
                 self._client = chromadb.HttpClient(host=host, port=port)
             else:

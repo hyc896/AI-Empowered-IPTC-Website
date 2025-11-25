@@ -45,8 +45,12 @@ database:
 
   # ChromaDB配置
   chromadb:
-    mode: "local"  # local 或 server
+    mode: "${CHROMADB_MODE:local}"  # local 或 server
+    # 本地模式配置
     path: "${CHROMADB_PATH:./data/chromadb}"
+    # Server模式配置（Celery worker必须使用server模式）
+    host: "${CHROMADB_HOST:localhost}"
+    port: "${CHROMADB_PORT:11530}"
     # collection_prefix: 已移除，直接使用collection名称
 
   # Redis配置
@@ -225,3 +229,58 @@ browser_pool:
       - --disable-blink-features=AutomationControlled
   health_check:
     interval: 60     # 健康检查间隔（秒）
+
+# ========================
+# Celery Configuration
+# ========================
+celery:
+  # 消息队列Broker（使用Redis）
+  broker:
+    url: "${CELERY_BROKER_URL:redis://localhost:6379/1}"
+
+  # 结果存储Backend
+  result_backend:
+    url: "${CELERY_RESULT_BACKEND:redis://localhost:6379/2}"
+    result_expires: 3600  # 结果过期时间（秒），1小时
+
+  # Worker配置
+  worker:
+    concurrency: 4                # Worker并发数（根据CPU核心数调整）
+    prefetch_multiplier: 1        # 预取任务数（1=一次只拉取1个任务）
+    max_tasks_per_child: 1000     # 每个worker子进程最多执行1000个任务后重启（防止内存泄漏）
+    pool: "solo"                  # 进程池类型：solo（Windows推荐）/prefork（Unix）/gevent
+
+  # 任务路由（不同类型任务路由到不同队列）
+  task_routes:
+    # 采集器任务路由到collector队列
+    "backend.tasks.collector_tasks.*":
+      queue: "collector"
+      routing_key: "collector"
+    # AI日报任务路由到report队列（高优先级）
+    "backend.tasks.ai_report_tasks.*":
+      queue: "report"
+      routing_key: "report"
+      priority: 9
+
+  # 任务超时配置
+  task_time_limits:
+    # 采集器任务超时（10分钟）
+    run_collector: 600
+    # AI日报任务超时（30分钟）
+    generate_daily_report: 1800
+
+  # 任务执行配置
+  task:
+    acks_late: true                  # 任务执行成功后才确认（防止worker崩溃导致任务丢失）
+    reject_on_worker_lost: true      # Worker丢失时拒绝任务
+    serializer: "json"               # 任务序列化格式
+    result_serializer: "json"
+    accept_content: ["json"]         # 接受的内容类型
+
+  # Beat定时调度配置
+  beat:
+    schedule_filename: "./data/celerybeat-schedule"  # 定时任务调度文件路径
+
+  # 监控配置
+  monitoring:
+    flower_port: 5555                # Flower监控端口

@@ -240,8 +240,7 @@ async def list_reports(
 
 @router.post("/generate", response_model=dict)
 async def trigger_report_generation(
-    background_tasks: BackgroundTasks,
-    report_type: str = Query('comprehensive', description="报告类型（comprehensive/governance/research/industry）"),
+    report_type: str = Query('governance', description="报告类型（governance/research/industry）"),
     report_date: Optional[str] = Query(None, description="报告日期（YYYY-MM-DD格式），默认为今天")
 ):
     """
@@ -285,28 +284,26 @@ async def trigger_report_generation(
         }
         report_name = report_type_names.get(report_type, report_type)
 
-        # 根据类型调用对应的生成方法
-        async def generate_task():
-            generator = get_report_generator()
-            if report_type == 'governance':
-                await generator.generate_governance_report(target_date)
-            elif report_type == 'research':
-                await generator.generate_research_report(target_date)
-            elif report_type == 'industry':
-                await generator.generate_industry_report(target_date)
-            else:  # comprehensive
-                await generator.generate_daily_report(target_date, 'comprehensive')
+        # 导入Celery任务并提交到队列
+        from backend.tasks.ai_report_tasks import generate_daily_report as celery_generate_report
 
-        # 在后台任务中执行生成
-        background_tasks.add_task(generate_task)
+        task = celery_generate_report.apply_async(
+            kwargs={
+                'report_type': report_type if report_type != 'comprehensive' else 'governance',
+                'report_date': report_date
+            },
+            queue='report',
+            priority=9  # 高优先级
+        )
 
         date_info = f"（{report_date}）" if report_date else "（今天）"
-        logger.info(f"【AI日报】手动生成任务已提交：{report_name}{date_info}")
+        logger.info(f"【AI日报】手动生成任务已提交：{report_name}{date_info}, task_id: {task.id}")
 
         return {
             "message": f"{report_name}生成任务已提交{date_info}，正在后台执行",
             "report_type": report_type,
             "report_date": report_date or datetime.now().date().isoformat(),
+            "task_id": task.id,
             "timestamp": datetime.now().isoformat()
         }
 

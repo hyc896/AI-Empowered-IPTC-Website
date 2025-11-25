@@ -105,7 +105,8 @@
       "Bash(Get-Content \"d:\\TechWork\\message_platform\\backend\\sources\\inteligencia_argentina\\register.sql\" -Encoding UTF8)",
       "Bash(Get-Content d:/TechWork/message_platform/backend/sources/lanacion/register.sql -Encoding UTF8)",
       "Bash(nul)",
-      "Bash(sc qc:*)"
+      "Bash(sc qc:*)",
+      "Bash(celery -A backend.tasks inspect:*)"
     ],
     "deny": [],
     "ask": []

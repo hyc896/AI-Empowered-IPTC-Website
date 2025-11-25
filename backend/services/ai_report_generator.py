@@ -7,7 +7,7 @@ AI Daily Report Generator
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
 import uuid
@@ -62,13 +62,15 @@ class AIReportGenerator:
     def _collect_messages_from_last_24h(
         self,
         db: Session,
+        report_date: date,
         ai_tag_filter: Optional[str] = None
     ) -> Dict[str, List[Dict]]:
         """
-        收集过去24小时的AI标签消息
+        收集指定日期过去24小时的AI标签消息
 
         Args:
             db: 数据库会话
+            report_date: 报告日期
             ai_tag_filter: 可选的ai_tag过滤器，只收集特定分类的消息
                           - None: 收集所有分类（用于综合日报）
                           - 'AI治理信息': 只收集治理类消息
@@ -78,13 +80,22 @@ class AIReportGenerator:
         Returns:
             按ai_tag分类的消息字典
         """
-        cutoff_time = datetime.now() - timedelta(hours=24)
+        # 计算时间范围
+        today = datetime.now().date()
+        if report_date >= today:
+            # 如果是今天或未来日期，从现在往前推24小时
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=24)
+        else:
+            # 如果是历史日期，从当天23:59:59往前推24小时
+            end_time = datetime.combine(report_date, time(23, 59, 59))
+            start_time = end_time - timedelta(hours=24)
 
         messages_by_tag = defaultdict(list)
         ai_tag_models = self.registry.get_ai_tag_models()
 
         filter_msg = f"（过滤：{ai_tag_filter}）" if ai_tag_filter else "（收集全部）"
-        logger.info(f"【AIReportGenerator】开始收集消息{filter_msg}（截止时间：{cutoff_time}）")
+        logger.info(f"【AIReportGenerator】开始收集消息{filter_msg}（时间范围：{start_time} ~ {end_time}）")
         logger.info(f"【AIReportGenerator】扫描{len(ai_tag_models)}个表：{self.registry.get_ai_tag_table_names()}")
 
         total_collected = 0
@@ -97,7 +108,8 @@ class AIReportGenerator:
                 conditions = [
                     model_class.ai_tag.isnot(None),
                     model_class.ai_tag != '',
-                    model_class.crawled_at >= cutoff_time
+                    model_class.crawled_at >= start_time,
+                    model_class.crawled_at <= end_time
                 ]
 
                 # 如果指定了ai_tag_filter，添加过滤条件
@@ -493,21 +505,13 @@ class AIReportGenerator:
             title = ref['title']
             source_name = ref['source_name']
             url = ref['url']
-            published_at = ref['published_at']
-
-            # 格式化发布时间
-            if published_at:
-                time_str = published_at.strftime('%Y-%m-%d %H:%M')
-            else:
-                time_str = '未知时间'
 
             # 格式：[1] 文章标题 - 消息源名称
             #      https://example.com
-            #      发布时间：2025-12-21 10:30
             references_section += f"[{ref_id}] {title} - {source_name}\n"
             if url:
                 references_section += f"     {url}\n"
-            references_section += f"     发布时间：{time_str}\n\n"
+            references_section += "\n"
 
         return content + references_section
 
@@ -1222,14 +1226,17 @@ class AIReportGenerator:
         生成每日报告
 
         Args:
-            report_date: 报告日期（默认为今天）
+            report_date: 报告日期（datetime或date类型，默认为今天）
             report_type: 报告类型（comprehensive/governance/research/industry）
 
         Returns:
             报告ID（UUID），失败返回None
         """
+        # 统一转换为date类型
         if report_date is None:
             report_date = datetime.now().date()
+        elif isinstance(report_date, datetime):
+            report_date = report_date.date()
 
         report_type_names = {
             'comprehensive': '综合日报',
@@ -1265,7 +1272,7 @@ class AIReportGenerator:
                 ai_tag_filter = ai_tag_filter_map.get(report_type)
 
                 # 收集消息（根据类型过滤）
-                messages_by_tag = self._collect_messages_from_last_24h(db, ai_tag_filter)
+                messages_by_tag = self._collect_messages_from_last_24h(db, report_date, ai_tag_filter)
 
                 # 聚合统计
                 stats = self._aggregate_statistics(messages_by_tag)

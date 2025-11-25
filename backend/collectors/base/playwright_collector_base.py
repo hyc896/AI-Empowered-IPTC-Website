@@ -151,6 +151,43 @@ class PlaywrightCollectorBase(ABC):
 
             await asyncio.sleep(self.interval)
 
+    async def collect_once(self) -> Dict[str, Any]:
+        """
+        单次采集（公共接口，供Celery任务调用）
+
+        Returns:
+            采集结果字典: {
+                'collected': int,  # 采集数量
+                'success': bool,   # 是否成功
+                'error': str | None  # 错误信息
+            }
+        """
+        try:
+            # 检查浏览器是否已初始化
+            if not self._browser:
+                if not await self.initialize():
+                    return {
+                        'collected': 0,
+                        'success': False,
+                        'error': '浏览器初始化失败'
+                    }
+
+            # 调用子类实现的采集逻辑
+            await self._collect_once()
+
+            return {
+                'collected': 1,  # 子类可通过返回值覆盖
+                'success': True,
+                'error': None
+            }
+        except Exception as e:
+            logger.error(f"【{self.collector_name}】单次采集失败: {e}", exc_info=True)
+            return {
+                'collected': 0,
+                'success': False,
+                'error': str(e)
+            }
+
     async def stop(self) -> None:
         """
         停止采集器

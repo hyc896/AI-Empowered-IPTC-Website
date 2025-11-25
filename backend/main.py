@@ -93,65 +93,16 @@ async def startup():
         logger.info("【5/7】初始化LLM客户端...")
         await init_llm()
 
-        # 5. 初始化浏览器池
-        logger.info("【6/8】初始化浏览器池...")
-        try:
-            from backend.services import initialize_browser_pool
-            config = app_state.get("config", {})
-            browser_pool_config = config.get("browser_pool", {})
-
-            if browser_pool_config.get("enabled", True):
-                # 合并配置（capacity + lifecycle + launch）
-                pool_config = {
-                    **browser_pool_config.get('capacity', {}),
-                    **browser_pool_config.get('lifecycle', {}),
-                    **browser_pool_config.get('launch', {}),
-                    'health_check_interval': browser_pool_config.get('health_check', {}).get('interval', 60)
-                }
-                browser_pool = await initialize_browser_pool(pool_config)
-                app_state["browser_pool"] = browser_pool
-                logger.info(f"【浏览器池】初始化成功 (当前浏览器数: {len(browser_pool._browsers)})")
-            else:
-                logger.info("【浏览器池】已禁用")
-        except Exception as e:
-            logger.warning(f"【浏览器池】初始化失败: {e}，采集器将使用独立浏览器")
-
-        # 6. 启动采集器服务
-        logger.info("【7/8】启动采集器服务...")
-        await start_collector_service()
-
-        # 5.5. 启动向量同步检查（后台任务）
-        try:
-            from backend.services.message.vector_sync import startup_vector_sync
-
-            config = app_state.get("config", {})
-            vector_sync_config = config.get("vector_sync", {})
-
-            if vector_sync_config.get("enabled", True):
-                full_sync = (vector_sync_config.get("mode", "full") == "full")
-                logger.info(f"【向量同步】后台任务启动 ({'全量' if full_sync else '增量'}模式)")
-                asyncio.create_task(startup_vector_sync(full_sync=full_sync))
-            else:
-                logger.info("【向量同步】已禁用")
-
-        except Exception as e:
-            logger.warning(f"【向量同步】启动失败: {e}，将继续运行但无法自动同步向量")
+        # 注意：浏览器池、采集器、向量同步、定时调度已迁移到Celery Worker
+        logger.info("【注意】后台任务由Celery Worker管理，请确保以下服务已启动：")
+        logger.info("  - Celery Worker (采集器任务)")
+        logger.info("  - Celery Beat (定时调度)")
+        logger.info("  - ChromaDB Server (端口11530)")
 
         # 6. 加载完整的API路由
-        logger.info("【8/9】加载API路由...")
+        logger.info("【6/6】加载API路由...")
         load_api_routes()
         setup_basic_routes()
-
-        # 7. 启动调度器服务
-        logger.info("【9/9】启动调度器服务...")
-        try:
-            from backend.services.scheduler_service import get_scheduler_service
-            scheduler = get_scheduler_service()
-            scheduler.start()
-            app_state["scheduler_service"] = scheduler
-            logger.info("【调度器】启动成功")
-        except Exception as e:
-            logger.warning(f"【调度器】启动失败: {e}，定时任务将不可用")
 
         # 8. 显示数据库数据统计
         await display_database_stats()
@@ -172,21 +123,7 @@ async def shutdown():
     logger.info("=== 消息平台正在关闭 ===")
 
     try:
-        # 停止调度器服务
-        if "scheduler_service" in app_state:
-            logger.info("【关闭】正在停止调度器服务...")
-            app_state["scheduler_service"].shutdown(wait=True)
-
-        # 停止采集器服务
-        if "collector_service" in app_state:
-            logger.info("【关闭】正在停止采集器服务...")
-            await app_state["collector_service"].stop()
-
-        # 关闭浏览器池
-        if "browser_pool" in app_state:
-            logger.info("【关闭】正在关闭浏览器池...")
-            from backend.services import shutdown_browser_pool
-            await shutdown_browser_pool()
+        # 注意：Celery Worker和Beat需要独立停止
 
         # 关闭数据库连接
         if "db_config" in app_state:
@@ -197,7 +134,7 @@ async def shutdown():
             logger.info("【关闭】正在关闭存储连接...")
             # ChromaDB会自动关闭
 
-        # 输出Token统计摘要（新增）
+        # 输出Token统计摘要
         try:
             from backend.llm.token_metrics import get_token_metrics
             token_metrics = get_token_metrics()
@@ -205,7 +142,7 @@ async def shutdown():
         except Exception as e:
             logger.warning(f"【关闭】Token统计输出失败: {e}")
 
-        logger.info("=== 消息平台已停止 ===")
+        logger.info("=== FastAPI服务已停止 ===")
 
     except Exception as e:
         logger.error(f"【关闭失败】清理过程失败: {e}")
