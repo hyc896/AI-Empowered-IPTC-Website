@@ -12,6 +12,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
+# 禁用Playwright遥测（必须在导入playwright之前设置）
+os.environ["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"
+os.environ["PW_DISABLE_TS_STATS"] = "1"
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -349,6 +353,12 @@ def load_api_routes():
             app.include_router(ai_report_router, prefix="/api/v1")
         except ImportError as e:
             logger.warning(f"AI日报路由加载失败: {e}")
+
+        try:
+            from backend.api.monitor_routes import router as monitor_router
+            app.include_router(monitor_router, prefix="/api/v1")
+        except ImportError as e:
+            logger.warning(f"监控路由加载失败: {e}")
 
         app.include_router(search_router, prefix="/api/v1")
 

@@ -1,8 +1,15 @@
 <template>
   <div class="globe-2d-view">
     <!-- 控制面板 -->
-    <div class="control-panel">
-      <el-card class="control-card">
+    <div class="control-panel" :class="{ collapsed: controlPanelCollapsed }">
+      <!-- 收缩/展开按钮 -->
+      <div class="toggle-button" @click="controlPanelCollapsed = !controlPanelCollapsed">
+        <el-icon :size="20">
+          <component :is="controlPanelCollapsed ? 'DArrowRight' : 'DArrowLeft'" />
+        </el-icon>
+      </div>
+
+      <el-card v-show="!controlPanelCollapsed" class="control-card">
         <template #header>
           <div class="card-header">
             <span>筛选条件</span>
@@ -162,6 +169,7 @@ import {
 import VChart from 'vue-echarts'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
+import { DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import { useMessageStore } from '@/stores/message'
 import type { MessageSource } from '@/types/models'
 import { formatDateShort } from '@/utils/date'
@@ -187,9 +195,10 @@ const loading = ref(true)
 const mapReady = ref(false)
 const filterSourceId = ref<string>()
 const dateRange = ref<[string, string]>()
-const selectedIndustryTags = ref<string[]>([])
+const selectedIndustryTags = ref<string[]>(['人工智能'])
 const availableIndustryTags = ref<string[]>([])
 const drawerVisible = ref(false)
+const controlPanelCollapsed = ref(true)  // 默认收起
 const selectedCountry = ref('')
 const selectedCountryNewsCount = ref(0)
 const selectedCountryMessages = ref<any[]>([])
@@ -400,8 +409,10 @@ const loadStatistics = async () => {
 }
 
 const handleMapClick = async (params: any) => {
-  if (!params.data) return
+  // 标记这次点击在国家区域上（用于区分海洋点击）
+  lastClickOnCountry = true
 
+  // 点击国家区域
   const geoJsonName = params.name
   const chineseName = geoJSONToChinese(geoJsonName)
 
@@ -485,6 +496,42 @@ const handleFilterChange = async () => {
   await loadStatistics()
 }
 
+// 处理全球新闻点击（点击海洋/空白区域）
+const handleGlobalClick = async () => {
+  selectedCountry.value = '全球'
+  selectedCountryGeoName.value = ''
+  selectedCountryNewsCount.value = totalNews.value
+
+  // 清除任何现有的选中状态
+  if (chartRef.value) {
+    chartRef.value.dispatchAction({
+      type: 'unselect',
+      seriesIndex: 0
+    })
+  }
+
+  try {
+    const response = await geoApi.getMessagesByRegion('全球', {
+      source_id: filterSourceId.value || undefined,
+      start_date: dateRange.value?.[0] || undefined,
+      end_date: dateRange.value?.[1] || undefined,
+      industry_tags: selectedIndustryTags.value.length > 0 ? selectedIndustryTags.value.join(',') : undefined,
+      limit: 50,
+      offset: 0
+    })
+    selectedCountryMessages.value = response.items
+  } catch (error) {
+    console.error('获取全球消息失败:', error)
+    ElMessage.error('获取全球新闻失败')
+    selectedCountryMessages.value = []
+  }
+
+  drawerVisible.value = true
+}
+
+// 记录最后点击是否在国家区域上
+let lastClickOnCountry = false
+
 onMounted(async () => {
   await messageStore.fetchMessageSources()
 
@@ -498,6 +545,22 @@ onMounted(async () => {
   const mapLoaded = await loadWorldMap()
   if (mapLoaded) {
     await loadStatistics()
+
+    // 等待图表渲染完成后，监听空白区域点击
+    setTimeout(() => {
+      if (chartRef.value) {
+        const chart = chartRef.value
+        // 使用getZr()监听底层canvas的点击事件
+        chart.getZr().on('click', (params: any) => {
+          // 如果没有点击在国家区域上，显示全球新闻
+          if (!lastClickOnCountry) {
+            handleGlobalClick()
+          }
+          // 重置标记
+          lastClickOnCountry = false
+        })
+      }
+    }, 100)
   }
 })
 </script>
@@ -521,11 +584,41 @@ onMounted(async () => {
     left: 20px;
     z-index: 100;
     width: 280px;
+    transition: all 0.3s ease;
+
+    &.collapsed {
+      width: 50px;
+    }
+
+    .toggle-button {
+      position: absolute;
+      right: -15px;
+      top: 10px;
+      width: 30px;
+      height: 30px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      color: white;
+      z-index: 101;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.2);
+        transform: scale(1.1);
+      }
+    }
 
     .control-card {
       background: rgba(255, 255, 255, 0.05);
       backdrop-filter: blur(10px);
       border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: opacity 0.3s ease;
 
       :deep(.el-card__header) {
         background: transparent;

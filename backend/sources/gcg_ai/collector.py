@@ -559,10 +559,10 @@ class GCGAICollector(PlaywrightCollectorBase):
                 item['industry_tags'] = None
                 item['ai_tag'] = None
 
-        # 存储到MySQL和ChromaDB
-        mysql_task = self._store_to_mysql(items)
-        chroma_task = self._store_to_chroma(items)
-        await asyncio.gather(mysql_task, chroma_task, return_exceptions=True)
+        # 串行存储到MySQL和ChromaDB
+        # 注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文冲突
+        await self._store_to_mysql(items)
+        await self._store_to_chroma(items)
 
     async def _enrich_fields(self, title: str, content: str, message_id: str = None) -> Dict[str, Optional[str]]:
         """

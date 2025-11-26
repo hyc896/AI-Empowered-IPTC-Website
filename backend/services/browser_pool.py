@@ -14,6 +14,7 @@ Browser Pool Service
 
 import asyncio
 import logging
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -127,9 +128,13 @@ class BrowserPool:
         # 内部状态
         self._playwright: Optional[Playwright] = None
         self._browsers: Dict[str, BrowserWrapper] = {}
-        self._lock = asyncio.Lock()
+        # 【重要】使用线程锁而非asyncio锁，支持跨事件循环调用
+        # 原因：Celery任务使用独立事件循环，asyncio.Lock绑定到创建时的循环会报错
+        self._lock = threading.Lock()
         self._background_tasks: Set[asyncio.Task] = set()
         self._running = False
+        # 保存初始化时的事件循环引用（用于后台任务）
+        self._init_loop: Optional[asyncio.AbstractEventLoop] = None
 
         # 指标（用于监控）
         self._metrics = {
@@ -150,6 +155,9 @@ class BrowserPool:
         """
         try:
             logger.info(f"【BrowserPool】初始化中... (min={self.min_size}, max={self.max_size}, init={self.init_size})")
+
+            # 保存初始化时的事件循环（后台任务需要在此循环运行）
+            self._init_loop = asyncio.get_event_loop()
 
             # 启动Playwright
             self._playwright = await async_playwright().start()
@@ -238,10 +246,12 @@ class BrowserPool:
         2. 如果所有浏览器都满载且未达到max_size，创建新浏览器
         3. 否则等待或返回负载最低的浏览器
 
+        【重要】使用threading.Lock确保跨事件循环安全
+
         Returns:
             Browser对象，如果获取失败返回None
         """
-        async with self._lock:
+        with self._lock:  # 线程锁，非asyncio锁
             self._metrics['acquire_count'] += 1
 
             # 1. 找到最佳浏览器（页面数最少且健康）
@@ -261,28 +271,31 @@ class BrowserPool:
                 )
                 return best_wrapper.browser
 
-            # 2. 所有浏览器都满载，尝试扩容
-            if len(self._browsers) < self.max_size:
-                try:
-                    wrapper = await self._create_browser()
+        # 2. 所有浏览器都满载，尝试扩容（在锁外执行异步操作）
+        if len(self._browsers) < self.max_size:
+            try:
+                wrapper = await self._create_browser()
+                with self._lock:
                     wrapper.increment_page_count()
-                    logger.info(f"【BrowserPool】自动扩容: {len(self._browsers)}/{self.max_size}")
-                    return wrapper.browser
-                except Exception as e:
-                    logger.error(f"【BrowserPool】扩容失败: {e}")
+                logger.info(f"【BrowserPool】自动扩容: {len(self._browsers)}/{self.max_size}")
+                return wrapper.browser
+            except Exception as e:
+                logger.error(f"【BrowserPool】扩容失败: {e}")
 
-            # 3. 无法扩容，返回None（调用者需要处理）
-            logger.warning(f"【BrowserPool】无可用浏览器 (总数: {len(self._browsers)}, max: {self.max_size})")
-            return None
+        # 3. 无法扩容，返回None（调用者需要处理）
+        logger.warning(f"【BrowserPool】无可用浏览器 (总数: {len(self._browsers)}, max: {self.max_size})")
+        return None
 
     async def release(self, browser: Browser) -> None:
         """
         释放浏览器（减少页面计数）
 
+        【重要】使用threading.Lock确保跨事件循环安全
+
         Args:
             browser: 要释放的Browser对象
         """
-        async with self._lock:
+        with self._lock:  # 线程锁，非asyncio锁
             self._metrics['release_count'] += 1
 
             # 找到对应的wrapper
@@ -324,9 +337,9 @@ class BrowserPool:
 
     async def _cleanup_idle_browsers(self) -> None:
         """清理空闲或过期浏览器"""
-        async with self._lock:
-            to_destroy = []
+        to_destroy = []
 
+        with self._lock:  # 线程锁
             for browser_id, wrapper in self._browsers.items():
                 # 检查空闲超时
                 if wrapper.page_count == 0 and wrapper.idle_seconds > self.idle_timeout:
@@ -342,10 +355,12 @@ class BrowserPool:
                 if wrapper.total_pages_created > self.max_pages_per_browser * 2:
                     to_destroy.append((browser_id, f"pages {wrapper.total_pages_created}"))
 
-            # 执行销毁（保持min_size）
-            for browser_id, reason in to_destroy:
-                if len(self._browsers) > self.min_size:
-                    await self._destroy_browser(browser_id, reason)
+        # 执行销毁（在锁外执行异步操作，保持min_size）
+        for browser_id, reason in to_destroy:
+            with self._lock:
+                current_size = len(self._browsers)
+            if current_size > self.min_size:
+                await self._destroy_browser(browser_id, reason)
 
     async def _health_check_loop(self) -> None:
         """健康检查循环"""
@@ -360,7 +375,7 @@ class BrowserPool:
 
     async def _check_browser_health(self) -> None:
         """检查所有浏览器健康状态"""
-        async with self._lock:
+        with self._lock:  # 线程锁
             for wrapper in self._browsers.values():
                 try:
                     # 简单健康检查：尝试获取contexts
@@ -386,16 +401,21 @@ class BrowserPool:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
 
         # 关闭所有浏览器
-        async with self._lock:
+        with self._lock:  # 线程锁
             browser_ids = list(self._browsers.keys())
-            for browser_id in browser_ids:
-                await self._destroy_browser(browser_id, "shutdown")
+
+        for browser_id in browser_ids:
+            await self._destroy_browser(browser_id, "shutdown")
 
         # 停止Playwright
         if self._playwright:
             await self._playwright.stop()
 
         logger.info("【BrowserPool】已关闭")
+
+    async def cleanup(self) -> None:
+        """关闭浏览器池（shutdown的别名，兼容旧代码）"""
+        await self.shutdown()
 
     def get_stats(self) -> Dict:
         """

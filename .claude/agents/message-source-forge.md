@@ -44,6 +44,7 @@ class MyCollector(PlaywrightCollectorBase):
 - ❌ 禁止实现run()循环（由基类提供）
 - ❌ 禁止手动管理Playwright实例
 - ❌ 禁止手动创建BrowserPool
+- ❌ 禁止创建自己的事件循环（asyncio.run()、asyncio.new_event_loop()）
 
 **浏览器访问方式**：
 ```python
@@ -187,6 +188,50 @@ async def _store_to_mysql(self, items: List[Dict]):
 **VentureBeat参照标准**：
 - 第702-737行：_preprocess_single_item（翻译+字段增强）
 - 第904-946行：_generate_summary（调用translator）
+
+### 翻译服务接口参数
+
+**完整接口签名**：
+```python
+await translator.translate(
+    text: str,                    # 必需：待翻译文本
+    context: Optional[str],       # 可选：上下文信息（如"新闻标题"）
+    max_tokens: int = 50000,      # 可选：最大生成token数
+    source_lang: Optional[str],   # 可选：源语言代码（如"es"、"en"、"ja"）
+    target_lang: Optional[str],   # 可选：目标语言代码（默认"zh"）
+    **kwargs                      # 兜底：忽略未知参数
+)
+```
+
+**语言代码支持**：
+- en(英语), es(西班牙语), fr(法语), de(德语)
+- ja(日语), ko(韩语), ru(俄语), ar(阿拉伯语)
+- pt(葡萄牙语), it(意大利语), zh(中文)
+
+**非英语源的翻译调用示例**：
+```python
+# 西班牙语源（La Nacion, Inteligencia Argentina）
+translated = await self.translator.translate(
+    item['content'],
+    context="新闻正文",
+    source_lang="es",
+    target_lang="zh"
+)
+
+# 日语源（Nikkei Asia日文版）
+translated = await self.translator.translate(
+    item['content'],
+    context="财经新闻",
+    source_lang="ja",
+    target_lang="zh"
+)
+```
+
+**效果对比**：
+- 指定 `source_lang="es"` → 提示词："你是专业翻译助手，擅长将**西班牙语**翻译成中文"
+- 不指定 → 提示词："你是专业翻译助手，擅长将**外文**翻译成中文"
+
+**为什么重要**：明确指定源语言可以提高翻译质量，特别是对于非英语的小语种。
 
 ### 去重与监控策略
 

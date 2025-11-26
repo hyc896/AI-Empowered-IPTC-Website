@@ -7,8 +7,13 @@ Celery任务队列应用入口
 
 import asyncio
 import logging
+import os
 import sys
 from typing import Optional
+
+# 禁用Playwright遥测（必须在导入playwright之前设置）
+os.environ["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"
+os.environ["PW_DISABLE_TS_STATS"] = "1"
 
 from celery import Celery
 from celery.signals import worker_process_init, worker_process_shutdown
@@ -241,17 +246,16 @@ def shutdown_worker(**kwargs):
 
 
 # ========================
-# 辅助函数：在worker事件循环中运行异步任务
+# 辅助函数：在Worker事件循环中运行异步任务
 # ========================
 def run_async_task(coro):
     """
-    在worker事件循环中运行异步任务
+    在Worker的事件循环中运行异步任务
 
-    用于将异步函数包装为同步Celery任务
-
-    支持两种模式：
-    - 如果事件循环未运行：使用 run_until_complete()
-    - 如果事件循环已运行（solo pool）：使用 nest_asyncio 允许嵌套循环
+    【重要】必须使用Worker初始化时创建的事件循环，原因：
+    - BrowserPool/Playwright在Worker启动时初始化，绑定到_worker_event_loop
+    - Playwright的Browser对象只能在创建它的事件循环中使用
+    - 如果创建新的事件循环，Playwright调用会死锁
 
     Args:
         coro: 协程对象
@@ -259,22 +263,26 @@ def run_async_task(coro):
     Returns:
         异步任务的返回值
     """
-    loop = get_worker_event_loop()
+    global _worker_event_loop
 
-    # 检查事件循环是否正在运行
-    if loop.is_running():
-        # Solo pool模式：循环已运行，使用 nest_asyncio 允许嵌套
+    # 使用Worker的事件循环
+    if _worker_event_loop is None or _worker_event_loop.is_closed():
+        # 如果Worker事件循环不可用，创建新的（降级方案）
+        logger.warning("【run_async_task】Worker事件循环不可用，创建临时循环")
+        loop = asyncio.new_event_loop()
         try:
-            import nest_asyncio
-            nest_asyncio.apply(loop)
-        except ImportError:
-            logger.error("nest_asyncio未安装，solo pool模式下需要此库。请运行: pip install nest_asyncio")
-            raise
-
-        return loop.run_until_complete(coro)
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:
+                pass
+            loop.close()
     else:
-        # Prefork pool模式：循环未运行，直接执行
-        return loop.run_until_complete(coro)
+        # 使用Worker的事件循环（正常情况）
+        asyncio.set_event_loop(_worker_event_loop)
+        return _worker_event_loop.run_until_complete(coro)
 
 
 __all__ = [

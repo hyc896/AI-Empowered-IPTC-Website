@@ -457,9 +457,10 @@ class TechCrunchCollector(PlaywrightCollectorBase):
                     'ai_tag': ''
                 }
 
-        mysql_task = self._store_to_mysql(items, translations, enriched_fields, message_ids)
-        chroma_task = self._store_to_chroma(items, translations)
-        await asyncio.gather(mysql_task, chroma_task, return_exceptions=True)
+        # 串行存储到MySQL和ChromaDB
+        # 注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文冲突
+        await self._store_to_mysql(items, translations, enriched_fields, message_ids)
+        await self._store_to_chroma(items, translations)
 
     async def _store_to_mysql(
         self,

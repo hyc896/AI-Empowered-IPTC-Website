@@ -9,11 +9,20 @@ LLM Translator
 - 自动重试机制（指数退避）
 - 降级策略（翻译失败时返回截断原文）
 - 批量翻译优化
+- 网络错误优雅降级（不刷屏）
 """
 
 import asyncio
 import logging
 from typing import Optional, List
+
+# 网络错误类型（用于优雅降级）
+try:
+    from openai import APIConnectionError
+    import httpx
+    NETWORK_ERRORS = (APIConnectionError, httpx.ConnectError, httpx.TimeoutException, ConnectionError, OSError)
+except ImportError:
+    NETWORK_ERRORS = (ConnectionError, OSError)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +61,9 @@ class Translator:
         # 延迟加载LLM客户端（避免循环导入）
         self._llm_client = None
 
+        # 网络错误日志标记（避免重复刷屏）
+        self._network_error_logged = False
+
     def _get_llm_client(self):
         """延迟加载Fast LLM客户端"""
         if self._llm_client is None:
@@ -64,25 +76,86 @@ class Translator:
 
         return self._llm_client
 
-    def _build_messages(self, text: str, context: Optional[str] = None) -> List[dict]:
+    def _is_network_error(self, error: Exception) -> bool:
+        """
+        检测是否为网络连接错误
+
+        Args:
+            error: 异常对象
+
+        Returns:
+            是否为网络错误
+        """
+        # 直接类型检测
+        if isinstance(error, NETWORK_ERRORS):
+            return True
+
+        # 字符串特征检测（兜底）
+        error_str = str(error).lower()
+        network_keywords = [
+            "connection error",
+            "connect error",
+            "timeout",
+            "timed out",
+            "network",
+            "unreachable",
+            "connection refused",
+            "no route to host"
+        ]
+        return any(keyword in error_str for keyword in network_keywords)
+
+    def _handle_network_error(self) -> None:
+        """
+        处理网络错误（仅记录一次警告，避免刷屏）
+        """
+        if not self._network_error_logged:
+            logger.warning("【Translator】网络连接失败，翻译跳过（检查VPN/代理）")
+            self._network_error_logged = True
+
+    # 语言代码到中文名称的映射
+    LANG_NAMES = {
+        'en': '英语', 'es': '西班牙语', 'fr': '法语', 'de': '德语',
+        'ja': '日语', 'ko': '韩语', 'ru': '俄语', 'ar': '阿拉伯语',
+        'pt': '葡萄牙语', 'it': '意大利语', 'zh': '中文'
+    }
+
+    def _build_messages(
+        self,
+        text: str,
+        context: Optional[str] = None,
+        source_lang: Optional[str] = None,
+        target_lang: Optional[str] = None
+    ) -> List[dict]:
         """
         构建翻译消息（system/user结构）
 
         Args:
             text: 待翻译文本
             context: 上下文信息（如"学术论文摘要"、"新闻报道"）
+            source_lang: 源语言代码（如"es"、"en"）
+            target_lang: 目标语言代码（默认"zh"）
 
         Returns:
             消息列表
         """
+        # 解析目标语言（默认中文）
+        target = target_lang or 'zh'
+        target_name = self.LANG_NAMES.get(target, '中文')
+
+        # 解析源语言
+        source_name = self.LANG_NAMES.get(source_lang) if source_lang else None
+
         # System消息：定义角色和翻译规则
-        system_content = "你是专业翻译助手，擅长将外文翻译成中文。翻译要求：准确完整、术语专业、语句流畅、不添加解释或评论。"
+        if source_name:
+            system_content = f"你是专业翻译助手，擅长将{source_name}翻译成{target_name}。翻译要求：准确完整、术语专业、语句流畅、不添加解释或评论。"
+        else:
+            system_content = f"你是专业翻译助手，擅长将外文翻译成{target_name}。翻译要求：准确完整、术语专业、语句流畅、不添加解释或评论。"
 
         if context:
             system_content += f"当前翻译内容类型：{context}。"
 
         # User消息：直接提供待翻译文本
-        user_content = f"请将以下文本翻译成中文：\n\n{text}"
+        user_content = f"请将以下文本翻译成{target_name}：\n\n{text}"
 
         return [
             {"role": "system", "content": system_content},
@@ -134,7 +207,10 @@ class Translator:
         self,
         text: str,
         context: Optional[str] = None,
-        max_tokens: int = 50000
+        max_tokens: int = 50000,
+        source_lang: Optional[str] = None,
+        target_lang: Optional[str] = None,
+        **kwargs
     ) -> str:
         """
         翻译单个文本（异步）
@@ -143,6 +219,9 @@ class Translator:
             text: 待翻译文本
             context: 上下文信息（可选，如"学术论文摘要"）
             max_tokens: 最大生成token数
+            source_lang: 源语言（可选，如"es"、"en"，用于优化翻译提示）
+            target_lang: 目标语言（可选，默认"zh"中文）
+            **kwargs: 忽略其他未知参数（向后兼容）
 
         Returns:
             翻译后的中文文本，失败时返回截断的原文
@@ -163,8 +242,8 @@ class Translator:
 
                     start_time = asyncio.get_event_loop().time()
 
-                    # 构建system/user消息
-                    messages = self._build_messages(text, context)
+                    # 构建system/user消息（传递语言参数以优化提示）
+                    messages = self._build_messages(text, context, source_lang, target_lang)
 
                     # 调用Fast LLM
                     llm_client = self._get_llm_client()
@@ -187,6 +266,11 @@ class Translator:
                     return translation
 
                 except Exception as e:
+                    # 优先检测网络错误（直接降级，不重试，不刷屏）
+                    if self._is_network_error(e):
+                        self._handle_network_error()
+                        return self._fallback(text)
+
                     if attempt < self.max_retries - 1:
                         # 指数退避：1秒、2秒、4秒
                         retry_delay = 2 ** attempt
@@ -238,20 +322,16 @@ class Translator:
 
         logger.info(f"【Translator】开始批量翻译: {len(texts)}条文本")
 
-        # 创建翻译任务
-        tasks = [self.translate(text, context) for text in texts]
+        # 串行执行（避免solo pool模式下的任务上下文冲突）
+        # 注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather/as_completed会导致任务上下文混乱
+        results = []
+        for i, text in enumerate(texts, 1):
+            result = await self.translate(text, context)
+            results.append(result)
+            if show_progress and (i % 10 == 0 or i == len(texts)):
+                logger.info(f"【Translator】批量翻译进度: {i}/{len(texts)}")
 
-        # 并发执行（Semaphore自动控制并发数）
-        if show_progress:
-            results = []
-            for i, task in enumerate(asyncio.as_completed(tasks), 1):
-                result = await task
-                results.append(result)
-                if i % 10 == 0 or i == len(texts):
-                    logger.info(f"【Translator】批量翻译进度: {i}/{len(texts)}")
-            return results
-        else:
-            return await asyncio.gather(*tasks)
+        return results
 
     def translate_sync(self, text: str, context: Optional[str] = None) -> str:
         """
@@ -276,8 +356,8 @@ class Translator:
         return loop.run_until_complete(self.translate(text, context))
 
 
-# 全局单例
-_translator_instance: Optional[Translator] = None
+# 全局单例（已废弃：在Celery solo pool模式下会导致asyncio任务冲突）
+# _translator_instance: Optional[Translator] = None
 
 
 def get_translator(
@@ -285,20 +365,23 @@ def get_translator(
     max_retries: int = 3
 ) -> Translator:
     """
-    获取全局翻译器实例（单例模式）
+    创建翻译器实例
+
+    注意：在Celery solo pool模式下，每次调用都会创建新实例。
+    这是有意为之，避免多个并发任务共享同一个asyncio.Semaphore导致的任务冲突错误：
+    "RuntimeError: Leaving task does not match the current task"
 
     Args:
         max_concurrent: 最大并发翻译数
         max_retries: 最大重试次数
 
     Returns:
-        全局翻译器实例
+        翻译器实例（每次调用都是新实例）
     """
-    global _translator_instance
-    if _translator_instance is None:
-        _translator_instance = Translator(
-            max_concurrent=max_concurrent,
-            max_retries=max_retries
-        )
-        logger.info(f"【Translator】翻译器初始化: 并发={max_concurrent}, 重试={max_retries}")
-    return _translator_instance
+    # 每次调用创建新实例，避免solo pool模式下的Semaphore冲突
+    instance = Translator(
+        max_concurrent=max_concurrent,
+        max_retries=max_retries
+    )
+    logger.debug(f"【Translator】创建新实例: 并发={max_concurrent}, 重试={max_retries}")
+    return instance

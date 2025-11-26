@@ -241,19 +241,21 @@ async def list_reports(
 @router.post("/generate", response_model=dict)
 async def trigger_report_generation(
     report_type: str = Query('governance', description="报告类型（governance/research/industry）"),
-    report_date: Optional[str] = Query(None, description="报告日期（YYYY-MM-DD格式），默认为今天")
+    report_date: Optional[str] = Query(None, description="报告日期（YYYY-MM-DD格式），默认为今天"),
+    async_mode: bool = Query(False, description="是否异步执行（True=走队列，False=直接执行）")
 ):
     """
     手动触发AI日报生成
 
     Args:
-        report_type: 报告类型，默认为comprehensive
+        report_type: 报告类型
         report_date: 报告日期，默认为今天
-
-    用于测试或补充生成，任务在后台异步执行
+        async_mode: 执行模式
+            - False（默认）：直接执行，立即返回结果，不受采集队列阻塞
+            - True：提交到Celery队列，后台异步执行
 
     Returns:
-        任务提交确认信息
+        生成结果或任务提交确认
     """
     try:
         # 验证report_type
@@ -274,8 +276,6 @@ async def trigger_report_generation(
                     detail="日期格式错误，应为YYYY-MM-DD格式"
                 )
 
-        from ..services.ai_report_generator import get_report_generator
-
         report_type_names = {
             'comprehensive': '综合日报',
             'governance': '治理日报',
@@ -283,30 +283,72 @@ async def trigger_report_generation(
             'industry': '产业日报'
         }
         report_name = report_type_names.get(report_type, report_type)
-
-        # 导入Celery任务并提交到队列
-        from backend.tasks.ai_report_tasks import generate_daily_report as celery_generate_report
-
-        task = celery_generate_report.apply_async(
-            kwargs={
-                'report_type': report_type if report_type != 'comprehensive' else 'governance',
-                'report_date': report_date
-            },
-            queue='report',
-            priority=9  # 高优先级
-        )
-
+        actual_type = report_type if report_type != 'comprehensive' else 'governance'
         date_info = f"（{report_date}）" if report_date else "（今天）"
-        logger.info(f"【AI日报】手动生成任务已提交：{report_name}{date_info}, task_id: {task.id}")
 
-        return {
-            "message": f"{report_name}生成任务已提交{date_info}，正在后台执行",
-            "report_type": report_type,
-            "report_date": report_date or datetime.now().date().isoformat(),
-            "task_id": task.id,
-            "timestamp": datetime.now().isoformat()
-        }
+        if async_mode:
+            # 异步模式：提交到Celery队列
+            from backend.tasks.ai_report_tasks import generate_daily_report as celery_generate_report
 
+            task = celery_generate_report.apply_async(
+                kwargs={
+                    'report_type': actual_type,
+                    'report_date': report_date
+                },
+                queue='report',
+                priority=9
+            )
+
+            logger.info(f"【AI日报】手动生成任务已提交：{report_name}{date_info}, task_id: {task.id}")
+
+            return {
+                "message": f"{report_name}生成任务已提交{date_info}，正在后台执行",
+                "mode": "async",
+                "report_type": report_type,
+                "report_date": report_date or datetime.now().date().isoformat(),
+                "task_id": task.id,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            # 同步模式：直接执行，不走队列
+            from ..services.ai_report_generator import AIReportGenerator
+
+            logger.info(f"【AI日报】开始直接生成：{report_name}{date_info}")
+            start_time = datetime.now()
+
+            generator = AIReportGenerator()
+            target_datetime = datetime.combine(target_date, datetime.min.time()) if target_date else None
+
+            if actual_type == 'governance':
+                report_id = await generator.generate_governance_report(target_datetime)
+            elif actual_type == 'research':
+                report_id = await generator.generate_research_report(target_datetime)
+            elif actual_type == 'industry':
+                report_id = await generator.generate_industry_report(target_datetime)
+            else:
+                raise ValueError(f"未知的报告类型: {actual_type}")
+
+            duration = (datetime.now() - start_time).total_seconds()
+
+            if report_id:
+                logger.info(f"【AI日报】直接生成成功：{report_name}{date_info}, ID: {report_id}, 耗时: {duration:.2f}s")
+                return {
+                    "message": f"{report_name}生成成功",
+                    "mode": "sync",
+                    "report_type": report_type,
+                    "report_date": report_date or datetime.now().date().isoformat(),
+                    "report_id": report_id,
+                    "duration_seconds": duration,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"{report_name}生成失败：返回空ID"
+                )
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"触发AI日报生成失败: {e}", exc_info=True)
         raise HTTPException(

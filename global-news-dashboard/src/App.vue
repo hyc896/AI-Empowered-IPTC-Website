@@ -7,6 +7,7 @@
         <router-link to="/message-sources">消息源管理</router-link>
         <router-link to="/globe">3D地球</router-link>
         <router-link to="/globe-2d">2D地球</router-link>
+        <router-link to="/monitor">监控</router-link>
       </nav>
     </div>
     <div class="content-wrapper">

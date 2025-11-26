@@ -28,7 +28,7 @@ def generate_daily_report(self, report_type: str, report_date: Optional[str] = N
     生成AI日报（通用任务）
 
     Args:
-        report_type: 报告类型（governance/research/industry）
+        report_type: 报告类型（governance/research/industry/comprehensive）
         report_date: 报告日期（YYYY-MM-DD），None表示今天
 
     Returns:
@@ -76,6 +76,8 @@ def generate_daily_report(self, report_type: str, report_date: Optional[str] = N
                 return await generator.generate_research_report(target_date)
             elif report_type == 'industry':
                 return await generator.generate_industry_report(target_date)
+            elif report_type == 'comprehensive':
+                return await generator.generate_daily_report(target_date, report_type='comprehensive')
             else:
                 raise ValueError(f"未知的报告类型: {report_type}")
 

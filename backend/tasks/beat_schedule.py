@@ -2,32 +2,115 @@
 
 """
 Celery Beat Schedule
-定时任务调度配置（动态从数据库加载）
+定时任务调度配置
+
+设计原则：
+- 日报任务（从config.yaml读取）始终注册，不依赖数据库
+- 采集器任务（动态配置）从数据库加载，失败不影响日报任务
 """
 
 import logging
 from datetime import timedelta
 from celery.schedules import crontab, schedule
 
-from backend.database.connection import create_session
-from backend.database.entities import MessageSource
+from backend.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
 
-def get_beat_schedule():
-    """
-    动态生成Celery Beat调度配置
+# ========================
+# 日报任务默认配置（当config.yaml未配置时使用）
+# ========================
+DEFAULT_AI_REPORT_SCHEDULE = {
+    'governance': {'hour': 8, 'minute': 0},
+    'research': {'hour': 8, 'minute': 10},
+    'industry': {'hour': 8, 'minute': 20},
+    'comprehensive': {'hour': 8, 'minute': 30},
+}
 
-    从数据库读取激活的消息源，为每个source创建周期性任务
+
+def _load_ai_report_schedule() -> dict:
+    """
+    从config.yaml加载日报时间配置
+
+    配置路径: celery.beat.ai_report_schedule
 
     Returns:
-        调度配置字典
+        日报时间配置字典
     """
-    beat_schedule = {}
+    try:
+        config_manager = ConfigManager()
+        if not config_manager.load_config('config.yaml'):
+            logger.warning("【Beat调度】配置加载失败，使用默认日报时间")
+            return DEFAULT_AI_REPORT_SCHEDULE
+
+        config = config_manager.get_config()
+        ai_report_schedule = (
+            config
+            .get('celery', {})
+            .get('beat', {})
+            .get('ai_report_schedule', {})
+        )
+
+        if not ai_report_schedule:
+            logger.warning("【Beat调度】未找到ai_report_schedule配置，使用默认时间")
+            return DEFAULT_AI_REPORT_SCHEDULE
+
+        logger.info(f"【Beat调度】从config.yaml加载日报时间配置")
+        return ai_report_schedule
+
+    except Exception as e:
+        logger.error(f"【Beat调度】加载日报配置失败: {e}，使用默认时间")
+        return DEFAULT_AI_REPORT_SCHEDULE
+
+
+def _get_ai_report_tasks() -> dict:
+    """
+    获取AI日报定时任务配置（从config.yaml读取，始终可用）
+
+    Returns:
+        日报任务调度配置字典
+    """
+    report_tasks = {}
+    ai_report_schedule = _load_ai_report_schedule()
+
+    for report_type, schedule_config in ai_report_schedule.items():
+        hour = schedule_config.get('hour', 8)
+        minute = schedule_config.get('minute', 0)
+
+        task_name = f"ai_report_{report_type}_daily"
+        report_tasks[task_name] = {
+            'task': 'backend.tasks.ai_report_tasks.generate_daily_report',
+            'schedule': crontab(hour=hour, minute=minute),
+            'args': (report_type, None),
+            'options': {
+                'queue': 'report',
+                'priority': 9,
+            }
+        }
+        logger.info(
+            f"【Beat调度】注册日报任务: {report_type} (每天 {hour:02d}:{minute:02d})"
+        )
+
+    return report_tasks
+
+
+def _get_collector_tasks() -> dict:
+    """
+    获取采集器定时任务配置（动态从数据库加载）
+
+    数据库查询失败时返回空字典，不影响日报任务
+
+    Returns:
+        采集器任务调度配置字典
+    """
+    collector_tasks = {}
 
     try:
-        # 1. 从数据库加载激活的消息源
+        # 延迟导入，避免模块加载时触发数据库连接
+        from backend.database.connection import create_session
+        from backend.database.entities import MessageSource
+
         with create_session() as db:
             active_sources = db.query(MessageSource).filter(
                 MessageSource.is_active == True
@@ -35,22 +118,18 @@ def get_beat_schedule():
 
             logger.info(f"【Beat调度】加载到 {len(active_sources)} 个激活消息源")
 
-            # 2. 为每个消息源创建周期性任务
             for source in active_sources:
                 source_config = source.config or {}
-                interval_seconds = source_config.get('interval', 300)  # 默认5分钟
+                interval_seconds = source_config.get('interval', 300)
 
-                # 任务名称（唯一标识）
                 task_name = f"collector_{source.name}"
-
-                # 调度配置
-                beat_schedule[task_name] = {
+                collector_tasks[task_name] = {
                     'task': 'backend.tasks.collector_tasks.run_collector',
                     'schedule': timedelta(seconds=interval_seconds),
-                    'args': (source.name,),  # 传递source_name参数
+                    'args': (source.name,),
                     'options': {
-                        'queue': 'collector',  # 路由到collector队列
-                        'priority': 3,  # 中等优先级
+                        'queue': 'collector',
+                        'priority': 3,
                     }
                 }
 
@@ -60,50 +139,79 @@ def get_beat_schedule():
                 )
 
     except Exception as e:
-        logger.error(f"【Beat调度】加载消息源失败: {e}", exc_info=True)
+        logger.error(f"【Beat调度】加载消息源失败（采集器任务不可用）: {e}")
+        logger.warning("【Beat调度】日报任务不受影响，采集器任务需要手动触发或重启Beat")
 
-    # 3. 添加AI日报定时任务（固定时间）
-    beat_schedule.update({
-        # AI治理日报（每天早上8:00）
-        'ai_report_governance_daily': {
-            'task': 'backend.tasks.ai_report_tasks.generate_daily_report',
-            'schedule': crontab(hour=8, minute=0),
-            'args': ('governance', None),
-            'options': {
-                'queue': 'report',
-                'priority': 9,  # 高优先级
-            }
-        },
+    return collector_tasks
 
-        # AI科技日报（每天早上8:10）
-        'ai_report_research_daily': {
-            'task': 'backend.tasks.ai_report_tasks.generate_daily_report',
-            'schedule': crontab(hour=8, minute=10),
-            'args': ('research', None),
-            'options': {
-                'queue': 'report',
-                'priority': 9,
-            }
-        },
 
-        # AI产业日报（每天早上8:20）
-        'ai_report_industry_daily': {
-            'task': 'backend.tasks.ai_report_tasks.generate_daily_report',
-            'schedule': crontab(hour=8, minute=20),
-            'args': ('industry', None),
-            'options': {
-                'queue': 'report',
-                'priority': 9,
-            }
-        },
-    })
+_startup_triggered = False
 
-    logger.info(f"【Beat调度】调度配置生成完成（共 {len(beat_schedule)} 个任务）")
+def trigger_startup_collectors():
+    """
+    Beat启动时触发所有采集器（仅调用一次）
+
+    所有采集器任务直接加入队列排队
+    使用全局标记防止模块被多次导入时重复触发
+    """
+    global _startup_triggered
+    if _startup_triggered:
+        logger.debug("【Beat启动】启动触发已执行过，跳过")
+        return
+
+    _startup_triggered = True
+
+    try:
+        from backend.tasks.collector_tasks import trigger_all_collectors
+
+        result = trigger_all_collectors.apply_async(queue='default')
+        logger.info(f"【Beat启动】已触发启动任务: {result.id}（所有采集器将加入队列排队）")
+
+    except Exception as e:
+        logger.error(f"【Beat启动】触发启动任务失败: {e}")
+
+
+def get_beat_schedule() -> dict:
+    """
+    生成Celery Beat调度配置
+
+    执行顺序：
+    1. 先注册日报任务（从config.yaml读取，始终成功）
+    2. 再尝试加载采集器任务（动态配置，可能失败）
+    3. 注册启动触发任务（Beat启动后立即触发一轮采集）
+
+    Returns:
+        完整的调度配置字典
+    """
+    beat_schedule = {}
+
+    # 1. 先注册日报任务（从config.yaml读取，不依赖数据库，始终成功）
+    logger.info("【Beat调度】注册日报任务...")
+    report_tasks = _get_ai_report_tasks()
+    beat_schedule.update(report_tasks)
+    logger.info(f"【Beat调度】日报任务注册完成: {len(report_tasks)} 个")
+
+    # 2. 再尝试加载采集器任务（动态配置，可能失败）
+    logger.info("【Beat调度】加载采集器任务...")
+    collector_tasks = _get_collector_tasks()
+    beat_schedule.update(collector_tasks)
+    logger.info(f"【Beat调度】采集器任务加载完成: {len(collector_tasks)} 个")
+
+    # 3. 触发启动任务（仅在模块加载时执行一次）
+    trigger_startup_collectors()
+
+    # 4. 输出调度摘要
+    logger.info("=" * 50)
+    logger.info(f"【Beat调度】调度配置生成完成")
+    logger.info(f"  - 日报任务: {len(report_tasks)} 个")
+    logger.info(f"  - 采集器任务: {len(collector_tasks)} 个")
+    logger.info(f"  - 总计: {len(beat_schedule)} 个定时任务")
+    logger.info("=" * 50)
+
     return beat_schedule
 
 
 # ========================
 # 导出调度配置（供celeryconfig.py导入）
 # ========================
-# 注意：这个函数会在Celery Beat启动时被调用，动态生成调度配置
 beat_schedule = get_beat_schedule()

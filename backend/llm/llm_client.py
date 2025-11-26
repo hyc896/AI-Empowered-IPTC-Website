@@ -6,9 +6,10 @@ OpenAI-compatible LLM client for embedding and text generation
 """
 
 from enum import Enum
-from openai import OpenAI, APIError, AsyncOpenAI
+from openai import OpenAI, APIError, AsyncOpenAI, APIConnectionError
 from typing import List, Dict, Any, Optional
 import logging
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +63,20 @@ class LLMClient:
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
-            timeout=self.timeout
+            timeout=self.timeout,
+            max_retries=0  # 禁用内部重试，由上层业务逻辑控制重试
         )
 
         # 创建异步客户端
+        # 禁用max_retries：防止httpx内部重试机制与asyncio任务上下文冲突
+        # 在Celery+asyncio环境中，httpx重试回调可能在错误的任务上下文执行
+        # 导致RuntimeError: Leaving task does not match the current task
+        # 重试逻辑由FieldEnricherService/Translator等上层服务自行控制
         self.async_client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
-            timeout=self.timeout
+            timeout=self.timeout,
+            max_retries=0  # 禁用内部重试，由上层业务逻辑控制重试
         )
 
     def generate(self, prompt: str, **kwargs) -> str:
@@ -223,8 +230,12 @@ class LLMClient:
                 )
 
             return response
+        except (APIConnectionError, httpx.ConnectError, httpx.TimeoutException) as e:
+            # 网络连接错误：记录警告而非异常，避免刷屏
+            logger.warning(f"【LLM】网络连接失败（检查VPN/代理）: {type(e).__name__}")
+            raise
         except APIError as e:
-            logger.exception(f"OpenAI API async error: {e}")
+            logger.error(f"【LLM】API错误: {e}")
             raise
 
     def _openai_chat_completion_stream(self, messages: List[Dict[str, Any]], **kwargs):

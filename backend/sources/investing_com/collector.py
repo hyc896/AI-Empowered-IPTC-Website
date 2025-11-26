@@ -165,12 +165,15 @@ class InvestingComCollector:
         3. 批量存储到MySQL + ChromaDB
         """
         try:
-            # 并发采集所有RSS源
-            tasks = [
-                self._parse_single_feed(feed['url'], feed['category'])
-                for feed in self.rss_feeds
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # 串行采集所有RSS源
+            # 注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文冲突
+            results = []
+            for feed in self.rss_feeds:
+                try:
+                    result = await self._parse_single_feed(feed['url'], feed['category'])
+                    results.append(result)
+                except Exception as e:
+                    results.append(e)
 
             # 统计各源采集结果
             all_news = []
@@ -375,14 +378,16 @@ class InvestingComCollector:
 
     async def _store_items(self, items: List[Dict[str, Any]]) -> None:
         """
-        并发存储到MySQL和ChromaDB
+        串行存储到MySQL和ChromaDB
+
+        注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文冲突
+        改为串行执行以保证稳定性
 
         Args:
             items: 新闻列表
         """
-        mysql_task = self._store_to_mysql(items)
-        chroma_task = self._store_to_chroma(items)
-        await asyncio.gather(mysql_task, chroma_task, return_exceptions=True)
+        await self._store_to_mysql(items)
+        await self._store_to_chroma(items)
 
     async def _store_to_mysql(self, items: List[Dict[str, Any]]) -> None:
         """
@@ -392,6 +397,25 @@ class InvestingComCollector:
             items: 新闻列表
         """
         try:
+            # 标题去重：查询已存在的标题，过滤重复项
+            titles = [item['title'] for item in items]
+            with create_session() as db:
+                existing_titles = set(
+                    r[0] for r in db.query(InvestingComMessage.title).filter(
+                        InvestingComMessage.title.in_(titles)
+                    ).all()
+                )
+
+            # 过滤掉已存在标题的项
+            original_count = len(items)
+            items = [item for item in items if item['title'] not in existing_titles]
+            if original_count > len(items):
+                logger.info(f"【Investing.com】标题去重: {original_count} -> {len(items)} 条（过滤{original_count - len(items)}条重复）")
+
+            if not items:
+                logger.debug("【Investing.com】所有项已存在，跳过存储")
+                return
+
             # 预增强：在数据库事务外批量增强字段和翻译摘要
             logger.debug(f"【Investing.com】批量处理 {len(items)} 条消息（字段增强 + 摘要翻译）")
             for item in items:

@@ -328,14 +328,16 @@ class Kr36Collector(PlaywrightCollectorBase):
 
     async def _store_items(self, items: List[Dict[str, Any]]) -> None:
         """
-        并发存储到MySQL和ChromaDB
+        串行存储到MySQL和ChromaDB
+
+        注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文冲突
+        改为串行执行以保证稳定性
 
         Args:
             items: 快讯列表
         """
-        mysql_task = self._store_to_mysql(items)
-        chroma_task = self._store_to_chroma(items)
-        await asyncio.gather(mysql_task, chroma_task, return_exceptions=True)
+        await self._store_to_mysql(items)
+        await self._store_to_chroma(items)
 
     async def _store_to_mysql(self, items: List[Dict[str, Any]]) -> None:
         """

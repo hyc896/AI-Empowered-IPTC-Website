@@ -426,12 +426,14 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
         """
         logger.debug(f"【InteligenciaArgentina】预处理 [{idx}/{total}]: {item['title']}")
 
-        # 1. 翻译content生成中文summary
+        # 1. 翻译content生成中文summary（西班牙语→中文）
         if self.translator and item.get('content'):
             try:
                 translated_summary = await self.translator.translate(
                     item['content'],
-                    context="阿根廷AI新闻摘要"
+                    context="阿根廷AI新闻摘要",
+                    source_lang="es",
+                    target_lang="zh"
                 )
                 item['summary'] = translated_summary
             except Exception as e:
@@ -466,7 +468,10 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
 
     async def _store_items(self, items: List[Dict[str, Any]]) -> None:
         """
-        Storing阶段：批量写入MySQL和ChromaDB
+        Storing阶段：串行写入MySQL和ChromaDB
+
+        注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文冲突
+        改为串行执行以保证稳定性
 
         Args:
             items: 预处理后的文章列表
@@ -474,18 +479,16 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
         if not items:
             return
 
-        # 并发写入MySQL和ChromaDB
-        results = await asyncio.gather(
-            self._store_to_mysql(items),
-            self._store_to_chroma(items),
-            return_exceptions=True
-        )
+        # 串行写入MySQL和ChromaDB
+        try:
+            await self._store_to_mysql(items)
+        except Exception as e:
+            logger.error(f"【InteligenciaArgentina】MySQL存储失败: {e}", exc_info=True)
 
-        # 检查错误
-        for idx, result in enumerate(results):
-            if isinstance(result, Exception):
-                storage_name = ['MySQL', 'ChromaDB'][idx]
-                logger.error(f"【InteligenciaArgentina】{storage_name}存储失败: {result}", exc_info=result)
+        try:
+            await self._store_to_chroma(items)
+        except Exception as e:
+            logger.error(f"【InteligenciaArgentina】ChromaDB存储失败: {e}", exc_info=True)
 
     async def _store_to_mysql(self, items: List[Dict[str, Any]]) -> int:
         """

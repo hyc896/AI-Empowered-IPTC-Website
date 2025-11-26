@@ -11,12 +11,21 @@
 - 自动重试机制（指数退避）
 - 降级策略（分类失败时返回NULL）
 - 批量处理优化
+- 网络错误优雅降级（不刷屏）
 """
 
 import asyncio
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict
+
+# 网络错误类型（用于优雅降级）
+try:
+    from openai import APIConnectionError
+    import httpx
+    NETWORK_ERRORS = (APIConnectionError, httpx.ConnectError, httpx.TimeoutException, ConnectionError, OSError)
+except ImportError:
+    NETWORK_ERRORS = (ConnectionError, OSError)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +69,9 @@ class FieldEnricherService:
         self._total_429_count = 0  # 总429错误计数
         self._backoff_seconds = 0  # 当前退避等待时间
 
+        # 网络错误追踪（避免重复打印）
+        self._network_error_logged = False  # 是否已打印过网络错误
+
     def _get_llm_client(self):
         """延迟加载Fast LLM客户端"""
         if self._llm_client is None:
@@ -95,6 +107,47 @@ class FieldEnricherService:
         except Exception as e:
             # 事件发布失败不影响主流程
             logger.warning(f"事件发布失败: {e}", exc_info=False)
+
+    def _is_network_error(self, error: Exception) -> bool:
+        """
+        检测是否为网络连接错误
+
+        Args:
+            error: 异常对象
+
+        Returns:
+            是否为网络错误
+        """
+        # 直接检查异常类型
+        if isinstance(error, NETWORK_ERRORS):
+            return True
+
+        # 检查错误消息
+        error_str = str(error).lower()
+        return (
+            "connection error" in error_str or
+            "connect error" in error_str or
+            "connection refused" in error_str or
+            "network is unreachable" in error_str or
+            "all connection attempts failed" in error_str
+        )
+
+    def _handle_network_error(self, context: str) -> None:
+        """
+        处理网络错误（只打印一次警告）
+
+        Args:
+            context: 上下文描述（如"地区分类"、"行业分类"）
+        """
+        if not self._network_error_logged:
+            logger.warning(f"【FieldEnricher】网络连接失败，{context}跳过（检查VPN/代理）")
+            self._network_error_logged = True
+
+    def _reset_network_error_flag(self) -> None:
+        """网络恢复后重置标志"""
+        if self._network_error_logged:
+            logger.info("【FieldEnricher】网络已恢复")
+            self._network_error_logged = False
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """
@@ -175,10 +228,12 @@ class FieldEnricherService:
             logger.warning("【FieldEnricher】标题或内容为空，跳过增强")
             return {"region": None, "industry_tags": None, "ai_tag": None}
 
-        # 第一步：并发执行地区分类和行业分类
-        region_task = self._classify_region(title, content)
-        industry_task = self._classify_industry(title, content)
-        region, industry_tags = await asyncio.gather(region_task, industry_task)
+        # 串行执行地区分类和行业分类
+        # 注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文混乱
+        # 错误表现："RuntimeError: Leaving task does not match the current task"
+        # 因此改为串行执行，牺牲少量性能换取稳定性
+        region = await self._classify_region(title, content)
+        industry_tags = await self._classify_industry(title, content)
 
         # 第二步：检查industry_tags是否包含"人工智能"，决定是否执行ai_tag分类
         ai_tag = None
@@ -211,7 +266,10 @@ class FieldEnricherService:
         show_progress: bool = False
     ) -> List[Dict[str, Optional[str]]]:
         """
-        批量增强字段（异步，自动并发控制）
+        批量增强字段（串行执行）
+
+        注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather/as_completed会导致任务上下文混乱。
+        因此改为串行执行，牺牲并发性能换取稳定性。
 
         Args:
             messages: 消息列表，每条包含title和content
@@ -225,23 +283,15 @@ class FieldEnricherService:
 
         logger.info(f"【FieldEnricher】开始批量增强: {len(messages)}条消息")
 
-        # 创建增强任务
-        tasks = [
-            self.enrich_fields(msg.get('title', ''), msg.get('content', ''))
-            for msg in messages
-        ]
+        # 串行执行（避免solo pool模式下的任务上下文冲突）
+        results = []
+        for i, msg in enumerate(messages, 1):
+            result = await self.enrich_fields(msg.get('title', ''), msg.get('content', ''))
+            results.append(result)
+            if show_progress and (i % 10 == 0 or i == len(messages)):
+                logger.info(f"【FieldEnricher】批量增强进度: {i}/{len(messages)}")
 
-        # 并发执行（Semaphore自动控制并发数）
-        if show_progress:
-            results = []
-            for i, task in enumerate(asyncio.as_completed(tasks), 1):
-                result = await task
-                results.append(result)
-                if i % 10 == 0 or i == len(messages):
-                    logger.info(f"【FieldEnricher】批量增强进度: {i}/{len(messages)}")
-            return results
-        else:
-            return await asyncio.gather(*tasks)
+        return results
 
     async def _classify_region(
         self,
@@ -293,6 +343,11 @@ class FieldEnricherService:
                         return None
 
                 except Exception as e:
+                    # 优先检测网络错误（直接返回None，不重试，不刷屏）
+                    if self._is_network_error(e):
+                        self._handle_network_error("地区分类")
+                        return None
+
                     # 检测429错误
                     if self._is_rate_limit_error(e):
                         consecutive_429_in_this_call += 1
@@ -380,6 +435,11 @@ class FieldEnricherService:
                         return None
 
                 except Exception as e:
+                    # 优先检测网络错误（直接返回None，不重试，不刷屏）
+                    if self._is_network_error(e):
+                        self._handle_network_error("行业分类")
+                        return None
+
                     # 检测429错误
                     if self._is_rate_limit_error(e):
                         consecutive_429_in_this_call += 1
@@ -530,6 +590,11 @@ class FieldEnricherService:
                         return None
 
                 except Exception as e:
+                    # 优先检测网络错误（直接返回None，不重试，不刷屏）
+                    if self._is_network_error(e):
+                        self._handle_network_error("AI标签分类")
+                        return None
+
                     # 检测429错误
                     if self._is_rate_limit_error(e):
                         consecutive_429_in_this_call += 1
@@ -619,8 +684,8 @@ class FieldEnricherService:
         return False
 
 
-# 全局单例
-_field_enricher_instance: Optional[FieldEnricherService] = None
+# 全局单例（已废弃：在Celery solo pool模式下会导致asyncio任务冲突）
+# _field_enricher_instance: Optional[FieldEnricherService] = None
 
 
 def get_field_enricher(
@@ -628,20 +693,23 @@ def get_field_enricher(
     max_retries: int = 3
 ) -> FieldEnricherService:
     """
-    获取全局字段增强服务实例（单例模式）
+    创建字段增强服务实例
+
+    注意：在Celery solo pool模式下，每次调用都会创建新实例。
+    这是有意为之，避免多个并发任务共享同一个asyncio.Semaphore导致的任务冲突错误：
+    "RuntimeError: Leaving task does not match the current task"
 
     Args:
         max_concurrent: 最大并发数
         max_retries: 最大重试次数
 
     Returns:
-        全局字段增强服务实例
+        字段增强服务实例（每次调用都是新实例）
     """
-    global _field_enricher_instance
-    if _field_enricher_instance is None:
-        _field_enricher_instance = FieldEnricherService(
-            max_concurrent=max_concurrent,
-            max_retries=max_retries
-        )
-        logger.info(f"【FieldEnricher】字段增强服务初始化: 并发={max_concurrent}, 重试={max_retries}")
-    return _field_enricher_instance
+    # 每次调用创建新实例，避免solo pool模式下的Semaphore冲突
+    instance = FieldEnricherService(
+        max_concurrent=max_concurrent,
+        max_retries=max_retries
+    )
+    logger.debug(f"【FieldEnricher】创建新实例: 并发={max_concurrent}, 重试={max_retries}")
+    return instance

@@ -163,6 +163,18 @@
 - 详细日志记录异常路径和中间状态
 - 使用白名单机制防止配置注入
 
+## 函数接口设计原则
+
+**向后兼容性设计**：
+- 公共API函数应使用 `**kwargs` 吸收未知参数，避免调用方因传递额外参数而报错
+- 新增可选参数时使用默认值，不破坏现有调用
+- 示例：`def translate(self, text, context=None, source_lang=None, **kwargs)`
+
+**接口变更规范**：
+- 新增参数必须有默认值
+- 废弃参数应保留但标记为deprecated，不立即删除
+- 使用 `**kwargs` 作为兜底，防止调用方传递意外参数时崩溃
+
 ## LLM交互的隐藏陷阱与防护（message_platform特有）
 
 本项目大量使用LLM进行翻译、摘要生成等任务。以下经验教训来自真实生产问题，必须严格遵守。
@@ -793,6 +805,17 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 
 这些教训的根本目标：将隐性的脆弱性转化为显性的防护机制，从被动修复转向主动预防。
 
+### Celery + Asyncio 架构约束（message_platform特有）
+
+**背景**：Windows必须使用Celery Solo Pool（不支持fork），所有任务在单进程串行执行。
+
+**核心约束**：
+- 使用`run_async_task(coro)`执行异步代码，它会为每个任务创建独立事件循环
+- 禁止使用`asyncio.run()`或共享事件循环（会导致协程上下文冲突）
+- 跨任务共享资源使用`threading.Lock`而非`asyncio.Lock`
+
+**采集器开发者无需关心**：继承`PlaywrightCollectorBase`后，事件循环由框架管理。
+
 ### ChromaDB向量存储规范（message_platform特有）
 
 **集合管理**：
@@ -850,30 +873,6 @@ db.query(model).filter(model.external_id.in_(ids))  # 查询自动转换
 - 使用ls显示目录，而不是dir。牢记你在bash环境中。
 - 在Python代码的f-string或模板引擎中编写大模型提示词时，将花括号{和}用{{和}}转义，避免被解析为变量占位符。**此规则仅适用于提示词字面量**，不适用于：(1)Python字典定义 (2)文档中的API路径参数（应使用单花括号如{source_id}）
 - 不要在代码中加入emoji符号
-- **禁止用EOF、Python脚本或其他间接方式打印琐碎报告**：能直接文字输出解决的事情，直接输出文字。禁止用`cat <<EOF`、`python -c "print(...）"`等方式生成报告。这些工具仅用于实际的代码执行和系统操作，不是用来格式化输出给用户看的内容。
+- **禁止用EOF、Python脚本或其他间接方式打印琐碎报告**：能直接文字输出解决的事情，直接输出文字。禁止用`cat <<EOF`、`python -c "print(...）等方式生成报告。这些工具仅用于实际的代码执行和系统操作，不是用来格式化输出给用户看的内容。
 
-## 常见问题排查（message_platform特有）
-
-**采集器不工作**：
-1. 检查mp_message_sources表中is_active是否为1
-2. 检查CollectorService是否注册了对应的Collector类
-3. 检查日志中是否有异常信息
-4. 验证配置中的interval和schedule是否正确
-
-**向量检索无结果**：
-1. 检查ChromaDB集合是否存在（查看启动日志）
-2. 检查向量同步是否成功（查看统计信息）
-3. 检查相似度阈值是否过高（config.yaml中的similarity_threshold）
-4. 使用scripts/中的诊断脚本检查数据质量
-
-**API返回404**：
-1. 检查路由是否正确注册（main.py中的include_router）
-2. 检查端点路径是否正确（/api/v1前缀）
-3. 检查FastAPI文档（http://localhost:11528/docs）
-4. 查看日志中的路由加载信息
-
-**PersonalAgent无法调用**：
-1. 检查message_platform是否启动（/health端点）
-2. 检查personal_agent中的MESSAGE_PLATFORM_URL环境变量
-3. 检查网络连接（防火墙、端口占用）
-4. 查看message_platform_client的健康检查日志
+目前conda环境：personal_agent

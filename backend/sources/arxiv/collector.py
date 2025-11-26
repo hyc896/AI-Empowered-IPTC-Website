@@ -97,6 +97,44 @@ class ArxivCollector:
             logger.error(f"【arXiv】初始化失败: {e}")
             return False
 
+    async def collect_once(self) -> Dict[str, Any]:
+        """
+        执行单次采集（供Celery任务调用）
+
+        Returns:
+            采集结果字典: {
+                'collected': int,  # 新增论文数量
+                'success': bool,
+                'error': str | None
+            }
+        """
+        try:
+            # 从数据库加载最新配置
+            config = self._load_config_from_db()
+            if not config:
+                return {
+                    'collected': 0,
+                    'success': False,
+                    'error': '无法加载配置或消息源已禁用'
+                }
+
+            # 执行采集
+            collected = await self.fetch_and_store(config)
+
+            return {
+                'collected': collected,
+                'success': True,
+                'error': None
+            }
+
+        except Exception as e:
+            logger.error(f"【arXiv】采集失败: {e}", exc_info=True)
+            return {
+                'collected': 0,
+                'success': False,
+                'error': str(e)
+            }
+
     async def run(self) -> None:
         """
         主循环：定时采集
@@ -144,12 +182,15 @@ class ArxivCollector:
             logger.error(f"【arXiv】加载配置失败: {e}")
             return None
 
-    async def fetch_and_store(self, config: Dict[str, Any]) -> None:
+    async def fetch_and_store(self, config: Dict[str, Any]) -> int:
         """
         根据当前配置抓取论文
 
         Args:
             config: 配置字典
+
+        Returns:
+            新增论文数量
         """
         categories = config.get('categories', [])
         max_results = config.get('max_results_per_category', 50)
@@ -161,7 +202,7 @@ class ArxivCollector:
 
         if not categories:
             logger.warning(f"【arXiv】未配置分类，跳过采集")
-            return
+            return 0
 
         # 计算日期范围（arXiv API要求格式：YYYYMMDDhhmm，并且需要明确的结束日期）
         date_from = datetime.now() - timedelta(days=date_range_days)
@@ -192,6 +233,8 @@ class ArxivCollector:
 
         # 更新last_crawled_at
         self._update_last_crawled()
+
+        return total_saved
 
     async def _fetch_category(
         self, category: str, date_from: str, date_to: str, max_results: int

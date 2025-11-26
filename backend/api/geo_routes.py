@@ -187,13 +187,17 @@ async def get_messages_by_region(
     - 支持按消息源、时间范围、行业标签筛选
     - 按发布时间倒序排序
     - 分页返回
+    - 特殊值"全球"返回所有地区的消息
 
     参数：
-    - region_name: 地区名（中文），如"中国"、"美国"
+    - region_name: 地区名（中文），如"中国"、"美国"、"全球"
 
     返回：
     - 每条消息包含完整信息：标题、内容、消息源、链接
     """
+    # 判断是否为全球查询
+    is_global_query = region_name in ('全球', 'Global', '国际', 'International')
+
     try:
         with create_session() as db:
             # 1. 获取消息源列表
@@ -233,11 +237,23 @@ async def get_messages_by_region(
                     continue
 
                 try:
-                    # 查询该表中region匹配的消息
-                    # 使用LIKE匹配：region_name开头（如"中国"匹配"中国/广东省/深圳市"）
-                    msg_query = db.query(model).filter(
-                        model.region.like(f'{region_name}%')
-                    )
+                    # 构建基础查询
+                    msg_query = db.query(model)
+
+                    # 全球查询：不过滤region，返回所有有region字段的消息
+                    # 普通查询：使用LIKE匹配region_name开头
+                    if is_global_query:
+                        # 全球查询：仅需region字段非空
+                        if hasattr(model, 'region'):
+                            msg_query = msg_query.filter(
+                                model.region.isnot(None),
+                                model.region != ''
+                            )
+                    else:
+                        # 普通地区查询
+                        msg_query = msg_query.filter(
+                            model.region.like(f'{region_name}%')
+                        )
 
                     # 应用日期筛选
                     if start_date:

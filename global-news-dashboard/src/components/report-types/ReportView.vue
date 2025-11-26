@@ -139,9 +139,6 @@
       <div class="content-glow" :style="{ background: `radial-gradient(ellipse at top, ${theme.glowColor.replace('0.3', '0.05')}, transparent)` }"></div>
 
       <MarkdownRenderer :content="report.content" />
-
-      <!-- 底部扫描线 -->
-      <div class="bottom-scan-line" :style="scanLineStyle"></div>
     </div>
 
     <!-- 元信息 -->
@@ -822,14 +819,6 @@ defineExpose({
     pointer-events: none;
   }
 
-  .bottom-scan-line {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    animation: scan-horizontal 3s linear infinite;
-  }
 
   :deep(.markdown-content) {
     color: #ffffff !important;
@@ -1012,12 +1001,4 @@ defineExpose({
   }
 }
 
-@keyframes scan-horizontal {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
 </style>

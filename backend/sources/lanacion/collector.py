@@ -360,13 +360,15 @@ class LaNacionCollector(PlaywrightCollectorBase):
                 url = f"{self.BASE_URL}{url}"
 
             # 提取标题
+            # 注意：La Nación页面中h3是分类标签（如"Unión Europea"），h2才是真正的标题
+            # 优先使用.com-title类或h2，避免误取分类标签
             title = None
-            title_selectors = ['h3', 'h2', '[class*="text-"]']
+            title_selectors = ['.com-title', 'h2', 'h1', '[class*="title"]']
             for selector in title_selectors:
                 title_locator = element.locator(selector).first
                 if await title_locator.count() > 0:
                     title = await title_locator.inner_text()
-                    if title and len(title.strip()) > 10:
+                    if title and len(title.strip()) > 15:  # 提高阈值，分类标签通常较短
                         break
 
             if not title:
@@ -629,17 +631,16 @@ class LaNacionCollector(PlaywrightCollectorBase):
 
     async def _store_items(self, items: List[Dict[str, Any]]) -> None:
         """
-        存储文章到MySQL和ChromaDB
+        串行存储文章到MySQL和ChromaDB
+
+        注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文冲突
+        改为串行执行以保证稳定性
 
         Args:
             items: 文章列表
         """
-        # 并发存储
-        await asyncio.gather(
-            self._store_to_mysql(items),
-            self._store_to_chroma(items),
-            return_exceptions=True
-        )
+        await self._store_to_mysql(items)
+        await self._store_to_chroma(items)
 
     async def _store_to_mysql(self, items: List[Dict[str, Any]]) -> None:
         """
@@ -686,7 +687,7 @@ class LaNacionCollector(PlaywrightCollectorBase):
 
     async def _store_to_chroma(self, items: List[Dict[str, Any]]) -> None:
         """
-        存储到ChromaDB
+        存储到ChromaDB（逐条处理）
 
         Args:
             items: 文章列表
@@ -699,63 +700,43 @@ class LaNacionCollector(PlaywrightCollectorBase):
                 logger.warning("【La Nación】ChromaDB未初始化，跳过向量存储")
                 return
 
-            # 准备向量化数据
-            ids = []
-            documents = []
-            metadatas = []
-
-            for item in items:
-                # 使用message_id作为向量ID（稳定且唯一）
-                ids.append(item['message_id'])
-
-                # 组合标题和内容用于向量化
-                doc_text = f"{item['title']}\n\n{item['content']}"
-                documents.append(doc_text)
-
-                # 元数据
-                metadatas.append({
-                    'id': item['message_id'],
-                    'source_id': self.source_id,
-                    'external_id': item['external_id'],
-                    'title': item['title'],
-                    'summary': item.get('summary', '')[:500],
-                    'published_at': item['published_at'].isoformat() if item['published_at'] else '',
-                    'url': item['url'],
-                    'region': item.get('region', ''),
-                    'language': self.language,
-                })
-
-            if not ids:
-                return
-
-            # 生成嵌入向量
-            embeddings = await self.embedding_client.get_embeddings(documents)
-
-            if not embeddings:
-                logger.warning("【La Nación】嵌入向量生成失败")
-                return
-
-            # 批量存储（每批50条）
-            batch_size = 50
             stored_count = 0
+            for item in items:
+                try:
+                    # 组合标题和摘要用于向量化
+                    summary = item.get('summary', '')
+                    document_text = f"{item['title']} {summary}"
 
-            for i in range(0, len(ids), batch_size):
-                batch_ids = ids[i:i + batch_size]
-                batch_embeddings = embeddings[i:i + batch_size]
-                batch_documents = documents[i:i + batch_size]
-                batch_metadatas = metadatas[i:i + batch_size]
+                    # 生成嵌入向量（使用正确的方法名）
+                    embedding = self.embedding_client.generate_embedding(document_text)
 
-                self.chroma_storage.upsert(
-                    collection_name=self.chroma_collection,
-                    ids=batch_ids,
-                    embeddings=batch_embeddings,
-                    documents=batch_documents,
-                    metadatas=batch_metadatas
-                )
+                    # 使用message_id作为ChromaDB ID
+                    chroma_id = item.get('message_id') or item.get('external_id') or str(uuid.uuid4())
 
-                stored_count += len(batch_ids)
+                    self.chroma_storage.upsert(
+                        collection_name=self.chroma_collection,
+                        ids=[chroma_id],
+                        documents=[document_text],
+                        metadatas=[{
+                            'id': item.get('message_id', ''),
+                            'source_id': self.source_id,
+                            'external_id': item.get('external_id', ''),
+                            'title': item['title'],
+                            'summary': summary[:500] if summary else '',
+                            'published_at': item['published_at'].isoformat() if item.get('published_at') else '',
+                            'url': item['url'],
+                            'region': item.get('region', ''),
+                            'language': self.language,
+                        }],
+                        embeddings=[embedding]
+                    )
+                    stored_count += 1
+                    logger.debug(f"【La Nación】ChromaDB存储: {item['url']}")
+                except Exception as e:
+                    logger.error(f"【La Nación】单条ChromaDB存储失败: {e}")
 
-            logger.info(f"【La Nación】ChromaDB存储完成: {stored_count} 条")
+            if stored_count > 0:
+                logger.info(f"【La Nación】ChromaDB存储完成: {stored_count} 条")
 
         except Exception as e:
             logger.error(f"【La Nación】ChromaDB存储失败: {e}")

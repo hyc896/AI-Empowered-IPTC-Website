@@ -147,7 +147,7 @@ class VentureBeatCollector(PlaywrightCollectorBase):
         单次采集（流式处理架构）
 
         流程（Fail Fast原则）：
-        1. 获取MySQL中最新文章URL
+        1. 获取MySQL中已存在的URL集合（用于去重）
         2. 遍历所有启用的栏目
         3. 逐栏目采集 → 分批处理（每批10篇）
         4. 每批：访问详情页 → 翻译 → 存储 → 下一批
@@ -157,10 +157,11 @@ class VentureBeatCollector(PlaywrightCollectorBase):
         - 边采集边处理，不等待全部完成
         - 分批控制并发翻译，防止API过载
         - 单条失败立即暴露，不阻塞后续处理
+        - 使用URL集合去重，支持多栏目独立检测
         """
         try:
-            latest_url = await self._get_latest_stored_url()
-            logger.debug(f"【VentureBeat】Latest stored URL: {latest_url}")
+            existing_urls = await self._get_existing_urls()
+            logger.info(f"【VentureBeat】已存在 {len(existing_urls)} 条URL用于去重")
 
             total_processed = 0
 
@@ -172,7 +173,7 @@ class VentureBeatCollector(PlaywrightCollectorBase):
                     continue
 
                 logger.info(f"【VentureBeat】开始采集栏目: {category_config['display']}")
-                articles = await self._scrape_category(category_config, latest_url)
+                articles = await self._scrape_category(category_config, existing_urls)
 
                 if not articles:
                     logger.debug(f"【VentureBeat】栏目 {category_config['display']} 无新文章")
@@ -228,43 +229,44 @@ class VentureBeatCollector(PlaywrightCollectorBase):
         except Exception as e:
             logger.error(f"【VentureBeat】采集错误: {e}", exc_info=True)
 
-    async def _get_latest_stored_url(self) -> Optional[str]:
+    async def _get_existing_urls(self, limit: int = 1000) -> set:
         """
-        获取MySQL中最新文章的URL（使用ORM）
+        获取MySQL中已存在的URL集合（用于去重）
+
+        Args:
+            limit: 最多获取的URL数量（默认1000，覆盖近期数据）
 
         Returns:
-            最新URL，如果没有返回None
+            已存在URL的集合
         """
         try:
             with create_session() as db:
-                latest = db.query(VentureBeatMessage).filter(
+                results = db.query(VentureBeatMessage.url).filter(
                     VentureBeatMessage.source_id == self.source_id,
                     VentureBeatMessage.url.isnot(None)
                 ).order_by(
-                    VentureBeatMessage.published_at.desc()
-                ).first()
+                    VentureBeatMessage.crawled_at.desc()
+                ).limit(limit).all()
 
-                if latest and latest.url:
-                    return str(latest.url)
-                return None
+                return {str(row[0]) for row in results if row[0]}
         except Exception as e:
-            logger.error(f"【VentureBeat】Failed to get latest URL: {e}")
-            return None
+            logger.error(f"【VentureBeat】Failed to get existing URLs: {e}")
+            return set()
 
     async def _scrape_category(
         self,
         category_config: Dict[str, str],
-        latest_url: Optional[str]
+        existing_urls: set
     ) -> List[Dict[str, Any]]:
         """
         爬取单个栏目的文章列表
 
         Args:
             category_config: 栏目配置
-            latest_url: 最新已存储的URL，遇到此URL立即停止
+            existing_urls: 已存在的URL集合，用于去重
 
         Returns:
-            文章列表
+            文章列表（仅包含新文章）
         """
         page: Optional[Page] = None
         max_retries = 3
@@ -330,10 +332,14 @@ class VentureBeatCollector(PlaywrightCollectorBase):
             articles_list = []
             load_more_attempts = 0
             max_load_attempts = 20  # 最多滚动20次
+            consecutive_all_duplicate = 0  # 连续全部重复计数
+            max_consecutive_all_duplicate = 2  # 连续2次全部重复则停止（说明已到达旧内容区域）
             consecutive_no_new = 0
             max_consecutive_no_new = 3  # 连续3次无新内容则停止
 
             logger.info(f"【VentureBeat】开始滚动加载 {category_config['display']} 栏目...")
+
+            processed_element_count = 0  # 已处理的元素数量
 
             while load_more_attempts < max_load_attempts:
                 # 获取当前所有文章元素
@@ -342,8 +348,10 @@ class VentureBeatCollector(PlaywrightCollectorBase):
                 logger.debug(f"【VentureBeat】当前页面文章数: {current_count}")
 
                 # 从上次结束的位置开始提取新文章
-                start_index = len(articles_list)
-                for idx in range(start_index, current_count):
+                new_in_this_scroll = 0
+                duplicate_in_this_scroll = 0
+
+                for idx in range(processed_element_count, current_count):
                     article_elem = article_elements[idx]
                     article_data = await self._extract_article_from_element(article_elem, category_config['name'])
 
@@ -354,25 +362,50 @@ class VentureBeatCollector(PlaywrightCollectorBase):
                     if not article_url:
                         continue
 
-                    # 遇到已存在URL立即停止
-                    if latest_url and article_url == latest_url:
-                        logger.info(f"【VentureBeat】遇到已存储URL，停止采集（共 {len(articles_list)} 篇新文章）")
-                        return articles_list
+                    # 检查URL是否已存在
+                    if article_url in existing_urls:
+                        duplicate_in_this_scroll += 1
+                        logger.debug(f"【VentureBeat】跳过已存在URL: {article_url[:60]}...")
+                        continue
 
-                    # 添加category_url用于Referer头
+                    # 新文章：添加到列表
                     article_data['category_url'] = category_config['url']
                     articles_list.append(article_data)
+                    new_in_this_scroll += 1
 
-                # 检查是否有新文章
-                if len(articles_list) == start_index:
+                processed_element_count = current_count
+
+                # 智能停止逻辑
+                if new_in_this_scroll == 0 and duplicate_in_this_scroll > 0:
+                    # 本次滚动全部是重复的
+                    consecutive_all_duplicate += 1
+                    consecutive_no_new = 0
+                    logger.debug(
+                        f"【VentureBeat】本次滚动全部重复 "
+                        f"({consecutive_all_duplicate}/{max_consecutive_all_duplicate})"
+                    )
+                    if consecutive_all_duplicate >= max_consecutive_all_duplicate:
+                        logger.info(
+                            f"【VentureBeat】连续{max_consecutive_all_duplicate}次全部重复，"
+                            f"停止滚动（共 {len(articles_list)} 篇新文章）"
+                        )
+                        break
+                elif new_in_this_scroll == 0 and duplicate_in_this_scroll == 0:
+                    # 本次滚动没有任何内容（页面可能没有更多了）
                     consecutive_no_new += 1
-                    logger.debug(f"【VentureBeat】本次滚动未发现新内容 ({consecutive_no_new}/{max_consecutive_no_new})")
+                    consecutive_all_duplicate = 0
+                    logger.debug(f"【VentureBeat】本次滚动无内容 ({consecutive_no_new}/{max_consecutive_no_new})")
                     if consecutive_no_new >= max_consecutive_no_new:
-                        logger.info(f"【VentureBeat】连续{max_consecutive_no_new}次无新内容，停止滚动（共 {len(articles_list)} 篇）")
+                        logger.info(
+                            f"【VentureBeat】连续{max_consecutive_no_new}次无新内容，"
+                            f"停止滚动（共 {len(articles_list)} 篇）"
+                        )
                         break
                 else:
+                    # 有新文章，重置计数器
+                    consecutive_all_duplicate = 0
                     consecutive_no_new = 0
-                    logger.debug(f"【VentureBeat】新增 {len(articles_list) - start_index} 篇文章")
+                    logger.debug(f"【VentureBeat】新增 {new_in_this_scroll} 篇，跳过 {duplicate_in_this_scroll} 篇重复")
 
                 # 滚动到页面底部触发加载
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -380,7 +413,7 @@ class VentureBeatCollector(PlaywrightCollectorBase):
 
                 load_more_attempts += 1
 
-            logger.info(f"【VentureBeat】{category_config['display']} 栏目共提取 {len(articles_list)} 篇文章")
+            logger.info(f"【VentureBeat】{category_config['display']} 栏目共提取 {len(articles_list)} 篇新文章")
             return articles_list
 
         except Exception as e:
@@ -763,14 +796,16 @@ class VentureBeatCollector(PlaywrightCollectorBase):
 
     async def _store_items(self, items: List[Dict[str, Any]]) -> None:
         """
-        并发存储到MySQL和ChromaDB
+        串行存储到MySQL和ChromaDB
+
+        注意：在Celery solo pool + nest_asyncio环境下，asyncio.gather会导致任务上下文冲突
+        改为串行执行以保证稳定性
 
         Args:
             items: 文章列表
         """
-        mysql_task = self._store_to_mysql(items)
-        chroma_task = self._store_to_chroma(items)
-        await asyncio.gather(mysql_task, chroma_task, return_exceptions=True)
+        await self._store_to_mysql(items)
+        await self._store_to_chroma(items)
 
     async def _store_to_mysql(self, items: List[Dict[str, Any]]) -> None:
         """

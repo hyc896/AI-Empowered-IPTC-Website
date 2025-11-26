@@ -281,6 +281,21 @@ celery:
   beat:
     schedule_filename: "./data/celerybeat-schedule"  # 定时任务调度文件路径
 
+    # AI日报定时生成配置（24小时制）
+    ai_report_schedule:
+      governance:
+        hour: 8
+        minute: 0
+      research:
+        hour: 8
+        minute: 0
+      industry:
+        hour: 8
+        minute: 0
+      comprehensive:
+        hour: 8
+        minute: 0
+
   # 监控配置
   monitoring:
     flower_port: 5555                # Flower监控端口

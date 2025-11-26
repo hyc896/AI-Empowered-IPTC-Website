@@ -3,7 +3,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/messages'
+    redirect: '/globe-2d'
   },
   {
     path: '/message-sources',
@@ -35,6 +35,14 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Globe2D/index.vue'),
     meta: {
       title: '2D地球视图'
+    }
+  },
+  {
+    path: '/monitor',
+    name: 'Monitor',
+    component: () => import('@/views/Monitor/index.vue'),
+    meta: {
+      title: '系统监控'
     }
   }
 ]

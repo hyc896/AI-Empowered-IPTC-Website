@@ -5,16 +5,75 @@ Collector Celery Tasks
 采集器Celery任务定义
 """
 
+import json
 import logging
 import importlib
+import redis
 from typing import Dict, Any, Optional
 from datetime import datetime
 
 from backend.tasks import app, get_worker_browser_pool, run_async_task
 from backend.database.connection import create_session
 from backend.database.entities import MessageSource
+from backend.config import ConfigManager
 
 logger = logging.getLogger(__name__)
+
+# Redis统计键前缀（与monitor_routes保持一致）
+COLLECTOR_STATS_KEY_PREFIX = "collector_stats:"
+_redis_client: Optional[redis.Redis] = None
+
+
+def _get_stats_redis_client() -> Optional[redis.Redis]:
+    """获取Redis客户端用于统计记录"""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            config_manager = ConfigManager()
+            config_manager.load_config('config.yaml')
+            config = config_manager.get_config()
+            celery_config = config.get('celery', {})
+            broker_url = celery_config.get('broker', {}).get('url', 'redis://localhost:6379/1')
+            _redis_client = redis.from_url(broker_url, socket_connect_timeout=2, decode_responses=True)
+        except Exception as e:
+            logger.warning(f"Redis连接失败，统计数据将不记录: {e}")
+    return _redis_client
+
+
+def _record_collector_stats(source_name: str, success: bool, error: Optional[str] = None) -> None:
+    """记录采集器执行统计到Redis"""
+    r = _get_stats_redis_client()
+    if not r:
+        return
+
+    try:
+        key = f"{COLLECTOR_STATS_KEY_PREFIX}{source_name}"
+        data = r.get(key)
+        if data:
+            stats = json.loads(data)
+        else:
+            stats = {
+                "total_runs": 0,
+                "success_count": 0,
+                "failure_count": 0,
+                "last_run_at": None,
+                "last_error": None
+            }
+
+        stats["total_runs"] += 1
+        stats["last_run_at"] = datetime.now().isoformat()
+
+        if success:
+            stats["success_count"] += 1
+            stats["last_error"] = None
+        else:
+            stats["failure_count"] += 1
+            stats["last_error"] = error
+
+        r.set(key, json.dumps(stats))
+        logger.debug(f"【Celery采集器】统计已记录: {source_name}, 成功={success}")
+    except Exception as e:
+        logger.warning(f"记录采集器统计失败: {source_name}, {e}")
 
 
 @app.task(
@@ -121,7 +180,18 @@ def run_collector(self, source_name: str) -> Dict[str, Any]:
 
             return result
 
-        result = run_async_task(collect_once())
+        try:
+            result = run_async_task(collect_once())
+        finally:
+            # 【关键】采集完成后必须释放浏览器回池，否则浏览器池会耗尽
+            if hasattr(collector_instance, '_close_browser'):
+                async def release_browser():
+                    await collector_instance._close_browser()
+                try:
+                    run_async_task(release_browser())
+                    logger.debug(f"【Celery采集器】已释放浏览器: {source_name}")
+                except Exception as release_err:
+                    logger.warning(f"【Celery采集器】释放浏览器失败: {source_name}, {release_err}")
 
         # 7. 更新last_crawled_at时间戳
         _update_last_crawled_at(source_name)
@@ -135,6 +205,9 @@ def run_collector(self, source_name: str) -> Dict[str, Any]:
             f"(采集: {collected_count}, 耗时: {duration_seconds:.2f}s)"
         )
 
+        # 9. 记录统计到Redis
+        _record_collector_stats(source_name, success=True)
+
         return {
             'success': True,
             'source_name': source_name,
@@ -144,6 +217,16 @@ def run_collector(self, source_name: str) -> Dict[str, Any]:
         }
 
     except Exception as e:
+        # 【关键】异常时也必须释放浏览器，防止浏览器池泄漏
+        if 'collector_instance' in locals() and hasattr(collector_instance, '_close_browser'):
+            async def release_browser_on_error():
+                await collector_instance._close_browser()
+            try:
+                run_async_task(release_browser_on_error())
+                logger.debug(f"【Celery采集器】异常后已释放浏览器: {source_name}")
+            except Exception as release_err:
+                logger.warning(f"【Celery采集器】异常后释放浏览器失败: {source_name}, {release_err}")
+
         duration_seconds = (datetime.now() - start_time).total_seconds()
         logger.error(f"【Celery采集器】❌ 采集失败: {source_name}, 错误: {e}", exc_info=True)
 
@@ -151,6 +234,9 @@ def run_collector(self, source_name: str) -> Dict[str, Any]:
         if self.request.retries < self.max_retries:
             logger.warning(f"【Celery采集器】重试中: {source_name} ({self.request.retries + 1}/{self.max_retries})")
             raise self.retry(exc=e)
+
+        # 所有重试失败，记录失败统计
+        _record_collector_stats(source_name, success=False, error=str(e))
 
         return {
             'success': False,
@@ -263,3 +349,74 @@ def _update_last_crawled_at(source_name: str) -> None:
 
     except Exception as e:
         logger.error(f"更新last_crawled_at失败: {source_name}, 错误: {e}")
+
+
+@app.task(
+    name='backend.tasks.collector_tasks.trigger_all_collectors',
+    bind=True,
+    time_limit=60,
+    soft_time_limit=50
+)
+def trigger_all_collectors(self) -> Dict[str, Any]:
+    """
+    触发所有激活的采集器进入队列（用于启动时初始化）
+
+    所有任务直接加入队列排队，由Worker串行消费
+
+    Returns:
+        触发结果字典
+    """
+    logger.info("【启动触发】开始触发所有采集器进入队列...")
+
+    triggered = []
+    failed = []
+
+    try:
+        with create_session() as db:
+            active_sources = db.query(MessageSource).filter(
+                MessageSource.is_active == True
+            ).all()
+
+            logger.info(f"【启动触发】发现 {len(active_sources)} 个激活的消息源")
+
+            for source in active_sources:
+                try:
+                    run_collector.apply_async(
+                        args=(source.name,),
+                        queue='collector'
+                    )
+
+                    triggered.append({
+                        'name': source.name,
+                        'display_name': source.display_name or source.name
+                    })
+
+                    logger.info(f"【启动触发】已加入队列: {source.display_name or source.name}")
+
+                except Exception as e:
+                    failed.append({
+                        'name': source.name,
+                        'error': str(e)
+                    })
+                    logger.error(f"【启动触发】加入队列失败: {source.name}, 错误: {e}")
+
+    except Exception as e:
+        logger.error(f"【启动触发】获取消息源列表失败: {e}")
+        return {
+            'success': False,
+            'triggered_count': 0,
+            'failed_count': 0,
+            'error': str(e)
+        }
+
+    logger.info(
+        f"【启动触发】全部加入队列: 成功 {len(triggered)} 个, 失败 {len(failed)} 个"
+    )
+
+    return {
+        'success': True,
+        'triggered_count': len(triggered),
+        'failed_count': len(failed),
+        'triggered': triggered,
+        'failed': failed
+    }
