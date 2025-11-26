@@ -157,7 +157,7 @@ const drawerVisible = ref(false)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const currentReport = ref<AIDailyReport | null>(null)
-const selectedDate = ref<string>()
+const selectedDate = ref<string>(new Date().toISOString().split('T')[0])
 const refreshing = ref(false)
 const generating = ref(false)
 const downloading = ref(false)
@@ -215,7 +215,8 @@ const getReportTypeIcon = (type: ReportType) => getTypeIcon(type)
 // 打开抽屉
 const openDrawer = async () => {
   drawerVisible.value = true
-  await loadLatestReport()
+  selectedDate.value = new Date().toISOString().split('T')[0]
+  await handleDateChange(selectedDate.value)
 }
 
 // 关闭抽屉
@@ -270,7 +271,7 @@ const handleDateChange = async (date: string) => {
 // 刷新报告
 const refreshReport = async () => {
   refreshing.value = true
-  await loadLatestReport()
+  await handleDateChange(selectedDate.value)
   refreshing.value = false
   ElMessage.success('刷新成功')
 }
@@ -284,7 +285,7 @@ const handleGenerate = async () => {
     ElMessage.success(result.message)
 
     setTimeout(async () => {
-      await loadLatestReport()
+      await handleDateChange(selectedDate.value)
     }, 3000)
 
   } catch (err: any) {
@@ -300,7 +301,8 @@ const handleTabChange = async (tabName: string) => {
   if (selectedDate.value) {
     await handleDateChange(selectedDate.value)
   } else {
-    await loadLatestReport()
+    selectedDate.value = new Date().toISOString().split('T')[0]
+  await handleDateChange(selectedDate.value)
   }
 }
 

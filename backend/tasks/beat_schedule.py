@@ -178,7 +178,9 @@ def get_beat_schedule() -> dict:
     执行顺序：
     1. 先注册日报任务（从config.yaml读取，始终成功）
     2. 再尝试加载采集器任务（动态配置，可能失败）
-    3. 注册启动触发任务（Beat启动后立即触发一轮采集）
+
+    注意：启动采集触发已移至 Worker 启动信号（__init__.py），
+    避免模块导入时意外发送任务
 
     Returns:
         完整的调度配置字典
@@ -197,10 +199,7 @@ def get_beat_schedule() -> dict:
     beat_schedule.update(collector_tasks)
     logger.info(f"【Beat调度】采集器任务加载完成: {len(collector_tasks)} 个")
 
-    # 3. 触发启动任务（仅在模块加载时执行一次）
-    trigger_startup_collectors()
-
-    # 4. 输出调度摘要
+    # 3. 输出调度摘要
     logger.info("=" * 50)
     logger.info(f"【Beat调度】调度配置生成完成")
     logger.info(f"  - 日报任务: {len(report_tasks)} 个")

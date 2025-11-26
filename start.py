@@ -5,9 +5,10 @@
 
 启动顺序：
 1. ChromaDB Server (端口11530)
-2. Celery Worker (采集器和日报任务)
-3. Celery Beat (定时调度)
-4. FastAPI Server (端口11528)
+2. 采集器 Worker (监听 default,collector 队列)
+3. 日报 Worker (监听 report 队列)
+4. Celery Beat (定时调度)
+5. FastAPI Server (端口11528)
 
 使用方式：
     python start.py
@@ -100,26 +101,38 @@ def main():
             wait_seconds=3
         )
 
-        # 2. 启动 Celery Worker
+        # 2. 启动采集器 Worker（监听 default,collector 队列）
         start_process(
-            "Celery Worker",
+            "采集器 Worker",
             ["celery", "-A", "backend.tasks", "worker",
              "--loglevel=info",
              "--pool=solo",
-             "-Q", "default,collector,report"],
+             "-Q", "default,collector",
+             "-n", "collector@%h"],
             wait_seconds=5
         )
 
-        # 3. 启动 Celery Beat
+        # 3. 启动日报 Worker（监听 report 队列，独立处理日报生成任务）
+        start_process(
+            "日报 Worker",
+            ["celery", "-A", "backend.tasks", "worker",
+             "--loglevel=info",
+             "--pool=solo",
+             "-Q", "report",
+             "-n", "report@%h"],
+            wait_seconds=3
+        )
+
+        # 4. 启动 Celery Beat（使用无状态调度器，每次启动从代码读取配置）
         start_process(
             "Celery Beat",
             ["celery", "-A", "backend.tasks", "beat",
              "--loglevel=info",
-             "-s", "./data/celerybeat-schedule"],
+             "--scheduler=celery.beat.Scheduler"],
             wait_seconds=2
         )
 
-        # 4. 启动 FastAPI Server
+        # 5. 启动 FastAPI Server
         start_process(
             "FastAPI Server",
             [sys.executable, "-m", "uvicorn", "backend.main:app",
@@ -135,6 +148,9 @@ def main():
         print("  - FastAPI:   http://localhost:11528")
         print("  - API文档:   http://localhost:11528/docs")
         print("  - ChromaDB:  http://localhost:11530")
+        print("\nWorker 分工:")
+        print("  - 采集器 Worker: 处理采集任务 (default,collector 队列)")
+        print("  - 日报 Worker:   处理日报生成 (report 队列)")
         print("\n按 Ctrl+C 停止所有服务\n")
 
         # 等待任意进程退出
