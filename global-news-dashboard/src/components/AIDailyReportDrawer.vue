@@ -67,6 +67,20 @@
             </el-button>
           </div>
 
+          <!-- 日期选择器（始终显示，方便选择历史日期） -->
+          <div class="date-selector-bar" :style="selectorStyle">
+            <div class="selector-label">REPORT DATE</div>
+            <el-date-picker
+              v-model="selectedDate"
+              type="date"
+              placeholder="选择日期"
+              size="default"
+              value-format="YYYY-MM-DD"
+              @change="handleDateChange"
+              class="glass-date-picker"
+            />
+          </div>
+
           <!-- 错误提示 -->
           <el-alert
             v-if="error"
@@ -108,21 +122,6 @@
               :report="currentReport"
               ref="reportViewRef"
             />
-
-            <!-- 日期选择器 -->
-            <div class="date-selector-container" :style="selectorStyle">
-              <div class="selector-label">REPORT DATE</div>
-              <el-date-picker
-                v-model="selectedDate"
-                type="date"
-                placeholder="选择日期"
-                size="default"
-                value-format="YYYY-MM-DD"
-                @change="handleDateChange"
-                class="glass-date-picker"
-              />
-              <div class="selector-info">{{ formatReportDate(currentReport.report_date) }}</div>
-            </div>
           </div>
 
           <!-- 无数据提示 -->
@@ -584,6 +583,28 @@ const downloadAsImage = async () => {
             color: #f59e0b;
           }
         }
+
+        // 中国AI日报（红金中国风）
+        &:has(.tab-china_ai).is-active {
+          border-bottom-color: #dc2626;
+          background: linear-gradient(135deg, rgba(220, 38, 38, 0.15) 0%, rgba(245, 158, 11, 0.1) 100%);
+
+          .tab-label {
+            color: #fbbf24;
+            text-shadow: 0 0 8px rgba(220, 38, 38, 0.5);
+          }
+        }
+
+        // 上海周报（蓝色都市风）
+        &:has(.tab-shanghai_weekly).is-active {
+          border-bottom-color: #0ea5e9;
+          background: linear-gradient(135deg, rgba(14, 165, 233, 0.15) 0%, rgba(56, 189, 248, 0.1) 100%);
+
+          .tab-label {
+            color: #7dd3fc;
+            text-shadow: 0 0 8px rgba(14, 165, 233, 0.5);
+          }
+        }
       }
 
       .el-tabs__active-bar {
@@ -639,8 +660,8 @@ const downloadAsImage = async () => {
     }
   }
 
-  .date-selector-container {
-    padding: 20px;
+  .date-selector-bar {
+    padding: 12px 20px;
     display: flex;
     align-items: center;
     gap: 16px;
@@ -652,13 +673,6 @@ const downloadAsImage = async () => {
       font-weight: 600;
       letter-spacing: 1.5px;
       color: rgba(255, 255, 255, 0.6);
-    }
-
-    .selector-info {
-      flex: 1;
-      font-size: 14px;
-      color: #ffffff;
-      font-weight: 500;
     }
 
     :deep(.glass-date-picker) {

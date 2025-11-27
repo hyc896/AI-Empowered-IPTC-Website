@@ -20,7 +20,8 @@ export const comprehensiveConfig: ReportTypeConfig = {
     glowColor: 'rgba(0, 212, 255, 0.3)',
     borderColor: 'rgba(0, 212, 255, 0.2)',
     textPrimary: '#ffffff',
-    textSecondary: 'rgba(255, 255, 255, 0.7)'
+    textSecondary: 'rgba(255, 255, 255, 0.7)',
+    bannerImageKeywords: 'artificial-intelligence,technology,future,digital'
   },
 
   statCards: {

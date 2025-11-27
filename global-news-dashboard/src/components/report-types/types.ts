@@ -13,7 +13,7 @@ import type { Component } from 'vue'
 /**
  * 报告类型标识
  */
-export type ReportType = 'comprehensive' | 'governance' | 'research' | 'industry'
+export type ReportType = 'comprehensive' | 'governance' | 'research' | 'industry' | 'china_ai' | 'shanghai_weekly'
 
 /**
  * 主题配色配置
@@ -28,6 +28,7 @@ export interface ThemeColors {
   borderColor: string       // 边框颜色
   textPrimary?: string      // 主要文本颜色（可选，默认白色）
   textSecondary?: string    // 次要文本颜色（可选，默认半透明白色）
+  bannerImageKeywords?: string  // Banner背景图Unsplash关键词（如"ai,technology"）
 }
 
 /**

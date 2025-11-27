@@ -53,7 +53,9 @@ async def get_latest_report(
                     'comprehensive': '综合日报',
                     'governance': '治理日报',
                     'research': '科研日报',
-                    'industry': '产业日报'
+                    'industry': '产业日报',
+                    'china_ai': '中国AI日报',
+                    'shanghai_weekly': '上海周报'
                 }
                 report_name = report_type_names.get(report_type, report_type)
                 raise HTTPException(
@@ -124,7 +126,9 @@ async def get_report_by_date(
                     'comprehensive': '综合日报',
                     'governance': '治理日报',
                     'research': '科研日报',
-                    'industry': '产业日报'
+                    'industry': '产业日报',
+                    'china_ai': '中国AI日报',
+                    'shanghai_weekly': '上海周报'
                 }
                 report_name = report_type_names.get(report_type, report_type)
                 raise HTTPException(
@@ -186,10 +190,11 @@ async def list_reports(
 
             # 类型过滤
             if report_type:
-                if report_type not in ['comprehensive', 'governance', 'research', 'industry']:
+                valid_types = ['comprehensive', 'governance', 'research', 'industry', 'china_ai', 'shanghai_weekly']
+                if report_type not in valid_types:
                     raise HTTPException(
                         status_code=400,
-                        detail="类型参数错误，应为comprehensive/governance/research/industry之一"
+                        detail=f"类型参数错误，应为{'/'.join(valid_types)}之一"
                     )
                 query = query.filter(AIDailyReport.report_type == report_type)
 
@@ -259,10 +264,11 @@ async def trigger_report_generation(
     """
     try:
         # 验证report_type
-        if report_type not in ['comprehensive', 'governance', 'research', 'industry']:
+        valid_types = ['comprehensive', 'governance', 'research', 'industry', 'china_ai', 'shanghai_weekly']
+        if report_type not in valid_types:
             raise HTTPException(
                 status_code=400,
-                detail="类型参数错误，应为comprehensive/governance/research/industry之一"
+                detail=f"类型参数错误，应为{'/'.join(valid_types)}之一"
             )
 
         # 解析日期
@@ -280,7 +286,9 @@ async def trigger_report_generation(
             'comprehensive': '综合日报',
             'governance': '治理日报',
             'research': '科研日报',
-            'industry': '产业日报'
+            'industry': '产业日报',
+            'china_ai': '中国AI日报',
+            'shanghai_weekly': '上海周报'
         }
         report_name = report_type_names.get(report_type, report_type)
         actual_type = report_type if report_type != 'comprehensive' else 'governance'
@@ -325,6 +333,10 @@ async def trigger_report_generation(
                 report_id = await generator.generate_research_report(target_datetime)
             elif actual_type == 'industry':
                 report_id = await generator.generate_industry_report(target_datetime)
+            elif actual_type == 'china_ai':
+                report_id = await generator.generate_china_ai_report(target_datetime)
+            elif actual_type == 'shanghai_weekly':
+                report_id = await generator.generate_shanghai_weekly_report(target_datetime)
             else:
                 raise ValueError(f"未知的报告类型: {actual_type}")
 

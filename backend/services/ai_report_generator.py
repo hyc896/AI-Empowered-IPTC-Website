@@ -160,6 +160,117 @@ class AIReportGenerator:
 
         return dict(messages_by_tag)
 
+    def _collect_messages_by_region(
+        self,
+        db: Session,
+        report_date: date,
+        region_pattern: str,
+        require_ai_tag: bool = True,
+        days: int = 1
+    ) -> Dict[str, List[Dict]]:
+        """
+        根据region筛选消息（用于中国AI日报和上海周报）
+
+        Args:
+            db: 数据库会话
+            report_date: 报告日期
+            region_pattern: region的LIKE匹配模式（如'%中国%'、'%上海%'）
+            require_ai_tag: 是否要求ai_tag不为空
+            days: 时间范围天数（1=日报，7=周报）
+
+        Returns:
+            按ai_tag分类的消息字典（如果require_ai_tag=False，则所有消息归类到'全部消息'）
+        """
+        today = datetime.now().date()
+        if report_date >= today:
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=days)
+        else:
+            end_time = datetime.combine(report_date, time(23, 59, 59))
+            start_time = end_time - timedelta(days=days)
+
+        messages_by_tag = defaultdict(list)
+
+        # 根据require_ai_tag选择扫描哪些表
+        if require_ai_tag:
+            models_to_scan = self.registry.get_ai_tag_models()
+            tag_field = 'ai_tag'
+        else:
+            models_to_scan = self.registry.get_region_models()
+            tag_field = None
+
+        logger.info(
+            f"【AIReportGenerator】按region收集消息（pattern={region_pattern}, "
+            f"require_ai_tag={require_ai_tag}, days={days}）"
+        )
+        logger.info(f"【AIReportGenerator】时间范围：{start_time} ~ {end_time}")
+        logger.info(f"【AIReportGenerator】扫描{len(models_to_scan)}个表")
+
+        total_collected = 0
+
+        for model_class in models_to_scan:
+            table_name = model_class.__tablename__
+
+            # 检查该表是否有region字段
+            if not hasattr(model_class, 'region'):
+                logger.debug(f"【AIReportGenerator】{table_name}无region字段，跳过")
+                continue
+
+            try:
+                conditions = [
+                    model_class.region.like(region_pattern),
+                    model_class.crawled_at >= start_time,
+                    model_class.crawled_at <= end_time
+                ]
+
+                if require_ai_tag and hasattr(model_class, 'ai_tag'):
+                    conditions.append(model_class.ai_tag.isnot(None))
+                    conditions.append(model_class.ai_tag != '')
+
+                query = db.query(model_class).options(
+                    joinedload(model_class.source)
+                ).filter(and_(*conditions)).order_by(model_class.crawled_at.desc())
+
+                records = query.all()
+
+                for record in records:
+                    message_data = {
+                        'id': str(record.id),
+                        'title': getattr(record, 'title', ''),
+                        'summary': getattr(record, 'summary', '') or getattr(record, 'content', '')[:200],
+                        'content': getattr(record, 'content', ''),
+                        'source_name': (record.source.display_name or record.source.name) if record.source else 'unknown',
+                        'region': getattr(record, 'region', None),
+                        'industry_tags': getattr(record, 'industry_tags', None),
+                        'published_at': getattr(record, 'published_at', None),
+                        'crawled_at': record.crawled_at,
+                        'url': getattr(record, 'url', None),
+                        'table_name': table_name
+                    }
+
+                    if require_ai_tag and hasattr(record, 'ai_tag') and record.ai_tag:
+                        messages_by_tag[record.ai_tag].append(message_data)
+                    else:
+                        messages_by_tag['全部消息'].append(message_data)
+
+                    total_collected += 1
+
+                logger.info(f"【AIReportGenerator】{table_name}: 收集到{len(records)}条消息")
+
+            except Exception as e:
+                logger.error(f"【AIReportGenerator】从{table_name}收集消息失败: {e}", exc_info=True)
+                continue
+
+        logger.info(f"【AIReportGenerator】共收集{total_collected}条消息（region匹配）")
+        if require_ai_tag:
+            logger.info(f"  - AI治理信息: {len(messages_by_tag.get('AI治理信息', []))}条")
+            logger.info(f"  - AI科研信息: {len(messages_by_tag.get('AI科研信息', []))}条")
+            logger.info(f"  - AI产业信息: {len(messages_by_tag.get('AI产业信息', []))}条")
+        else:
+            logger.info(f"  - 全部消息: {len(messages_by_tag.get('全部消息', []))}条")
+
+        return dict(messages_by_tag)
+
     def _aggregate_statistics(self, messages_by_tag: Dict[str, List[Dict]]) -> Dict[str, Any]:
         """
         聚合统计数据
@@ -180,7 +291,11 @@ class AIReportGenerator:
             'industry_distribution': {}
         }
 
-        stats['total_messages'] = stats['governance_count'] + stats['research_count'] + stats['industry_count']
+        # 计算total_messages（支持"全部消息"分类用于上海周报）
+        if '全部消息' in messages_by_tag:
+            stats['total_messages'] = len(messages_by_tag['全部消息'])
+        else:
+            stats['total_messages'] = stats['governance_count'] + stats['research_count'] + stats['industry_count']
 
         # 统计地区分布
         region_counts = defaultdict(int)
@@ -493,6 +608,35 @@ class AIReportGenerator:
 
         return filtered_list
 
+    def _strip_markdown_code_block(self, content: str) -> str:
+        """
+        移除LLM输出开头和结尾的markdown代码块标记
+
+        LLM有时会在输出时包裹```markdown...```，需要过滤掉
+
+        Args:
+            content: LLM生成的原始内容
+
+        Returns:
+            清理后的内容
+        """
+        if not content:
+            return content
+
+        content = content.strip()
+
+        # 检查并移除开头的```markdown或```
+        if content.startswith('```markdown'):
+            content = content[len('```markdown'):].lstrip('\n')
+        elif content.startswith('```'):
+            content = content[3:].lstrip('\n')
+
+        # 检查并移除结尾的```
+        if content.endswith('```'):
+            content = content[:-3].rstrip('\n')
+
+        return content.strip()
+
     def _append_references(self, content: str, reference_list: List[Dict[str, Any]]) -> str:
         """
         在报告内容后添加参考文献列表（每条消息独立编号）
@@ -504,6 +648,9 @@ class AIReportGenerator:
         Returns:
             添加了参考文献的完整报告
         """
+        # 先清理markdown代码块标记
+        content = self._strip_markdown_code_block(content)
+
         if not reference_list:
             return content
 
@@ -1234,6 +1381,360 @@ class AIReportGenerator:
             logger.error(f"【AIReportGenerator】产业日报生成失败: {e}", exc_info=True)
             return self._generate_fallback_report(stats)
 
+    def _build_china_ai_prompt(
+        self,
+        messages_by_tag: Dict[str, List[Dict]],
+        stats: Dict[str, Any],
+        report_date: date
+    ) -> tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
+        """
+        构建中国AI日报提示词（聚焦中国AI产业、科研、治理动态）
+        """
+        all_messages = []
+        for tag, msgs in messages_by_tag.items():
+            all_messages.extend(msgs)
+
+        date_str = report_date.strftime('%Y年%m月%d日')
+
+        message_index, reference_list = self._build_message_references(all_messages)
+        logger.info(f"【AIReportGenerator:中国AI日报】构建了{len(reference_list)}条消息引用")
+
+        system_content = """你是一位资深的中国AI产业分析师，专注于追踪中国人工智能领域的最新动态。
+
+报告要求：
+1. 使用Markdown格式
+2. 结构：标题、摘要、政策治理、科研进展、产业动态、趋势展望
+3. 语言专业、客观、中立
+4. 突出中国AI发展的特色和优势
+5. 适当进行国际对比分析
+6. 关注政策导向对产业的影响
+7. 字数不限，以深度分析为优先
+
+内容撰写与消息源引用规范（必须严格遵守）：
+1. 针对每条新闻深入展开，不要过度压缩
+2. 每个事件后必须用方括号标注引用序号，如：[1]、[2]、[1][3]（多个来源）
+3. 引用序号对应输入数据中的"引用X"标记
+4. 参考来源列表会由系统自动添加
+
+客观性原则：
+1. 对涉及中国的信息保持客观中立
+2. 既关注成就也正视挑战
+3. 数据驱动，避免主观臆断
+4. 多角度呈现信息"""
+
+        system_tokens = self._estimate_tokens(system_content)
+
+        governance_msgs = messages_by_tag.get('AI治理信息', [])
+        research_msgs = messages_by_tag.get('AI科研信息', [])
+        industry_msgs = messages_by_tag.get('AI产业信息', [])
+
+        stats_section = f"""## 统计概览
+- AI治理信息：{len(governance_msgs)}条
+- AI科研信息：{len(research_msgs)}条
+- AI产业信息：{len(industry_msgs)}条
+- 总计：{stats['total_messages']}条
+
+## 地区分布
+{self._format_distribution(stats['region_distribution'])}
+
+## 消息来源
+{self._format_distribution(stats['source_distribution'])}"""
+
+        stats_tokens = self._estimate_tokens(stats_section)
+
+        requirements = """---
+
+请生成结构化的中国AI日报，包含：
+
+1. **标题**：体现当日中国AI领域核心主题
+
+2. **摘要**：3-5段话概括今日中国AI要点，重点突出：
+   - 重大政策发布或监管动态
+   - 重要科研突破或论文发表
+   - 企业动态和产业进展
+   - 国际合作或竞争态势
+
+3. **政策与治理**：
+   - 国家级AI政策解读
+   - 地方政府AI发展规划
+   - 监管动态和合规要求
+   - 伦理标准和安全规范
+
+4. **科研进展**：
+   - 高校和研究机构的最新成果
+   - 国产大模型发展动态
+   - 算法和技术突破
+   - 产学研合作项目
+
+5. **产业动态**：
+   - 企业AI应用落地案例
+   - 投融资和商业合作
+   - 产品发布和技术迭代
+   - 产业链上下游动态
+
+6. **趋势与展望**：
+   - 中国AI发展的机遇与挑战
+   - 与国际前沿的差距和追赶路径
+   - 未来发展预判
+
+**分析深度要求**：
+- 政策解读要联系产业影响
+- 科研成果要评估应用前景
+- 产业动态要分析竞争格局"""
+
+        requirements_tokens = self._estimate_tokens(requirements)
+
+        header_text = f"今天是{date_str}，请生成中国AI日报："
+        header_tokens = self._estimate_tokens(header_text)
+
+        available_tokens = self.MAX_INPUT_TOKENS - system_tokens - stats_tokens - requirements_tokens - header_tokens
+
+        messages_text, used_message_ids = self._format_messages(
+            all_messages,
+            max_tokens=available_tokens,
+            message_index=message_index
+        )
+        messages_section = f"\n## 消息详情（全部{len(all_messages)}条）\n{messages_text}"
+
+        user_content = f"""{header_text}
+
+{stats_section}
+{messages_section}
+
+{requirements}"""
+
+        total_tokens = system_tokens + self._estimate_tokens(user_content)
+        logger.info(f"【AIReportGenerator:中国AI日报】实际总tokens: {total_tokens} / {self.MAX_INPUT_TOKENS}")
+
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content}
+        ]
+
+        filtered_reference_list = self._filter_references(reference_list, used_message_ids)
+
+        return messages, filtered_reference_list
+
+    async def _generate_china_ai_report_content(
+        self,
+        messages_by_tag: Dict[str, List[Dict]],
+        stats: Dict[str, Any],
+        report_date: date
+    ) -> str:
+        """生成中国AI日报内容"""
+        llm_client = self._get_llm_client()
+        messages, reference_list = self._build_china_ai_prompt(messages_by_tag, stats, report_date)
+
+        try:
+            logger.info("【AIReportGenerator】调用LLM生成中国AI日报...")
+            response = await llm_client.generate_with_messages_async(
+                messages,
+                source="AIReportGenerator:china_ai"
+            )
+
+            if hasattr(response, 'choices') and len(response.choices) > 0:
+                content = response.choices[0].message.content
+                logger.info(f"【AIReportGenerator】中国AI日报生成成功（长度：{len(content)}字符）")
+
+                final_content = self._append_references(content, reference_list)
+                logger.info(f"【AIReportGenerator:中国AI日报】添加了{len(reference_list)}个参考来源")
+
+                return final_content
+            else:
+                raise ValueError("LLM返回格式异常")
+
+        except Exception as e:
+            logger.error(f"【AIReportGenerator】中国AI日报生成失败: {e}", exc_info=True)
+            return self._generate_fallback_report(stats)
+
+    def _build_shanghai_weekly_prompt(
+        self,
+        messages_by_tag: Dict[str, List[Dict]],
+        stats: Dict[str, Any],
+        report_date: date
+    ) -> tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
+        """
+        构建上海周报提示词（聚焦上海各行业动态，不限于AI）
+        """
+        all_messages = messages_by_tag.get('全部消息', [])
+
+        week_start = report_date - timedelta(days=6)
+        date_range_str = f"{week_start.strftime('%Y年%m月%d日')} ~ {report_date.strftime('%Y年%m月%d日')}"
+
+        message_index, reference_list = self._build_message_references(all_messages)
+        logger.info(f"【AIReportGenerator:上海周报】构建了{len(reference_list)}条消息引用")
+
+        system_content = """你是一位资深的上海区域经济分析师，专注于追踪上海各行业的发展动态，拥有丰富的产业研究和政策解读经验。
+
+报告要求：
+1. 使用Markdown格式
+2. 结构：标题、本周要闻、重点行业分析、政策解读、投资机会、风险提示
+3. 语言专业、数据驱动、分析深入透彻
+4. 覆盖金融、科技、制造、贸易、消费等多个行业
+5. 结合上海"五个中心"定位进行深度分析
+6. 关注长三角一体化发展和区域协同效应
+7. 字数不限，以深度分析和全面覆盖为优先
+8. 每个重点事件至少200字的深度分析，不要浅尝辄止
+
+内容撰写与消息源引用规范（必须严格遵守）：
+1. 切记不要过度压缩：针对每条重要新闻不要只用一句话概括，要铺开阐释
+2. 深入展开背景、细节、影响、趋势判断等多个维度
+3. 分析每个事件对上海经济、产业、就业、创新的多层次影响
+4. 每个事件后必须用方括号标注引用序号，如：[1]、[2]
+5. 引用序号对应输入数据中的"引用X"标记
+6. 参考来源列表会由系统自动添加
+7. 引用尾注不要过于频繁：同一个引用序号在同一个大段落内最多只出现一次
+
+分析深度要求：
+1. 上海国际经济中心建设进展：分析GDP、产业结构、总部经济等维度
+2. 上海国际金融中心地位巩固：关注金融市场开放、金融科技创新、跨境金融等
+3. 上海国际贸易中心功能提升：进出口结构、自贸区创新、跨境电商等
+4. 上海国际航运中心能级跃升：港口吞吐量、航运服务、物流枢纽等
+5. 上海国际科技创新中心策源能力：研发投入、科技成果转化、创新生态等
+
+每个重点事件分析需包括：
+- 事件背景：为什么会发生？有什么前因？
+- 核心内容：具体是什么？涉及哪些主体？
+- 影响分析：对上海、长三角、全国的影响
+- 趋势判断：未来可能的演变方向"""
+
+        system_tokens = self._estimate_tokens(system_content)
+
+        stats_section = f"""## 统计概览
+- 本周消息总数：{stats['total_messages']}条
+- 时间范围：{date_range_str}
+
+## 地区分布（详细）
+{self._format_distribution(stats['region_distribution'])}
+
+## 消息来源
+{self._format_distribution(stats['source_distribution'])}
+
+## 行业分布
+{self._format_distribution(stats['industry_distribution'])}"""
+
+        stats_tokens = self._estimate_tokens(stats_section)
+
+        requirements = """---
+
+请生成结构化的上海周报，包含：
+
+1. **标题**：体现本周上海经济核心主题，要有冲击力和概括性
+
+2. **摘要**：3-5段话深入概括本周上海要点，重点突出：
+   - 最重大的政策发布或制度创新
+   - 最具影响力的产业动态
+   - 最值得关注的投资机会
+   - 长三角一体化最新进展
+
+3. **本周要闻深度解读**：选取5-8个最重要事件进行深度分析
+   - 不要简单罗列，每个事件至少200字的深度解读
+   - 分析背景、内容、影响、趋势
+   - 评估对上海"五个中心"建设的推动作用
+
+4. **重点行业分析**（每个行业有内容才分析，无则跳过）：
+   - **金融服务**：银行、证券、保险、基金等动态
+     * 深度分析：政策背景、市场影响、机构反应、未来趋势
+   - **科技创新**：集成电路、人工智能、生物医药等
+     * 深度分析：技术突破点、产业化前景、与全球竞争力对比
+   - **先进制造**：汽车、装备、新材料等
+     * 深度分析：产能变化、供应链调整、出口竞争力
+   - **国际贸易**：进出口、跨境电商、自贸区等
+     * 深度分析：贸易结构、新兴市场、制度创新
+   - **消费升级**：零售、餐饮、文旅等
+     * 深度分析：消费趋势、品牌动态、消费环境
+
+5. **政策深度解读**：
+   - 上海市级政策发布：逐条解读政策意图、执行要点、影响范围
+   - 浦东新区先行先试：制度创新的突破意义
+   - 临港新片区开放措施：开放深度和广度分析
+   - 长三角协同政策：区域一体化的实质进展
+
+6. **投资机会与风险评估**：
+   - 值得关注的项目和企业：具体分析其竞争优势
+   - 新兴赛道和增长点：市场规模、增长逻辑
+   - 政策红利领域：如何把握政策窗口期
+   - 风险提示：需要规避的陷阱和不确定因素
+
+7. **综合趋势分析与下周展望**：
+   - 本周事件的综合影响评估
+   - 跨行业、跨领域的关联分析
+   - 对上海中长期发展的影响判断
+   - 下周值得关注的事件和趋势
+
+**分析深度要求**：
+- 每个重点事件至少200字深度分析，不要浅尝辄止
+- 数据支撑，避免空泛描述
+- 结合上海"五个中心"定位进行战略分析
+- 关注长三角一体化协同效应
+- 提供具有可操作性的投资建议
+- 挖掘事件背后的政策意图和产业逻辑"""
+
+        requirements_tokens = self._estimate_tokens(requirements)
+
+        header_text = f"本周（{date_range_str}），请生成上海周报："
+        header_tokens = self._estimate_tokens(header_text)
+
+        available_tokens = self.MAX_INPUT_TOKENS - system_tokens - stats_tokens - requirements_tokens - header_tokens
+
+        messages_text, used_message_ids = self._format_messages(
+            all_messages,
+            max_tokens=available_tokens,
+            message_index=message_index
+        )
+        messages_section = f"\n## 本周消息详情（全部{len(all_messages)}条）\n{messages_text}"
+
+        user_content = f"""{header_text}
+
+{stats_section}
+{messages_section}
+
+{requirements}"""
+
+        total_tokens = system_tokens + self._estimate_tokens(user_content)
+        logger.info(f"【AIReportGenerator:上海周报】实际总tokens: {total_tokens} / {self.MAX_INPUT_TOKENS}")
+
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content}
+        ]
+
+        filtered_reference_list = self._filter_references(reference_list, used_message_ids)
+
+        return messages, filtered_reference_list
+
+    async def _generate_shanghai_weekly_report_content(
+        self,
+        messages_by_tag: Dict[str, List[Dict]],
+        stats: Dict[str, Any],
+        report_date: date
+    ) -> str:
+        """生成上海周报内容"""
+        llm_client = self._get_llm_client()
+        messages, reference_list = self._build_shanghai_weekly_prompt(messages_by_tag, stats, report_date)
+
+        try:
+            logger.info("【AIReportGenerator】调用LLM生成上海周报...")
+            response = await llm_client.generate_with_messages_async(
+                messages,
+                source="AIReportGenerator:shanghai_weekly"
+            )
+
+            if hasattr(response, 'choices') and len(response.choices) > 0:
+                content = response.choices[0].message.content
+                logger.info(f"【AIReportGenerator】上海周报生成成功（长度：{len(content)}字符）")
+
+                final_content = self._append_references(content, reference_list)
+                logger.info(f"【AIReportGenerator:上海周报】添加了{len(reference_list)}个参考来源")
+
+                return final_content
+            else:
+                raise ValueError("LLM返回格式异常")
+
+        except Exception as e:
+            logger.error(f"【AIReportGenerator】上海周报生成失败: {e}", exc_info=True)
+            return self._generate_fallback_report(stats)
+
     async def generate_daily_report(
         self,
         report_date: Optional[datetime] = None,
@@ -1259,7 +1760,9 @@ class AIReportGenerator:
             'comprehensive': '综合日报',
             'governance': '治理日报',
             'research': '科研日报',
-            'industry': '产业日报'
+            'industry': '产业日报',
+            'china_ai': '中国AI日报',
+            'shanghai_weekly': '上海周报'
         }
         report_name = report_type_names.get(report_type, report_type)
 
@@ -1279,17 +1782,27 @@ class AIReportGenerator:
                     logger.warning(f"【AIReportGenerator】{report_date}的{report_name}已存在（ID: {existing_report.id}）")
                     return existing_report.id
 
-                # 根据报告类型确定ai_tag过滤器
-                ai_tag_filter_map = {
-                    'comprehensive': None,  # 综合报告收集所有
-                    'governance': 'AI治理信息',
-                    'research': 'AI科研信息',
-                    'industry': 'AI产业信息'
-                }
-                ai_tag_filter = ai_tag_filter_map.get(report_type)
-
-                # 收集消息（根据类型过滤）
-                messages_by_tag = self._collect_messages_from_last_24h(db, report_date, ai_tag_filter)
+                # 根据报告类型确定收集方式
+                if report_type == 'china_ai':
+                    # 中国AI日报：region包含"中国"且有ai_tag的消息
+                    messages_by_tag = self._collect_messages_by_region(
+                        db, report_date, region_pattern='%中国%', require_ai_tag=True, days=1
+                    )
+                elif report_type == 'shanghai_weekly':
+                    # 上海周报：region包含"上海"的消息（不限ai_tag），过去7天
+                    messages_by_tag = self._collect_messages_by_region(
+                        db, report_date, region_pattern='%上海%', require_ai_tag=False, days=7
+                    )
+                else:
+                    # 原有逻辑：根据ai_tag_filter收集
+                    ai_tag_filter_map = {
+                        'comprehensive': None,
+                        'governance': 'AI治理信息',
+                        'research': 'AI科研信息',
+                        'industry': 'AI产业信息'
+                    }
+                    ai_tag_filter = ai_tag_filter_map.get(report_type)
+                    messages_by_tag = self._collect_messages_from_last_24h(db, report_date, ai_tag_filter)
 
                 # 聚合统计
                 stats = self._aggregate_statistics(messages_by_tag)
@@ -1306,6 +1819,10 @@ class AIReportGenerator:
                     report_content = await self._generate_research_report_content(messages_by_tag, stats, report_date)
                 elif report_type == 'industry':
                     report_content = await self._generate_industry_report_content(messages_by_tag, stats, report_date)
+                elif report_type == 'china_ai':
+                    report_content = await self._generate_china_ai_report_content(messages_by_tag, stats, report_date)
+                elif report_type == 'shanghai_weekly':
+                    report_content = await self._generate_shanghai_weekly_report_content(messages_by_tag, stats, report_date)
                 else:  # comprehensive
                     report_content = await self._generate_report_content(messages_by_tag, stats, report_date)
 
@@ -1396,6 +1913,30 @@ class AIReportGenerator:
             报告ID（UUID），失败返回None
         """
         return await self.generate_daily_report(report_date, report_type='industry')
+
+    async def generate_china_ai_report(self, report_date: Optional[datetime] = None) -> Optional[str]:
+        """
+        生成中国AI日报
+
+        Args:
+            report_date: 报告日期（默认为今天）
+
+        Returns:
+            报告ID（UUID），失败返回None
+        """
+        return await self.generate_daily_report(report_date, report_type='china_ai')
+
+    async def generate_shanghai_weekly_report(self, report_date: Optional[datetime] = None) -> Optional[str]:
+        """
+        生成上海周报
+
+        Args:
+            report_date: 报告日期（默认为周日）
+
+        Returns:
+            报告ID（UUID），失败返回None
+        """
+        return await self.generate_daily_report(report_date, report_type='shanghai_weekly')
 
 
 # 全局单例

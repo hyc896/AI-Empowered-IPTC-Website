@@ -9,6 +9,16 @@
 
     <!-- AI风格顶部横幅 -->
     <div class="ai-banner" :style="bannerStyle">
+      <!-- Unsplash背景图层 -->
+      <div
+        v-if="bannerImageUrl"
+        class="banner-image"
+        :style="{ backgroundImage: `url(${bannerImageUrl})` }"
+      ></div>
+
+      <!-- 渐变蒙版层（顶部模糊+暗，底部清晰+亮） -->
+      <div class="banner-overlay"></div>
+
       <!-- 粒子背景 -->
       <div class="banner-particles"></div>
 
@@ -177,6 +187,24 @@ const props = defineProps<{
 
 const exportRef = ref<HTMLElement | null>(null)
 const theme = computed(() => props.config.theme)
+
+// 预设的高质量Unsplash图片（每个主题一张精选图片）
+const themeImageMap: Record<string, string> = {
+  'artificial-intelligence,technology,future,digital': 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=1600&h=900&fit=crop', // AI科技
+  'government,policy,conference,law': 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=1600&h=900&fit=crop', // 政府会议
+  'laboratory,research,science,experiment': 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=1600&h=900&fit=crop', // 科研实验室
+  'business,industry,startup,innovation': 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1600&h=900&fit=crop', // 商业大厦
+  'china,beijing,technology,skyline': 'https://images.unsplash.com/photo-1508804185872-d7badad00f7d?w=1600&h=900&fit=crop', // 北京天际线
+  'shanghai,pudong,oriental-pearl,modern-city': 'https://images.unsplash.com/photo-1538428494232-9c0d8a3ab403?w=1600&h=900&fit=crop' // 上海外滩
+}
+
+// 生成背景图URL
+const bannerImageUrl = computed(() => {
+  const keywords = theme.value.bannerImageKeywords
+  if (!keywords) return null
+  return themeImageMap[keywords] || null
+})
+
 
 // 根元素样式
 const rootStyle = computed(() => ({
@@ -485,13 +513,55 @@ defineExpose({
   border-bottom: 1px solid var(--theme-border);
   min-height: 280px;
 
+  .banner-image {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 0;
+  }
+
+  .banner-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+    // 隔离层，防止被兄弟元素的transform动画影响
+    isolation: isolate;
+    will-change: auto;
+    // 暗化渐变：顶部较暗，底部透明
+    background: linear-gradient(180deg,
+      rgba(0, 0, 0, 0.6) 0%,
+      rgba(0, 0, 0, 0.3) 50%,
+      rgba(0, 0, 0, 0.1) 100%
+    );
+    // 模糊效果：使用mask让顶部模糊，底部清晰
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    // mask渐变：顶部不透明（显示模糊），底部透明（不显示模糊）
+    mask-image: linear-gradient(180deg,
+      rgba(0, 0, 0, 1) 0%,
+      rgba(0, 0, 0, 0.6) 40%,
+      rgba(0, 0, 0, 0) 80%
+    );
+    -webkit-mask-image: linear-gradient(180deg,
+      rgba(0, 0, 0, 1) 0%,
+      rgba(0, 0, 0, 0.6) 40%,
+      rgba(0, 0, 0, 0) 80%
+    );
+  }
+
   .banner-particles {
     position: absolute;
     inset: 0;
     background-image:
       radial-gradient(circle at 10% 20%, var(--theme-glow), transparent 50%),
       radial-gradient(circle at 90% 80%, var(--theme-glow), transparent 50%);
-    animation: particles-float 20s ease-in-out infinite;
+    // 禁用transform动画，防止影响backdrop-filter
+    z-index: 2;
   }
 
   .scan-line {
@@ -501,6 +571,7 @@ defineExpose({
     height: 2px;
     animation: scan 4s linear infinite;
     opacity: 0.6;
+    z-index: 2;
   }
 
   .grid-bg {
@@ -508,6 +579,7 @@ defineExpose({
     inset: 0;
     background-size: 50px 50px;
     opacity: 0.2;
+    z-index: 2;
   }
 
   .banner-content {
@@ -515,7 +587,7 @@ defineExpose({
     display: flex;
     align-items: flex-start;
     gap: 32px;
-    z-index: 1;
+    z-index: 3;
   }
 
   .banner-icon {

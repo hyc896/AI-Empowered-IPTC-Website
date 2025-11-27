@@ -1,9 +1,11 @@
 import axiosInstance from './index'
 
+export type ReportType = 'comprehensive' | 'governance' | 'research' | 'industry' | 'china_ai' | 'shanghai_weekly'
+
 export interface AIDailyReport {
   id: string
   report_date: string
-  report_type: 'comprehensive' | 'governance' | 'research' | 'industry'
+  report_type: ReportType
   content: string
   statistics: {
     governance_count: number
@@ -34,7 +36,7 @@ export interface AIDailyReportListResponse {
 /**
  * 获取最新的AI日报
  */
-export const getLatestReport = async (reportType: 'comprehensive' | 'governance' | 'research' | 'industry' = 'comprehensive'): Promise<AIDailyReport> => {
+export const getLatestReport = async (reportType: ReportType = 'comprehensive'): Promise<AIDailyReport> => {
   const response = await axiosInstance.get<AIDailyReport>('/api/v1/ai-reports/latest', {
     params: { report_type: reportType }
   })
@@ -44,7 +46,7 @@ export const getLatestReport = async (reportType: 'comprehensive' | 'governance'
 /**
  * 根据日期获取AI日报
  */
-export const getReportByDate = async (reportDate: string, reportType: 'comprehensive' | 'governance' | 'research' | 'industry' = 'comprehensive'): Promise<AIDailyReport> => {
+export const getReportByDate = async (reportDate: string, reportType: ReportType = 'comprehensive'): Promise<AIDailyReport> => {
   const response = await axiosInstance.get<AIDailyReport>(`/api/v1/ai-reports/${reportDate}`, {
     params: { report_type: reportType }
   })
@@ -58,7 +60,7 @@ export const listReports = async (params?: {
   limit?: number
   offset?: number
   status?: 'pending' | 'completed' | 'failed'
-  report_type?: 'comprehensive' | 'governance' | 'research' | 'industry'
+  report_type?: ReportType
 }): Promise<AIDailyReportListResponse> => {
   const response = await axiosInstance.get<AIDailyReportListResponse>('/api/v1/ai-reports', {
     params
@@ -70,7 +72,7 @@ export const listReports = async (params?: {
  * 手动触发AI日报生成
  */
 export const triggerReportGeneration = async (
-  reportType: 'comprehensive' | 'governance' | 'research' | 'industry' = 'comprehensive',
+  reportType: ReportType = 'comprehensive',
   reportDate?: string
 ): Promise<{ message: string; timestamp: string }> => {
   const response = await axiosInstance.post<{ message: string; timestamp: string }>(

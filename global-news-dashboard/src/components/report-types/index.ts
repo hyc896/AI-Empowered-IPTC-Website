@@ -26,6 +26,8 @@ import { comprehensiveConfig } from './comprehensive/config'
 import { governanceConfig } from './governance/config'
 import { researchConfig } from './research/config'
 import { industryConfig } from './industry/config'
+import { chinaAiConfig } from './china-ai/config'
+import { shanghaiWeeklyConfig } from './shanghai-weekly/config'
 
 // 导入通用报告展示组件（所有类型共用，但通过 props 传入不同配置）
 import ReportView from './ReportView.vue'
@@ -53,6 +55,14 @@ const reportRegistry: ReportTypeRegistry = {
   },
   industry: {
     config: industryConfig,
+    component: ReportView
+  },
+  china_ai: {
+    config: chinaAiConfig,
+    component: ReportView
+  },
+  shanghai_weekly: {
+    config: shanghaiWeeklyConfig,
     component: ReportView
   }
 }

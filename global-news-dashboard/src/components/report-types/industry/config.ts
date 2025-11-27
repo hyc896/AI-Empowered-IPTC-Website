@@ -20,7 +20,8 @@ export const industryConfig: ReportTypeConfig = {
     glowColor: 'rgba(245, 158, 11, 0.3)',
     borderColor: 'rgba(245, 158, 11, 0.2)',
     textPrimary: '#ffffff',
-    textSecondary: 'rgba(255, 255, 255, 0.75)'
+    textSecondary: 'rgba(255, 255, 255, 0.75)',
+    bannerImageKeywords: 'business,industry,startup,innovation'
   },
 
   statCards: {

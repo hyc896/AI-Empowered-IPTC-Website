@@ -78,6 +78,10 @@ def generate_daily_report(self, report_type: str, report_date: Optional[str] = N
                 return await generator.generate_industry_report(target_date)
             elif report_type == 'comprehensive':
                 return await generator.generate_daily_report(target_date, report_type='comprehensive')
+            elif report_type == 'china_ai':
+                return await generator.generate_china_ai_report(target_date)
+            elif report_type == 'shanghai_weekly':
+                return await generator.generate_shanghai_weekly_report(target_date)
             else:
                 raise ValueError(f"未知的报告类型: {report_type}")
 
@@ -193,5 +197,47 @@ def generate_industry_report_task(report_date: Optional[str] = None) -> Dict[str
     """
     return generate_daily_report.apply(kwargs={
         'report_type': 'industry',
+        'report_date': report_date
+    }).get()
+
+
+@app.task(
+    name='backend.tasks.ai_report_tasks.generate_china_ai_report',
+    time_limit=1800,
+    soft_time_limit=1650
+)
+def generate_china_ai_report_task(report_date: Optional[str] = None) -> Dict[str, Any]:
+    """
+    生成中国AI日报
+
+    Args:
+        report_date: 报告日期（YYYY-MM-DD）
+
+    Returns:
+        生成结果字典
+    """
+    return generate_daily_report.apply(kwargs={
+        'report_type': 'china_ai',
+        'report_date': report_date
+    }).get()
+
+
+@app.task(
+    name='backend.tasks.ai_report_tasks.generate_shanghai_weekly_report',
+    time_limit=2400,
+    soft_time_limit=2200
+)
+def generate_shanghai_weekly_report_task(report_date: Optional[str] = None) -> Dict[str, Any]:
+    """
+    生成上海周报
+
+    Args:
+        report_date: 报告日期（YYYY-MM-DD）
+
+    Returns:
+        生成结果字典
+    """
+    return generate_daily_report.apply(kwargs={
+        'report_type': 'shanghai_weekly',
         'report_date': report_date
     }).get()

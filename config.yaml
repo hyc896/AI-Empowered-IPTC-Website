@@ -282,19 +282,27 @@ celery:
     schedule_filename: "./data/celerybeat-schedule"  # 定时任务调度文件路径
 
     # AI日报定时生成配置（24小时制）
+    # day_of_week: 周几执行（0=周一, 1=周二, ..., 6=周日），不设置则每天执行
     ai_report_schedule:
       governance:
         hour: 20
-        minute: 00  
+        minute: 00
       research:
         hour: 20
         minute: 00
       industry:
         hour: 20
-        minute: 00  
+        minute: 00
       comprehensive:
         hour: 20
         minute: 00
+      china_ai:
+        hour: 20
+        minute: 30
+      shanghai_weekly:
+        hour: 8
+        minute: 0
+        day_of_week: 0
 
   # 监控配置
   monitoring:

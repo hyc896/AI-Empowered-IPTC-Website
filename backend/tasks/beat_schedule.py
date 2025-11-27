@@ -26,6 +26,8 @@ DEFAULT_AI_REPORT_SCHEDULE = {
     'research': {'hour': 8, 'minute': 10},
     'industry': {'hour': 8, 'minute': 20},
     'comprehensive': {'hour': 8, 'minute': 30},
+    'china_ai': {'hour': 8, 'minute': 40},
+    'shanghai_weekly': {'hour': 9, 'minute': 0, 'day_of_week': 1},
 }
 
 
@@ -68,6 +70,10 @@ def _get_ai_report_tasks() -> dict:
     """
     获取AI日报定时任务配置（从config.yaml读取，始终可用）
 
+    支持日报和周报两种调度模式：
+    - 日报：仅配置hour和minute，每天执行
+    - 周报：配置hour、minute和day_of_week，每周指定日执行
+
     Returns:
         日报任务调度配置字典
     """
@@ -77,20 +83,27 @@ def _get_ai_report_tasks() -> dict:
     for report_type, schedule_config in ai_report_schedule.items():
         hour = schedule_config.get('hour', 8)
         minute = schedule_config.get('minute', 0)
+        day_of_week = schedule_config.get('day_of_week')
 
-        task_name = f"ai_report_{report_type}_daily"
+        if day_of_week is not None:
+            task_schedule = crontab(hour=hour, minute=minute, day_of_week=day_of_week)
+            task_name = f"ai_report_{report_type}_weekly"
+            schedule_desc = f"每周{day_of_week} {hour:02d}:{minute:02d}"
+        else:
+            task_schedule = crontab(hour=hour, minute=minute)
+            task_name = f"ai_report_{report_type}_daily"
+            schedule_desc = f"每天 {hour:02d}:{minute:02d}"
+
         report_tasks[task_name] = {
             'task': 'backend.tasks.ai_report_tasks.generate_daily_report',
-            'schedule': crontab(hour=hour, minute=minute),
+            'schedule': task_schedule,
             'args': (report_type, None),
             'options': {
                 'queue': 'report',
                 'priority': 9,
             }
         }
-        logger.info(
-            f"【Beat调度】注册日报任务: {report_type} (每天 {hour:02d}:{minute:02d})"
-        )
+        logger.info(f"【Beat调度】注册报告任务: {report_type} ({schedule_desc})")
 
     return report_tasks
 

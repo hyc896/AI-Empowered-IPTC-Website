@@ -112,7 +112,8 @@
       "Bash(cmd.exe /c \"netstat -ano | findstr LISTENING | findstr -E \"\"6379|11528|11530\"\"\")",
       "Bash(tasklist /FI \"IMAGENAME eq python.exe\")",
       "Bash(wmic process where \"name like ''''%python%'''' or name like ''''%celery%''''\" get ProcessId,CommandLine)",
-      "Bash(redis-cli:*)"
+      "Bash(redis-cli:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []

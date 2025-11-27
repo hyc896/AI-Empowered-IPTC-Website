@@ -27,6 +27,7 @@ class ORMRegistry:
         self._registry: Dict[str, Type] = {}
         self._reverse_registry: Dict[Type, str] = {}
         self._ai_tag_models: List[Type] = []  # 缓存包含ai_tag的模型
+        self._region_models: List[Type] = []  # 缓存包含region的模型
 
     def register(self, table_name: str, model_class: Type) -> None:
         """
@@ -52,6 +53,12 @@ class ORMRegistry:
             if model_class not in self._ai_tag_models:
                 self._ai_tag_models.append(model_class)
                 logger.debug(f"检测到ai_tag字段: {table_name}")
+
+        # 检查是否包含region字段并缓存
+        if self._has_region_field(model_class):
+            if model_class not in self._region_models:
+                self._region_models.append(model_class)
+                logger.debug(f"检测到region字段: {table_name}")
 
         logger.debug(f"注册ORM类: {model_class.__name__} → {table_name}")
 
@@ -123,6 +130,39 @@ class ORMRegistry:
         return [
             model.__tablename__
             for model in self._ai_tag_models
+        ]
+
+    def _has_region_field(self, model_class: Type) -> bool:
+        """
+        检查模型是否包含region字段
+
+        检测方式：
+        1. 检查类属性是否有region
+        2. 验证是否为Column类型
+        """
+        if not hasattr(model_class, 'region'):
+            return False
+
+        try:
+            region_attr = getattr(model_class, 'region')
+            return isinstance(region_attr.property, ColumnProperty)
+        except AttributeError:
+            return False
+
+    def get_region_models(self) -> List[Type]:
+        """
+        获取所有包含region字段的模型
+
+        返回：
+        - 模型类列表（已缓存，无需每次扫描）
+        """
+        return self._region_models.copy()
+
+    def get_region_table_names(self) -> List[str]:
+        """获取所有包含region的表名（用于日志和监控）"""
+        return [
+            model.__tablename__
+            for model in self._region_models
         ]
 
 
@@ -200,4 +240,12 @@ def auto_register_all_models():
     for table_name in ai_tag_tables:
         logger.info(f"  ✓ {table_name}")
     logger.info(f"共 {len(ai_tag_tables)} 个表")
+
+    # 打印包含region字段的表
+    region_tables = _orm_registry.get_region_table_names()
+    logger.info("-" * 50)
+    logger.info("【软注册】包含region字段的表:")
+    for table_name in region_tables:
+        logger.info(f"  ✓ {table_name}")
+    logger.info(f"共 {len(region_tables)} 个表")
     logger.info("=" * 50)

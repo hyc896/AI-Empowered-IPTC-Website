@@ -1,0 +1,1 @@
+export { chinaAiConfig } from './config'

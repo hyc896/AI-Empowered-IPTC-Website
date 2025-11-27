@@ -20,7 +20,8 @@ export const researchConfig: ReportTypeConfig = {
     glowColor: 'rgba(59, 130, 246, 0.3)',
     borderColor: 'rgba(59, 130, 246, 0.2)',
     textPrimary: '#ffffff',
-    textSecondary: 'rgba(255, 255, 255, 0.75)'
+    textSecondary: 'rgba(255, 255, 255, 0.75)',
+    bannerImageKeywords: 'laboratory,research,science,experiment'
   },
 
   statCards: {

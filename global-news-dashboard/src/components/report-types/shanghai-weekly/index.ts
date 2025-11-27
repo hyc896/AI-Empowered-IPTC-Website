@@ -1,0 +1,1 @@
+export { shanghaiWeeklyConfig } from './config'
