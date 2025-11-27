@@ -233,14 +233,13 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
                         title_elem = await link.query_selector('h3')
                         title = await title_elem.inner_text() if title_elem else ''
 
-                        date_elem = await link.query_selector('p')
+                        # 日期在 span.autor-y-fecha 中（格式：DD/MM/YYYY）
+                        date_elem = await link.query_selector('span.autor-y-fecha')
                         date_text = await date_elem.inner_text() if date_elem else ''
 
-                        # 提取摘要（第二个<p>）
-                        excerpt_elems = await link.query_selector_all('p')
-                        excerpt = ''
-                        if len(excerpt_elems) >= 2:
-                            excerpt = await excerpt_elems[1].inner_text()
+                        # 摘要在 span.listado-llamada 中
+                        excerpt_elem = await link.query_selector('span.listado-llamada')
+                        excerpt = await excerpt_elem.inner_text() if excerpt_elem else ''
 
                         # 解析日期（DD/MM/YYYY）
                         published_at = self._parse_date(date_text)
