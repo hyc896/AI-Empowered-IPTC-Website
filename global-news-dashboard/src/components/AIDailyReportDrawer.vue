@@ -44,6 +44,7 @@
             >
               刷新
             </el-button>
+            <!-- 安全考虑：手动生成按钮仅在开发环境使用
             <el-button
               :icon="Download"
               size="small"
@@ -54,6 +55,7 @@
             >
               手动生成
             </el-button>
+            -->
             <el-button
               :icon="Picture"
               size="small"

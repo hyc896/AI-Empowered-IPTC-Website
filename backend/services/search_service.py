@@ -14,6 +14,7 @@ from collections import defaultdict
 from ..database.connection import create_session
 from ..database.entities import MessageSource, TongHuaShunMessage, Kr36Message, ArxivMessage
 from ..database.orm_registry import get_orm_registry
+from .cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,22 @@ class SearchService:
 
         # 区分浏览模式和搜索模式
         is_empty_query = not query or not query.strip()
+
+        # 尝试从缓存获取（仅浏览模式使用缓存）
+        hours = time_range.get("hours", 0) if time_range else 0
+        if is_empty_query:
+            cached = cache_service.get_messages(
+                source_type=source_type,
+                source_id=source_id,
+                query="",
+                limit=limit,
+                offset=offset,
+                hours=hours
+            )
+            if cached:
+                results, total = cached
+                logger.info(f"【消息检索】缓存命中 - 返回 {len(results)} 条消息（总计 {total} 条）")
+                return results, total
 
         if is_empty_query:
             logger.info(f"【消息检索】浏览模式 - 类别: {source_type}, 消息源ID: {source_id}, 限制: {limit}, 偏移: {offset}")
@@ -238,6 +255,20 @@ class SearchService:
             # 记录检索耗时
             search_time = (datetime.now() - start_time).total_seconds()
             logger.info(f"【返回结果】最终返回 {len(final_results)} 条结果（总计 {total_count} 条），耗时 {search_time:.2f}s")
+
+            # 缓存结果（仅浏览模式）
+            if is_empty_query and final_results:
+                cache_service.set_messages(
+                    results=final_results,
+                    total=total_count,
+                    source_type=source_type,
+                    source_id=source_id,
+                    query="",
+                    limit=limit,
+                    offset=offset,
+                    hours=hours
+                )
+                logger.info(f"【消息检索】结果已缓存")
 
             return final_results, total_count
 
@@ -661,6 +692,12 @@ class SearchService:
 
     async def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
+        # 尝试从缓存获取
+        cached = cache_service.get_stats()
+        if cached:
+            logger.info("【统计信息】缓存命中")
+            return cached
+
         try:
             with create_session() as db:
                 # 统计各表记录数
@@ -708,6 +745,10 @@ class SearchService:
                 # 总消息数
                 stats["messages"]["total"] = sum(stats["messages"].values())
                 stats["recent_messages"]["total"] = sum(stats["recent_messages"].values())
+
+                # 缓存统计结果
+                cache_service.set_stats(stats)
+                logger.info("【统计信息】结果已缓存")
 
                 return stats
 

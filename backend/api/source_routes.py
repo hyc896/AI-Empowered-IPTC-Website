@@ -19,6 +19,7 @@ from ..api.schemas import (
     MessageSourceResponse, MessageSourceCreate, MessageSourceUpdate,
     ErrorResponse, SuccessResponse
 )
+from ..services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,12 @@ async def get_sources(
 
     支持按状态和类别过滤
     """
+    # 尝试从缓存获取
+    cached = cache_service.get_sources(category=category, is_active=is_active)
+    if cached:
+        logger.info(f"【消息源列表】缓存命中，返回 {len(cached)} 个消息源")
+        return [MessageSourceResponse(**s) for s in cached]
+
     try:
         with create_session() as db:
             query = db.query(MessageSource)
@@ -54,7 +61,14 @@ async def get_sources(
             sources = query.order_by(MessageSource.created_at.desc()).all()
 
             # 转换为响应格式
-            return [MessageSourceResponse.from_orm(source) for source in sources]
+            result = [MessageSourceResponse.from_orm(source) for source in sources]
+
+            # 缓存结果
+            cache_data = [s.dict() for s in result]
+            cache_service.set_sources(cache_data, category=category, is_active=is_active)
+            logger.info(f"【消息源列表】结果已缓存，共 {len(result)} 个消息源")
+
+            return result
 
     except Exception as e:
         logger.error(f"获取消息源列表失败: {e}", exc_info=True)
@@ -130,6 +144,9 @@ async def create_source(source_data: MessageSourceCreate):
 
             logger.info(f"创建消息源成功: {new_source.name} ({new_source.id})")
 
+            # 使消息源缓存失效
+            cache_service.invalidate_sources()
+
             return MessageSourceResponse.from_orm(new_source)
 
     except HTTPException:
@@ -170,6 +187,9 @@ async def update_source(source_id: str, source_data: MessageSourceUpdate):
 
             logger.info(f"更新消息源成功: {source.name} ({source.id})")
 
+            # 使消息源缓存失效
+            cache_service.invalidate_sources()
+
             return MessageSourceResponse.from_orm(source)
 
     except HTTPException:
@@ -205,6 +225,9 @@ async def delete_source(source_id: str):
 
             logger.info(f"删除消息源成功: {source.name} ({source.id})")
 
+            # 使消息源缓存失效
+            cache_service.invalidate_sources()
+
             return None  # HTTP 204 No Content
 
     except HTTPException:
@@ -239,6 +262,9 @@ async def activate_source(source_id: str):
             db.commit()
 
             logger.info(f"启用消息源成功: {source.name} ({source.id})")
+
+            # 使消息源缓存失效
+            cache_service.invalidate_sources()
 
             return SuccessResponse(
                 message=f"消息源 {source.name} 已启用"
@@ -276,6 +302,9 @@ async def deactivate_source(source_id: str):
             db.commit()
 
             logger.info(f"禁用消息源成功: {source.name} ({source.id})")
+
+            # 使消息源缓存失效
+            cache_service.invalidate_sources()
 
             return SuccessResponse(
                 message=f"消息源 {source.name} 已禁用"

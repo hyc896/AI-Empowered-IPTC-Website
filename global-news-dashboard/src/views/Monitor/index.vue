@@ -165,7 +165,7 @@
     <div class="collectors-section">
       <div class="section-header">
         <h3>采集器状态</h3>
-        <span class="section-hint">点击"运行"可手动触发采集任务</span>
+        <!-- <span class="section-hint">点击"运行"可手动触发采集任务</span> -->
       </div>
 
       <el-table
@@ -225,6 +225,7 @@
           </template>
         </el-table-column>
 
+        <!-- 安全考虑：手动运行采集器仅在开发环境使用
         <el-table-column label="操作" width="100" align="center" fixed="right">
           <template #default="{ row }">
             <el-button
@@ -238,6 +239,7 @@
             </el-button>
           </template>
         </el-table-column>
+        -->
       </el-table>
     </div>
 
@@ -262,6 +264,7 @@
               :type="info.pending_tasks > 10 ? 'warning' : info.pending_tasks > 0 ? 'primary' : 'info'"
               class="queue-badge"
             />
+            <!-- 安全考虑：清空队列按钮仅在开发环境使用
             <el-popconfirm
               v-if="info.pending_tasks > 0"
               :title="`确定清空 ${formatQueueName(String(queueName))} 中的 ${info.pending_tasks} 个任务？`"
@@ -281,6 +284,7 @@
                 </el-button>
               </template>
             </el-popconfirm>
+            -->
           </div>
 
           <!-- 任务列表 -->

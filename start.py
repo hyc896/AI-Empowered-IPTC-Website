@@ -21,6 +21,11 @@ import signal
 import os
 from typing import List
 
+# 设置UTF-8编码环境（解决Linux服务器中文乱码）
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+os.environ['LANG'] = 'en_US.UTF-8'
+os.environ['LC_ALL'] = 'en_US.UTF-8'
+
 # 进程列表（用于清理）
 processes: List[subprocess.Popen] = []
 
@@ -32,10 +37,17 @@ def start_process(name: str, cmd: List[str], wait_seconds: int = 2) -> subproces
     print(f"命令: {' '.join(cmd)}")
     print(f"{'='*50}")
 
+    # 子进程环境变量（确保UTF-8编码）
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+    env['LANG'] = 'en_US.UTF-8'
+    env['LC_ALL'] = 'en_US.UTF-8'
+
     proc = subprocess.Popen(
         cmd,
         stdout=sys.stdout,
         stderr=sys.stderr,
+        env=env,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
     )
     processes.append(proc)
