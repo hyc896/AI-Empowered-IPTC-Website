@@ -2,13 +2,6 @@
   <div class="message-sources-view">
     <div class="sources-header">
       <h3>消息源管理</h3>
-      <el-button
-        type="primary"
-        :icon="Plus"
-        @click="handleCreateSource"
-      >
-        新建消息源
-      </el-button>
     </div>
     <div v-loading="loading" class="sources-list">
       <MessageSourceCard
@@ -65,7 +58,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useMessageStore } from '@/stores'
 import type { MessageSource } from '@/types/models'
@@ -114,18 +106,6 @@ const fetchData = async () => {
   } finally {
     loading.value = false
   }
-}
-
-const handleCreateSource = () => {
-  isEdit.value = false
-  formData.value = {
-    id: '',
-    name: '',
-    adapter_name: '',
-    schedule: '',
-    is_active: true
-  }
-  dialogVisible.value = true
 }
 
 const handleEditSource = (source: MessageSource) => {
