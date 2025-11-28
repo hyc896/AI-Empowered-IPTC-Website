@@ -9,8 +9,15 @@ import asyncio
 import logging
 import sys
 import os
+import io
 from contextlib import asynccontextmanager
 from typing import Dict, Any
+
+# 强制UTF-8编码（解决Linux服务器中文显示问题）
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # 禁用Playwright遥测（必须在导入playwright之前设置）
 os.environ["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"
