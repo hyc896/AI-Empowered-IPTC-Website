@@ -113,7 +113,9 @@
       "Bash(tasklist /FI \"IMAGENAME eq python.exe\")",
       "Bash(wmic process where \"name like ''''%python%'''' or name like ''''%celery%''''\" get ProcessId,CommandLine)",
       "Bash(redis-cli:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(D:/Anaconda/envs/personal_agent/python.exe test_llm_response.py)",
+      "WebFetch(domain:timesofindia.indiatimes.com)"
     ],
     "deny": [],
     "ask": []

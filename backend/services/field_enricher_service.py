@@ -327,7 +327,7 @@ class FieldEnricherService:
                     llm_client = self._get_llm_client()
                     response = await llm_client.generate_with_messages_async(
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=100,
+                        max_tokens=20000,
                         source="FieldEnricher:region"
                     )
 
@@ -408,7 +408,7 @@ class FieldEnricherService:
                     llm_client = self._get_llm_client()
                     response = await llm_client.generate_with_messages_async(
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=150,
+                        max_tokens=20000,
                         source="FieldEnricher:industry"
                     )
 
@@ -573,7 +573,7 @@ class FieldEnricherService:
                     llm_client = self._get_llm_client()
                     response = await llm_client.generate_with_messages_async(
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=50,
+                        max_tokens=20000,
                         source="FieldEnricher:ai_tag"
                     )
 

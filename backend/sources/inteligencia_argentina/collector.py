@@ -173,7 +173,10 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
 
     async def _scrape_articles(self, latest_url: Optional[str]) -> List[Dict[str, Any]]:
         """
-        Scraping阶段：抓取文章列表和详情页
+        Scraping阶段：从最后一页向前抓取文章列表和详情页
+
+        注意：该网站文章按时间升序排列（第1页最老，最后一页最新），
+        因此需要从最后一页开始向前采集，遇到已存储URL时停止。
 
         Args:
             latest_url: 最新已存储的URL，遇到该URL停止
@@ -185,34 +188,42 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
         items = []
 
         try:
-            page_num = 1
-            max_pages = 20  # 安全上限
+            # 第一步：获取总页数
+            total_pages = await self._get_total_pages(page)
+            logger.info(f"【InteligenciaArgentina】网站共 {total_pages} 页，从最后一页开始采集")
 
-            while page_num <= max_pages:
-                if page_num == 1:
+            # 第二步：从最后一页向前采集
+            current_page = total_pages
+
+            while current_page >= 1:
+                if current_page == 1:
                     url = self.BASE_URL
                 else:
-                    url = f"{self.BASE_URL}?page={page_num}"
+                    url = f"{self.BASE_URL}?page={current_page}"
 
-                logger.info(f"【InteligenciaArgentina】正在抓取第 {page_num} 页: {url}")
+                logger.info(f"【InteligenciaArgentina】正在抓取第 {current_page} 页: {url}")
 
                 try:
                     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                     await asyncio.sleep(2)  # 等待内容渲染
                 except Exception as e:
-                    logger.warning(f"【InteligenciaArgentina】第 {page_num} 页加载失败: {e}")
-                    break
+                    logger.warning(f"【InteligenciaArgentina】第 {current_page} 页加载失败: {e}")
+                    current_page -= 1
+                    continue
 
                 # 提取文章链接（<a>标签包含<h3>）
                 article_links = await page.query_selector_all('a:has(h3)')
 
                 if not article_links:
-                    logger.info(f"【InteligenciaArgentina】第 {page_num} 页无文章，停止翻页")
-                    break
+                    logger.info(f"【InteligenciaArgentina】第 {current_page} 页无文章")
+                    current_page -= 1
+                    continue
 
-                logger.info(f"【InteligenciaArgentina】第 {page_num} 页找到 {len(article_links)} 篇文章")
+                logger.info(f"【InteligenciaArgentina】第 {current_page} 页找到 {len(article_links)} 篇文章")
 
                 page_stopped = False
+                page_items = []  # 当前页的文章
+
                 for link in article_links:
                     try:
                         article_url = await link.get_attribute('href')
@@ -223,7 +234,7 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
                         if not article_url.startswith('http'):
                             article_url = f"https://inteligenciaargentina.ar{article_url}"
 
-                        # 遇到已存储URL，立即停止
+                        # 遇到已存储URL，停止当前页后续文章采集
                         if latest_url and article_url == latest_url:
                             logger.info(f"【InteligenciaArgentina】遇到最新已存储URL，停止采集")
                             page_stopped = True
@@ -247,7 +258,7 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
                         # 提取external_id（URL slug）
                         external_id = self._extract_slug(article_url)
 
-                        items.append({
+                        page_items.append({
                             'url': article_url,
                             'title': title.strip(),
                             'excerpt': excerpt.strip(),
@@ -259,16 +270,13 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
                         logger.warning(f"【InteligenciaArgentina】提取文章信息失败: {e}")
                         continue
 
+                # 将当前页文章添加到总列表（保持时间降序，最新的在前）
+                items.extend(page_items)
+
                 if page_stopped:
                     break
 
-                # 检查是否有下一页
-                next_page_btn = await page.query_selector(f'a[href*="?page={page_num + 1}"]')
-                if not next_page_btn:
-                    logger.info(f"【InteligenciaArgentina】第 {page_num} 页为最后一页")
-                    break
-
-                page_num += 1
+                current_page -= 1
 
             # 访问详情页获取完整content
             if items:
@@ -279,6 +287,39 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
             await page.close()
 
         return items
+
+    async def _get_total_pages(self, page: Page) -> int:
+        """
+        获取网站总页数
+
+        Args:
+            page: Playwright页面对象
+
+        Returns:
+            总页数
+        """
+        try:
+            await page.goto(self.BASE_URL, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(2)
+
+            # 查找分页链接，提取最大页码
+            pagination_links = await page.query_selector_all('a[href*="?page="]')
+            max_page = 1
+
+            for link in pagination_links:
+                href = await link.get_attribute('href')
+                if href:
+                    import re
+                    match = re.search(r'\?page=(\d+)', href)
+                    if match:
+                        page_num = int(match.group(1))
+                        max_page = max(max_page, page_num)
+
+            return max_page
+
+        except Exception as e:
+            logger.warning(f"【InteligenciaArgentina】获取总页数失败: {e}，使用默认值10")
+            return 10
 
     async def _fetch_article_contents(self, page: Page, items: List[Dict[str, Any]]) -> None:
         """
