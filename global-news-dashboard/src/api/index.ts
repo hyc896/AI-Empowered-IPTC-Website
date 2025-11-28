@@ -2,10 +2,9 @@ import axios, { type AxiosInstance, type AxiosResponse } from 'axios'
 import { ElMessage } from 'element-plus'
 import { API_TIMEOUT } from '@/constants'
 
-// 使用相对路径，通过Vite proxy转发到后端
-// 开发模式：Vite proxy转发 /api -> localhost:11528
-// 生产模式：需要Nginx配置proxy
-const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+// 前端通过Vite proxy在服务器内网访问后端
+// 浏览器请求 /api/* -> Vite proxy -> localhost:11528/api/*
+const baseURL = ''
 
 const axiosInstance: AxiosInstance = axios.create({
   baseURL,
