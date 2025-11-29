@@ -25,6 +25,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# 采集器全局超时（秒）- 单次采集最大执行时间
+# 防止单个采集器卡死阻塞整个Worker（Windows Solo Pool是串行执行）
+COLLECTOR_TIMEOUT_SECONDS = 600  # 10分钟
+
 
 class PlaywrightCollectorBase(ABC):
     """
@@ -155,6 +159,11 @@ class PlaywrightCollectorBase(ABC):
         """
         单次采集（公共接口，供Celery任务调用）
 
+        【重要】包含全局超时保护：
+        - Windows Solo Pool是串行执行，一个任务卡住会阻塞所有后续任务
+        - 使用asyncio.wait_for包裹_collect_once，超时后强制退出
+        - 超时时间由COLLECTOR_TIMEOUT_SECONDS控制（默认10分钟）
+
         Returns:
             采集结果字典: {
                 'collected': int,  # 采集数量
@@ -172,8 +181,23 @@ class PlaywrightCollectorBase(ABC):
                         'error': '浏览器初始化失败'
                     }
 
-            # 调用子类实现的采集逻辑
-            await self._collect_once()
+            # 【关键】使用asyncio.wait_for添加全局超时保护
+            # 防止单个采集器卡死阻塞整个Worker
+            try:
+                await asyncio.wait_for(
+                    self._collect_once(),
+                    timeout=COLLECTOR_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                error_msg = f"采集超时（超过{COLLECTOR_TIMEOUT_SECONDS}秒），强制退出"
+                logger.error(f"【{self.collector_name}】{error_msg}")
+                # 超时时尝试关闭所有页面，释放资源
+                await self._force_cleanup_pages()
+                return {
+                    'collected': 0,
+                    'success': False,
+                    'error': error_msg
+                }
 
             return {
                 'collected': 1,  # 子类可通过返回值覆盖
@@ -187,6 +211,27 @@ class PlaywrightCollectorBase(ABC):
                 'success': False,
                 'error': str(e)
             }
+
+    async def _force_cleanup_pages(self) -> None:
+        """
+        强制清理浏览器所有页面（超时时调用）
+
+        在采集超时后，浏览器可能还有打开的页面，需要强制关闭
+        避免浏览器资源泄漏
+        """
+        try:
+            if self._browser:
+                contexts = self._browser.contexts
+                for ctx in contexts:
+                    pages = ctx.pages
+                    for page in pages:
+                        try:
+                            await page.close()
+                        except Exception:
+                            pass
+                logger.debug(f"【{self.collector_name}】已强制清理所有页面")
+        except Exception as e:
+            logger.warning(f"【{self.collector_name}】强制清理页面失败: {e}")
 
     async def stop(self) -> None:
         """

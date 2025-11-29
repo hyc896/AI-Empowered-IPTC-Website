@@ -341,9 +341,9 @@ class InteligenciaArgentinaCollector(PlaywrightCollectorBase):
             try:
                 logger.debug(f"【InteligenciaArgentina】访问详情页 {idx}/{len(items)}: {item['url']}")
 
-                # 使用networkidle等待，确保JavaScript完全执行
-                await page.goto(item['url'], wait_until="networkidle", timeout=60000)
-                await asyncio.sleep(2)  # 增加延迟，避免触发反爬虫
+                # 使用domcontentloaded快速加载，避免networkidle卡在广告/追踪脚本
+                await page.goto(item['url'], wait_until="domcontentloaded", timeout=15000)
+                await asyncio.sleep(1)  # 短暂延迟等待内容渲染
 
                 # 提取文章正文（实际在div.contenido中）
                 content_elem = await page.query_selector('div.contenido') or \
