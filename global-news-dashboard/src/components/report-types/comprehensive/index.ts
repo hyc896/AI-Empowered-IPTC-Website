@@ -1,1 +1,0 @@
-export { comprehensiveConfig } from './config'

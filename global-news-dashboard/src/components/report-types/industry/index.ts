@@ -1,1 +1,0 @@
-export { industryConfig } from './config'

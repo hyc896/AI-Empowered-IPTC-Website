@@ -1,1 +1,0 @@
-export { researchConfig } from './config'
