@@ -1,0 +1,127 @@
+/**
+ * CSS 变量定义
+ */
+
+:root {
+  /* 主色调 - 思政红色主题 */
+  --color-primary: #d03050; /* 中国红/党政红 - 主色调 */
+  --color-primary-dark: #c41e3a; /* 深红色 - 强调色/hover状态 */
+  --color-secondary: #f0ad4e; /* 金色 - 辅助色，体现庄重感 */
+  --color-accent: #ff6b6b; /* 橙红 - 点缀色，增加活力感 */
+
+  /* 中性色 */
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-gray-50: #fafafa;
+  --color-gray-100: #f5f5f5;
+  --color-gray-200: #eeeeee;
+  --color-gray-300: #e0e0e0;
+  --color-gray-400: #bdbdbd;
+  --color-gray-500: #9e9e9e;
+  --color-gray-600: #757575;
+  --color-gray-700: #616161;
+  --color-gray-800: #424242;
+  --color-gray-900: #212121;
+
+  /* 语义色 */
+  --color-success: #52c41a;
+  --color-warning: #f0ad4e; /* 使用金色作为警告色 */
+  --color-error: #d03050; /* 使用主红色作为错误色 */
+  --color-info: #ff6b6b; /* 使用橙红色作为信息色 */
+
+  /* 背景色 */
+  --bg-primary: #ffffff; /* 主背景 - 白色 */
+  --bg-secondary: #f5f5f5; /* 次背景 - 浅灰 */
+  --bg-tertiary: #fafafa; /* 第三背景 */
+  --bg-dark: #d03050; /* 深色背景 - 使用主红色 */
+
+  /* 文本颜色 */
+  --text-primary: #333333; /* 主文字 */
+  --text-secondary: #666666; /* 次文字 */
+  --text-tertiary: #999999; /* 辅助文字 */
+  --text-light: #ffffff; /* 浅色文字 */
+
+  /* 边框 */
+  --border-color: #e0e0e0;
+  --border-color-light: #f0f0f0;
+  --border-radius-sm: 4px;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+
+  /* 阴影 */
+  --shadow-light: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-medium: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-heavy: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+  --spacing-3xl: 48px;
+  --spacing-4xl: 64px;
+
+  /* 字体 */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-family-serif: Georgia, Cambria, 'Times New Roman', Times, serif;
+  --font-family-mono: 'Courier New', Courier, monospace;
+
+  /* 字号 */
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+
+  /* 字重 */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* 行高 */
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.8;
+
+  /* 过渡 */
+  --transition-fast: 150ms ease-in-out;
+  --transition-base: 300ms ease-in-out;
+  --transition-slow: 500ms ease-in-out;
+
+  /* Z-index */
+  --z-dropdown: 1000;
+  --z-sticky: 1020;
+  --z-fixed: 1030;
+  --z-modal-backdrop: 1040;
+  --z-modal: 1050;
+  --z-popover: 1060;
+  --z-tooltip: 1070;
+
+  /* 布局 */
+  --header-height: 64px;
+  --footer-height: 80px;
+  --sidebar-width: 240px;
+  --max-width: 1200px;
+}
+
+/* 暗色模式（预留） */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2a2a2a;
+    --bg-tertiary: #3a3a3a;
+    --text-primary: #e0e0e0;
+    --text-secondary: #b0b0b0;
+    --text-tertiary: #808080;
+    --border-color: #404040;
+    --border-color-light: #303030;
+  }
+}

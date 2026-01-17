@@ -367,6 +367,12 @@ def load_api_routes():
         except ImportError as e:
             logger.warning(f"监控路由加载失败: {e}")
 
+        try:
+            from backend.api.iptc_case_routes import router as iptc_case_router
+            app.include_router(iptc_case_router)
+        except ImportError as e:
+            logger.warning(f"IPTC案例路由加载失败: {e}")
+
         app.include_router(search_router, prefix="/api/v1")
 
         logger.info("API路由加载成功")

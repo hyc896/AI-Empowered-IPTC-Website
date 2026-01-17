@@ -140,8 +140,9 @@ def init_worker(**kwargs):
 
             chroma_config = _worker_config.get('database', {}).get('chromadb', {})
 
-            # 强制使用server模式（从环境变量CHROMADB_MODE读取，默认server）
-            chroma_mode = os.getenv('CHROMADB_MODE', 'server')
+            # 使用local模式（从环境变量CHROMADB_MODE读取，默认local）
+            # Server模式在Windows上有兼容性问题，优先使用local模式
+            chroma_mode = os.getenv('CHROMADB_MODE', 'local')
             chroma_config['mode'] = chroma_mode
 
             # 使用全局初始化函数，确保采集器能通过 get_chromadb_storage() 访问

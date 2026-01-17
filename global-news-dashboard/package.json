@@ -30,10 +30,10 @@
   "devDependencies": {
     "@types/markdown-it": "latest",
     "@types/node": "latest",
-    "@vitejs/plugin-vue": "latest",
+    "@vitejs/plugin-vue": "^5.2.1",
     "sass": "latest",
     "typescript": "latest",
-    "vite": "latest",
+    "vite": "^5.4.11",
     "vue-tsc": "latest"
   }
 }

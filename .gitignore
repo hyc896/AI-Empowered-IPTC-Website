@@ -63,3 +63,18 @@ htmlcov/
 # Jupyter Notebook
 .ipynb_checkpoints
 betakit_debug_output.txt
+
+# Celery files in root directory
+celerybeat-schedule.*
+
+# Large SQL dumps (32MB+)
+full_database_dump.sql
+*.dump
+
+# IPTC Dashboard frontend dependencies
+iptc-dashboard/node_modules/
+iptc-dashboard/dist/
+iptc-dashboard/.vite/
+
+# Exclude global-news-dashboard (不需要上传)
+global-news-dashboard/
