@@ -1,0 +1,24 @@
+# 图数据库
+neo4j
+
+# 异步支持
+aiohttp
+
+# 数据验证
+pydantic
+
+# 配置管理
+pyyaml
+
+# 文本处理
+rapidfuzz
+
+# LLM客户端（可选）
+openai
+anthropic
+
+# 日志
+colorlog
+
+# 工具
+python-dotenv

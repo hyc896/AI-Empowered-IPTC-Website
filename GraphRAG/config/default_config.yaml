@@ -1,0 +1,48 @@
+# Neo4j配置
+neo4j:
+  uri: ${NEO4J_URI:bolt://localhost:7687}
+  user: ${NEO4J_USER:neo4j}
+  password: ${NEO4J_PASSWORD}
+  database: ${NEO4J_DATABASE:neo4j}
+  max_connection_pool_size: 50
+  connection_timeout: 30
+
+# LLM配置
+llm:
+  provider: openai  # openai, anthropic, custom
+  model: gpt-4
+  api_key: ${LLM_API_KEY}
+  base_url: ${LLM_BASE_URL:}
+  temperature: 0.3
+  max_tokens: 2000
+
+# 实体提取配置
+entity_extraction:
+  max_chunk_chars: 20000
+  entity_types:
+    - Company
+    - Person
+    - Technology
+    - Product
+    - Organization
+    - Event
+    - Concept
+    - Location
+  relation_types:
+    - WORKS_AT
+    - INVESTS_IN
+    - DEVELOPS
+    - COMPETES_WITH
+    - PARTNERS_WITH
+    - BASED_ON
+    - LOCATED_IN
+
+# 实体归一化配置
+normalization:
+  similarity_threshold: 0.9
+  enable_auto_merge: true
+
+# 日志配置
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
