@@ -1,0 +1,41 @@
+{
+  
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(pip install:*)",
+      "Bash(python debug_qstheory.py:*)",
+      "Bash(python:*)",
+      "Bash(done)",
+      "Bash(mysql -u root -pHyc174513 -D message_platform -e \"SHOW TABLES LIKE ''iptc%'';\")",
+      "Bash(mysql:*)",
+      "Bash(cat:*)",
+      "Bash(npm run dev:*)",
+      "Bash(where:*)",
+      "Bash(conda activate:*)",
+      "Bash(\"D:\\Anaconda3\\envs\\personal_agent\\Scripts\\pip.exe\" install schedule)",
+      "Bash(\"D:/Programs/python3/Scripts/pip.exe\" install schedule)",
+      "Bash(redis-cli ping:*)",
+      "Bash(\"D:\\Anaconda3\\envs\\personal_agent\\python.exe\" test_single_collector.py)",
+      "Bash(\"D:\\Anaconda3\\envs\\personal_agent\\python.exe\":*)",
+      "Bash(\"D:\\Anaconda3\\envs\\personal_agent\\python.exe\" backend/scripts/iptc_auto_scheduler.py)",
+      "Bash(ping:*)",
+      "Bash(\"D:\\Anaconda3\\envs\\personal_agent\\Scripts\\pip.exe\" install chromadb==1.1.1 \"numpy>=2.0\")",
+      "Bash(python debug_collector.py:*)",
+      "Bash(dir:*)",
+      "Bash(python init_rednet_collector.py:*)",
+      "Bash(python init_guancha_collector.py:*)",
+      "Bash(timeout 60 python:*)",
+      "Bash(timeout 120 python:*)",
+      "Bash(curl:*)",
+      "Bash(timeout 5 bash:*)",
+      "Bash(timeout 120 bash:*)",
+      "Bash(npm install:*)",
+      "Bash(mkdir:*)",
+      "Bash(set PYTHONPATH=%CD%)",
+      "Bash(node:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

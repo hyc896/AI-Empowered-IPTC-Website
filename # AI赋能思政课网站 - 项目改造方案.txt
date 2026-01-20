@@ -1,0 +1,959 @@
+# AI赋能思政课网站 - 项目改造方案
+
+> **基于Message Platform项目改造**  
+> **目标**：构建思政知识库与案例网站，支持知识图谱展示与智能问答
+
+---
+
+## 📋 项目需求概述
+
+### 新项目核心功能
+1. **思政知识库**
+   - 基于教材章节的知识体系
+   - 知识点结构化存储
+   - 智能问答与检索
+
+2. **案例网站**
+   - 案例更新档案库
+   - 按教材章节分类
+   - 案例标签与关联
+
+3. **知识图谱**
+   - Neo4j图数据库存储知识关系
+   - 可视化展示知识体系
+   - 支持关系查询与推理
+
+4. **多源数据整合**
+   - 支持案例数据导入
+   - 实时更新机制
+   - 数据审核流程
+
+### 技术栈要求
+- ✅ **前端**：Vue3（保持）
+- ✅ **后端**：Python/FastAPI（保持）
+- ✅ **关系数据库**：MySQL（保持）
+- 🆕 **图数据库**：Neo4j（新增）
+- ❓ **向量数据库**：ChromaDB（可选保留，用于语义检索）
+
+---
+
+## 🔄 项目改造分析
+
+### 一、可以复用的部分 ✅
+
+#### 1. **后端框架层** - 100%复用
+**保留内容**：
+```
+backend/
+├── main.py                 # FastAPI主入口（修改路由）
+├── config/                 # 配置管理（保留）
+├── database/
+│   ├── connection.py      # MySQL连接管理（保留）
+│   └── entities.py        # ORM模型（替换为新的实体）
+├── llm/                    # LLM服务（保留，用于智能问答）
+│   ├── global_llm_manager.py
+│   ├── llm_client.py
+│   └── translator.py      # 可能用于翻译功能
+└── utils/                  # 工具模块（保留）
+```
+
+**复用价值**：
+- FastAPI框架配置完善
+- MySQL连接池管理
+- LLM集成（用于知识问答、案例分析）
+- 配置管理系统（config.yaml）
+
+---
+
+#### 2. **前端框架层** - 70%复用
+**保留内容**：
+```
+global-news-dashboard/
+├── src/
+│   ├── api/               # API封装（改造）
+│   ├── router/            # 路由配置（替换）
+│   ├── stores/            # Pinia状态管理（保留）
+│   ├── types/             # TypeScript类型（替换）
+│   ├── utils/             # 工具函数（部分保留）
+│   │   ├── date.ts       # 日期格式化（保留）
+│   │   ├── format.ts     # 数据格式化（保留）
+│   │   └── markdown.ts   # Markdown渲染（保留）
+│   └── components/common/ # 通用组件（部分保留）
+│       └── MarkdownRenderer.vue  # Markdown渲染器（保留）
+├── package.json           # 依赖管理（保留）
+└── vite.config.ts        # 构建配置（保留）
+```
+
+**复用价值**：
+- Vue3 + TypeScript + Vite基础架构
+- Element Plus UI组件库
+- Axios HTTP封装
+- Markdown渲染能力（用于案例展示）
+
+---
+
+#### 3. **LLM能力层** - 100%复用
+**保留内容**：
+```
+backend/llm/
+├── global_llm_manager.py   # LLM客户端管理
+├── llm_client.py           # LLM客户端封装
+└── token_metrics.py        # Token统计
+```
+
+**应用场景**：
+- **知识问答**：基于知识库的智能问答
+- **案例分析**：自动生成案例分析报告
+- **关键词提取**：从案例中提取思政知识点
+- **知识关联推荐**：推荐相关知识点和案例
+
+---
+
+#### 4. **向量存储层** - 可选保留
+**保留内容**：
+```
+backend/storage/
+└── chromadb_storage.py     # ChromaDB封装
+```
+
+**应用场景**：
+- **语义检索**：基于语义的案例检索
+- **相似案例推荐**：找到相似的思政案例
+- **知识点匹配**：将案例自动匹配到知识点
+
+**建议**：保留ChromaDB，与Neo4j配合使用
+- Neo4j：存储结构化知识关系
+- ChromaDB：支持语义检索
+
+---
+
+### 二、需要删除的部分 ❌
+
+#### 1. **消息采集器模块** - 完全删除
+**删除内容**：
+```
+backend/
+├── collectors/             # 采集器基础设施（删除）
+├── sources/                # 27个消息源采集器（删除）
+├── services/
+│   ├── collector_service.py      # 采集器调度服务（删除）
+│   ├── browser_pool.py           # 浏览器池（删除）
+│   └── field_enricher_service.py # 字段增强（删除）
+└── tasks/
+    ├── collector_tasks.py        # 采集器任务（删除）
+    └── beat_schedule.py          # 定时调度（删除）
+```
+
+**删除原因**：
+- 思政网站不需要自动采集新闻
+- 案例数据通过**人工录入**或**批量导入**
+- 不需要浏览器自动化
+
+---
+
+#### 2. **地理可视化模块** - 完全删除
+**删除内容**：
+```
+global-news-dashboard/src/
+├── views/
+│   ├── Globe/              # 3D地球（删除）
+│   └── Globe2D/            # 2D地图（删除）
+├── utils/
+│   └── countryMapping.ts   # 国家映射（删除）
+└── public/
+    ├── world.json          # 地图数据（删除）
+    ├── china.json
+    └── *.geojson
+```
+
+**删除原因**：
+- 思政网站不需要地理可视化
+- 知识图谱可视化将替代地球可视化
+
+---
+
+#### 3. **AI日报模块** - 完全删除
+**删除内容**：
+```
+backend/
+├── services/
+│   └── ai_report_generator.py    # AI日报生成（删除）
+├── api/
+│   └── ai_report_routes.py       # AI日报API（删除）
+└── tasks/
+    └── ai_report_tasks.py        # AI日报任务（删除）
+
+global-news-dashboard/src/
+├── components/
+│   ├── AIDailyReportDrawer.vue   # 日报抽屉（删除）
+│   └── report-types/             # 日报类型（删除）
+└── api/
+    └── aiReport.ts               # 日报API（删除）
+```
+
+**删除原因**：
+- 思政网站不需要新闻日报
+- 可能需要的是**知识摘要**或**案例周报**（但逻辑不同）
+
+---
+
+#### 4. **消息源管理模块** - 部分删除
+**删除内容**：
+```
+backend/api/
+├── source_routes.py        # 消息源管理API（删除）
+├── collector_routes.py     # 采集器控制API（删除）
+└── sse_routes.py           # SSE事件流（可选删除）
+
+global-news-dashboard/src/views/
+└── MessageSources/         # 消息源管理页（删除）
+```
+
+**删除原因**：
+- 不需要管理新闻消息源
+- 将替换为**案例来源管理**（但逻辑更简单）
+
+---
+
+### 三、需要新增的部分 🆕
+
+#### 1. **Neo4j图数据库集成** - 核心新增
+**新增文件**：
+```
+backend/
+├── graph/                          # 图数据库模块（新增）
+│   ├── __init__.py
+│   ├── neo4j_client.py            # Neo4j客户端封装
+│   ├── knowledge_graph.py         # 知识图谱服务
+│   ├── graph_builder.py           # 图谱构建器
+│   └── graph_query.py             # 图谱查询服务
+└── config/
+    └── neo4j_config.yaml          # Neo4j配置
+```
+
+**核心功能**：
+- 知识点节点（Chapter、Section、KnowledgePoint）
+- 案例节点（Case）
+- 关系边（BELONGS_TO、RELATES_TO、REFERENCES）
+- 图谱查询（路径查询、关系推理）
+
+**Python依赖**：
+```python
+# requirements.txt新增
+neo4j==5.14.0              # Neo4j官方驱动
+py2neo==2021.2.3           # Neo4j OGM（可选）
+```
+
+---
+
+#### 2. **知识库管理模块** - 核心新增
+**新增文件**：
+```
+backend/
+├── database/entities.py           # 替换原有实体
+│   ├── Chapter                    # 教材章节
+│   ├── Section                    # 教材小节
+│   ├── KnowledgePoint             # 知识点
+│   ├── Case                       # 案例
+│   ├── CaseSource                 # 案例来源
+│   └── Tag                        # 标签
+├── services/
+│   ├── knowledge_service.py       # 知识库服务
+│   ├── case_service.py            # 案例服务
+│   └── qa_service.py              # 问答服务（基于LLM）
+└── api/
+    ├── knowledge_routes.py        # 知识库API
+    ├── case_routes.py             # 案例API
+    ├── chapter_routes.py          # 章节API
+    └── qa_routes.py               # 问答API
+```
+
+**数据库表设计**（MySQL）：
+```sql
+-- 教材章节表
+CREATE TABLE chapters (
+    id VARCHAR(36) PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    chapter_number INT NOT NULL,
+    description TEXT,
+    created_at DATETIME,
+    updated_at DATETIME
+);
+
+-- 教材小节表
+CREATE TABLE sections (
+    id VARCHAR(36) PRIMARY KEY,
+    chapter_id VARCHAR(36),
+    title VARCHAR(200) NOT NULL,
+    section_number INT NOT NULL,
+    content TEXT,
+    created_at DATETIME,
+    FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+);
+
+-- 知识点表
+CREATE TABLE knowledge_points (
+    id VARCHAR(36) PRIMARY KEY,
+    section_id VARCHAR(36),
+    title VARCHAR(200) NOT NULL,
+    content TEXT,
+    keywords TEXT,
+    created_at DATETIME,
+    FOREIGN KEY (section_id) REFERENCES sections(id)
+);
+
+-- 案例表
+CREATE TABLE cases (
+    id VARCHAR(36) PRIMARY KEY,
+    title VARCHAR(500) NOT NULL,
+    content TEXT NOT NULL,
+    summary TEXT,
+    source_id VARCHAR(36),
+    chapter_id VARCHAR(36),
+    tags TEXT,
+    published_at DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+);
+
+-- 案例来源表
+CREATE TABLE case_sources (
+    id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    url VARCHAR(500),
+    is_active TINYINT(1) DEFAULT 1,
+    created_at DATETIME
+);
+
+-- 标签表
+CREATE TABLE tags (
+    id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    category VARCHAR(50),
+    created_at DATETIME
+);
+
+-- 案例-知识点关联表
+CREATE TABLE case_knowledge_relations (
+    id VARCHAR(36) PRIMARY KEY,
+    case_id VARCHAR(36),
+    knowledge_point_id VARCHAR(36),
+    relation_type VARCHAR(50),
+    created_at DATETIME,
+    FOREIGN KEY (case_id) REFERENCES cases(id),
+    FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points(id)
+);
+```
+
+---
+
+#### 3. **知识图谱可视化** - 前端新增
+**新增文件**：
+```
+global-news-dashboard/src/
+├── views/
+│   ├── KnowledgeGraph/            # 知识图谱页（新增）
+│   │   ├── index.vue
+│   │   ├── GraphCanvas.vue        # 图谱画布组件
+│   │   └── GraphControls.vue      # 图谱控制组件
+│   ├── Chapters/                  # 章节管理页（新增）
+│   │   └── index.vue
+│   ├── Cases/                     # 案例管理页（新增）
+│   │   ├── index.vue
+│   │   ├── CaseList.vue
+│   │   ├── CaseDetail.vue
+│   │   └── CaseEditor.vue
+│   ├── KnowledgeBase/             # 知识库页（新增）
+│   │   └── index.vue
+│   └── QA/                        # 智能问答页（新增）
+│       └── index.vue
+└── components/
+    ├── graph/                     # 图谱组件（新增）
+    │   ├── Neo4jGraph.vue         # Neo4j图谱组件
+    │   └── GraphLegend.vue        # 图例组件
+    ├── case/                      # 案例组件（新增）
+    │   ├── CaseCard.vue           # 案例卡片
+    │   └── CaseRelations.vue      # 案例关联展示
+    └── knowledge/                 # 知识组件（新增）
+        ├── ChapterTree.vue        # 章节树
+        └── KnowledgeCard.vue      # 知识点卡片
+```
+
+**前端依赖新增**：
+```json
+{
+  "dependencies": {
+    // 现有依赖保留
+    "vue": "latest",
+    "element-plus": "latest",
+    "pinia": "latest",
+    
+    // 新增依赖
+    "neovis.js": "^2.1.0",           // Neo4j可视化库
+    "d3": "^7.8.5",                  // D3.js图形库（备用）
+    "cytoscape": "^3.26.0",          // Cytoscape.js图谱库（备用）
+    "vue-cytoscape": "^1.1.0",       // Vue封装
+    "@antv/g6": "^4.8.0",            // 阿里AntV G6图谱库（推荐）
+    "monaco-editor": "^0.45.0",      // 代码编辑器（用于案例编辑）
+    "vue-monaco": "^1.4.0"           // Vue封装
+  }
+}
+```
+
+**推荐图谱可视化方案**：
+1. **方案一：neovis.js**（官方推荐）
+   - 直接连接Neo4j数据库
+   - 基于vis.js渲染
+   - 适合简单图谱展示
+
+2. **方案二：AntV G6**（推荐）
+   - 阿里开源，功能强大
+   - 支持自定义布局
+   - 适合复杂图谱交互
+
+3. **方案三：Cytoscape.js**
+   - 科研领域常用
+   - 布局算法丰富
+   - 适合学术型图谱
+
+---
+
+#### 4. **数据导入模块** - 新增
+**新增文件**：
+```
+backend/
+├── services/
+│   ├── import_service.py          # 数据导入服务
+│   └── batch_processor.py         # 批量处理器
+├── api/
+│   └── import_routes.py           # 数据导入API
+└── scripts/
+    ├── import_chapters.py         # 章节导入脚本
+    ├── import_cases.py            # 案例导入脚本
+    └── build_knowledge_graph.py   # 图谱构建脚本
+```
+
+**支持导入格式**：
+- Excel（.xlsx）：批量导入案例
+- CSV：数据迁移
+- JSON：API对接
+- Markdown：案例内容
+
+**Python依赖新增**：
+```python
+# requirements.txt新增
+openpyxl==3.1.2            # Excel读写
+pandas==2.1.4              # 数据处理
+xlrd==2.0.1                # Excel读取（旧格式）
+```
+
+---
+
+#### 5. **智能问答模块** - 新增
+**新增文件**：
+```
+backend/
+├── services/
+│   ├── qa_service.py              # 问答服务
+│   ├── retrieval_service.py       # 检索服务
+│   └── rag_service.py             # RAG服务（检索增强生成）
+└── api/
+    └── qa_routes.py               # 问答API
+```
+
+**功能设计**：
+- **检索增强生成（RAG）**：
+  1. 用户提问
+  2. 向量检索相关知识点和案例（ChromaDB）
+  3. 图谱查询关联知识（Neo4j）
+  4. LLM生成答案
+  5. 返回答案+引用来源
+
+**流程图**：
+```
+用户问题
+  ↓
+向量检索（ChromaDB）→ 相关知识点Top5
+  ↓
+图谱查询（Neo4j）→ 知识关系图
+  ↓
+上下文组装 → Prompt构建
+  ↓
+LLM生成答案（Chat模型）
+  ↓
+答案+知识来源+案例引用
+```
+
+---
+
+### 四、需要调整的部分 🔧
+
+#### 1. **配置文件** - 调整
+**修改内容**：
+```yaml
+# config.yaml
+# 删除部分
+celery:                    # 删除Celery配置（不需要异步任务）
+browser_pool:              # 删除浏览器池配置
+news:                      # 删除新闻配置
+
+# 新增部分
+neo4j:                     # 新增Neo4j配置
+  uri: "${NEO4J_URI:bolt://localhost:7687}"
+  username: "${NEO4J_USER:neo4j}"
+  password: "${NEO4J_PASSWORD:password}"
+  database: "${NEO4J_DATABASE:neo4j}"
+
+knowledge_base:            # 新增知识库配置
+  enable_qa: true          # 启用问答功能
+  enable_graph: true       # 启用知识图谱
+  enable_vector_search: true  # 启用向量检索
+  auto_build_relations: false # 是否自动构建知识关系
+
+import:                    # 新增导入配置
+  max_file_size_mb: 50     # 最大文件大小
+  supported_formats: ["xlsx", "csv", "json", "md"]
+  batch_size: 100          # 批处理大小
+```
+
+---
+
+#### 2. **数据库初始化脚本** - 替换
+**新建文件**：
+```
+思政课项目/
+├── init_db.sql            # 替换为新的建表脚本
+├── data_chapters.sql      # 教材章节初始数据
+├── data_tags.sql          # 标签初始数据
+└── neo4j_schema.cypher    # Neo4j图谱schema
+```
+
+**Neo4j Schema示例**：
+```cypher
+// neo4j_schema.cypher
+// 创建节点索引
+CREATE INDEX chapter_index FOR (c:Chapter) ON (c.id);
+CREATE INDEX section_index FOR (s:Section) ON (s.id);
+CREATE INDEX knowledge_index FOR (k:KnowledgePoint) ON (k.id);
+CREATE INDEX case_index FOR (c:Case) ON (c.id);
+
+// 创建约束
+CREATE CONSTRAINT chapter_id_unique FOR (c:Chapter) REQUIRE c.id IS UNIQUE;
+CREATE CONSTRAINT section_id_unique FOR (s:Section) REQUIRE s.id IS UNIQUE;
+CREATE CONSTRAINT knowledge_id_unique FOR (k:KnowledgePoint) REQUIRE k.id IS UNIQUE;
+CREATE CONSTRAINT case_id_unique FOR (c:Case) REQUIRE c.id IS UNIQUE;
+```
+
+---
+
+#### 3. **前端路由** - 重构
+**修改文件**：`global-news-dashboard/src/router/index.ts`
+
+**新路由设计**：
+```typescript
+// router/index.ts
+const routes = [
+  {
+    path: '/',
+    redirect: '/knowledge-graph'
+  },
+  {
+    path: '/knowledge-graph',
+    name: 'KnowledgeGraph',
+    component: () => import('@/views/KnowledgeGraph/index.vue'),
+    meta: { title: '知识图谱' }
+  },
+  {
+    path: '/chapters',
+    name: 'Chapters',
+    component: () => import('@/views/Chapters/index.vue'),
+    meta: { title: '教材章节' }
+  },
+  {
+    path: '/knowledge-base',
+    name: 'KnowledgeBase',
+    component: () => import('@/views/KnowledgeBase/index.vue'),
+    meta: { title: '知识库' }
+  },
+  {
+    path: '/cases',
+    name: 'Cases',
+    component: () => import('@/views/Cases/index.vue'),
+    meta: { title: '案例库' }
+  },
+  {
+    path: '/cases/:id',
+    name: 'CaseDetail',
+    component: () => import('@/views/Cases/CaseDetail.vue'),
+    meta: { title: '案例详情' }
+  },
+  {
+    path: '/qa',
+    name: 'QA',
+    component: () => import('@/views/QA/index.vue'),
+    meta: { title: '智能问答' }
+  },
+  {
+    path: '/import',
+    name: 'Import',
+    component: () => import('@/views/Import/index.vue'),
+    meta: { title: '数据导入' }
+  }
+]
+```
+
+---
+
+#### 4. **API接口** - 重构
+**新API设计**：
+```
+RESTful API设计：
+
+# 章节管理
+GET    /api/v1/chapters              # 获取章节列表
+GET    /api/v1/chapters/{id}         # 获取章节详情
+POST   /api/v1/chapters              # 创建章节
+PUT    /api/v1/chapters/{id}         # 更新章节
+DELETE /api/v1/chapters/{id}         # 删除章节
+
+# 知识点管理
+GET    /api/v1/knowledge-points      # 获取知识点列表
+GET    /api/v1/knowledge-points/{id} # 获取知识点详情
+POST   /api/v1/knowledge-points      # 创建知识点
+PUT    /api/v1/knowledge-points/{id} # 更新知识点
+
+# 案例管理
+GET    /api/v1/cases                 # 获取案例列表
+GET    /api/v1/cases/{id}            # 获取案例详情
+POST   /api/v1/cases                 # 创建案例
+PUT    /api/v1/cases/{id}            # 更新案例
+DELETE /api/v1/cases/{id}            # 删除案例
+
+# 知识图谱
+GET    /api/v1/graph/full            # 获取完整图谱数据
+GET    /api/v1/graph/chapter/{id}    # 获取章节子图
+GET    /api/v1/graph/case/{id}       # 获取案例关联图
+POST   /api/v1/graph/query           # Cypher查询接口
+
+# 智能问答
+POST   /api/v1/qa/ask                # 提问接口
+GET    /api/v1/qa/history            # 问答历史
+
+# 数据导入
+POST   /api/v1/import/cases          # 导入案例
+POST   /api/v1/import/chapters       # 导入章节
+GET    /api/v1/import/status/{id}    # 导入状态查询
+```
+
+---
+
+## 📦 所需额外工具清单
+
+### 一、后端依赖新增
+```python
+# requirements.txt新增
+neo4j==5.14.0              # Neo4j官方驱动
+py2neo==2021.2.3           # Neo4j OGM（可选）
+openpyxl==3.1.2            # Excel读写
+pandas==2.1.4              # 数据处理
+xlrd==2.0.1                # Excel读取（旧格式）
+```
+
+### 二、前端依赖新增
+```json
+{
+  "dependencies": {
+    "neovis.js": "^2.1.0",           // Neo4j可视化（可选）
+    "@antv/g6": "^4.8.0",            // 图谱可视化（推荐）
+    "cytoscape": "^3.26.0",          // 图谱可视化（可选）
+    "monaco-editor": "^0.45.0",      // 代码编辑器
+    "vue-monaco": "^1.4.0"           // Vue封装
+  }
+}
+```
+
+### 三、基础设施新增
+```
+1. Neo4j数据库
+   - 版本：5.x
+   - 安装方式：Docker或本地安装
+   - 端口：7474（HTTP）、7687（Bolt）
+
+2. Docker Compose（推荐）
+   - 统一管理MySQL、Neo4j、ChromaDB
+   - 配置文件：docker-compose.yml
+```
+
+---
+
+## 🗑️ 需要删除的文件清单
+
+### 后端删除
+```
+backend/
+├── collectors/                # 整个目录删除
+├── sources/                   # 整个目录删除
+├── services/
+│   ├── collector_service.py   # 删除
+│   ├── browser_pool.py        # 删除
+│   ├── field_enricher_service.py  # 删除
+│   ├── ai_report_generator.py # 删除
+│   └── scheduler_service.py   # 删除
+├── tasks/                     # 整个目录删除
+├── api/
+│   ├── source_routes.py       # 删除
+│   ├── collector_routes.py    # 删除
+│   ├── ai_report_routes.py    # 删除
+│   ├── sse_routes.py          # 删除
+│   ├── geo_routes.py          # 删除
+│   └── monitor_routes.py      # 删除
+└── scripts/
+    ├── create_rss_collectors.py  # 删除
+    ├── backfill_ai_tags.py    # 删除
+    └── ... (所有采集器相关脚本)
+```
+
+### 前端删除
+```
+global-news-dashboard/
+├── src/
+│   ├── views/
+│   │   ├── Globe/             # 整个目录删除
+│   │   ├── Globe2D/           # 整个目录删除
+│   │   ├── Messages/          # 整个目录删除
+│   │   ├── MessageSources/    # 整个目录删除
+│   │   └── Monitor/           # 整个目录删除
+│   ├── components/
+│   │   ├── AIDailyReportDrawer.vue  # 删除
+│   │   ├── AITagsObserver.vue       # 删除
+│   │   └── report-types/      # 整个目录删除
+│   ├── api/
+│   │   ├── message.ts         # 删除
+│   │   ├── aiReport.ts        # 删除
+│   │   ├── geo.ts             # 删除
+│   │   └── monitor.ts         # 删除
+│   ├── utils/
+│   │   └── countryMapping.ts  # 删除
+│   └── composables/
+│       └── useAITagsStream.ts # 删除
+├── public/
+│   ├── world.json             # 删除
+│   ├── china.json             # 删除
+│   └── *.geojson              # 删除
+└── 项目架构.md                # 删除（过时文档）
+```
+
+### 配置文件调整
+```
+删除config.yaml中的配置项：
+- celery.*                     # Celery配置
+- browser_pool.*               # 浏览器池配置
+- news.*                       # 新闻配置
+- vector_sync.*                # 向量同步配置
+```
+
+---
+
+## 📐 项目目录结构（改造后）
+
+### 后端目录
+```
+思政课网站/
+├── backend/
+│   ├── main.py                # FastAPI主入口
+│   ├── config/                # 配置管理
+│   │   ├── config_manager.py
+│   │   └── global_config.py
+│   ├── database/              # 数据库层
+│   │   ├── connection.py     # MySQL连接
+│   │   └── entities.py       # ORM实体（新）
+│   ├── graph/                 # 图数据库层（新）
+│   │   ├── neo4j_client.py
+│   │   ├── knowledge_graph.py
+│   │   └── graph_query.py
+│   ├── services/              # 业务层
+│   │   ├── knowledge_service.py
+│   │   ├── case_service.py
+│   │   ├── qa_service.py
+│   │   ├── rag_service.py
+│   │   └── import_service.py
+│   ├── api/                   # API层
+│   │   ├── knowledge_routes.py
+│   │   ├── case_routes.py
+│   │   ├── chapter_routes.py
+│   │   ├── qa_routes.py
+│   │   └── import_routes.py
+│   ├── llm/                   # LLM服务
+│   │   ├── global_llm_manager.py
+│   │   └── llm_client.py
+│   ├── storage/               # 存储层
+│   │   └── chromadb_storage.py
+│   ├── utils/                 # 工具模块
+│   └── scripts/               # 运维脚本
+│       ├── import_chapters.py
+│       ├── import_cases.py
+│       └── build_knowledge_graph.py
+├── config.yaml                # 配置文件（调整）
+├── requirements.txt           # Python依赖（调整）
+└── init_db.sql                # 数据库初始化（新）
+```
+
+### 前端目录
+```
+思政课网站-前端/
+├── src/
+│   ├── views/                 # 页面
+│   │   ├── KnowledgeGraph/   # 知识图谱（新）
+│   │   ├── Chapters/         # 章节管理（新）
+│   │   ├── KnowledgeBase/    # 知识库（新）
+│   │   ├── Cases/            # 案例库（新）
+│   │   ├── QA/               # 智能问答（新）
+│   │   └── Import/           # 数据导入（新）
+│   ├── components/            # 组件
+│   │   ├── graph/            # 图谱组件（新）
+│   │   ├── case/             # 案例组件（新）
+│   │   ├── knowledge/        # 知识组件（新）
+│   │   └── common/           # 通用组件（保留）
+│   ├── api/                   # API封装
+│   │   ├── index.ts          # Axios实例
+│   │   ├── knowledge.ts      # 知识库API（新）
+│   │   ├── case.ts           # 案例API（新）
+│   │   ├── graph.ts          # 图谱API（新）
+│   │   └── qa.ts             # 问答API（新）
+│   ├── stores/                # 状态管理
+│   │   ├── knowledge.ts      # 知识库Store（新）
+│   │   ├── case.ts           # 案例Store（新）
+│   │   └── qa.ts             # 问答Store（新）
+│   ├── router/                # 路由（重构）
+│   ├── types/                 # 类型定义（新）
+│   └── utils/                 # 工具函数（保留）
+├── package.json               # 依赖管理（调整）
+└── vite.config.ts            # 构建配置
+```
+
+---
+
+## 🚀 改造实施计划
+
+### 阶段一：环境准备（1-2天）
+1. ✅ 安装Neo4j数据库
+2. ✅ 配置Docker Compose（MySQL + Neo4j + ChromaDB）
+3. ✅ 安装前端图谱可视化库
+4. ✅ 创建新的数据库Schema
+
+### 阶段二：后端重构（5-7天）
+1. 🔧 删除采集器相关代码
+2. 🆕 创建Neo4j客户端封装
+3. 🆕 实现知识库服务层
+4. 🆕 实现案例管理服务
+5. 🆕 实现智能问答服务（RAG）
+6. 🆕 创建新的API路由
+7. 🔧 调整配置文件
+
+### 阶段三：前端重构（5-7天）
+1. 🔧 删除地理可视化相关代码
+2. 🆕 实现知识图谱可视化页面
+3. 🆕 实现章节管理页面
+4. 🆕 实现案例库页面
+5. 🆕 实现智能问答页面
+6. 🆕 实现数据导入页面
+7. 🔧 重构路由和API调用
+
+### 阶段四：数据准备（3-5天）
+1. 📝 整理教材章节数据
+2. 📝 整理案例数据
+3. 🔧 编写数据导入脚本
+4. 🔧 构建知识图谱
+5. ✅ 数据质量验证
+
+### 阶段五：测试与优化（3-5天）
+1. 🧪 功能测试
+2. 🧪 性能测试（Neo4j查询优化）
+3. 🧪 用户体验测试
+4. 🔧 Bug修复
+5. 📝 文档编写
+
+---
+
+## ⚠️ 风险与注意事项
+
+### 技术风险
+1. **Neo4j学习曲线**
+   - 风险：Cypher查询语言学习成本
+   - 缓解：参考官方文档，从简单查询开始
+
+2. **图谱可视化性能**
+   - 风险：大规模图谱渲染卡顿
+   - 缓解：分层加载、限制节点数量、使用Canvas渲染
+
+3. **LLM问答准确性**
+   - 风险：RAG检索不准确、答案幻觉
+   - 缓解：优化检索策略、增加引用来源、人工审核
+
+### 数据风险
+1. **数据质量**
+   - 风险：案例数据不完整、格式不统一
+   - 缓解：数据导入验证、人工审核流程
+
+2. **知识关系复杂性**
+   - 风险：知识点关系定义不清晰
+   - 缓解：制定知识图谱Schema规范
+
+### 项目风险
+1. **需求变更**
+   - 风险：教材内容更新频繁
+   - 缓解：设计灵活的数据结构
+
+2. **性能优化**
+   - 风险：图谱查询性能不佳
+   - 缓解：Neo4j索引优化、查询语句优化
+
+---
+
+## 📚 参考资源
+
+### Neo4j资源
+- [Neo4j官方文档](https://neo4j.com/docs/)
+- [Cypher查询语言教程](https://neo4j.com/developer/cypher/)
+- [Neo4j Python驱动](https://neo4j.com/docs/python-manual/current/)
+
+### 图谱可视化资源
+- [AntV G6文档](https://g6.antv.antgroup.com/)
+- [neovis.js文档](https://github.com/neo4j-contrib/neovis.js)
+- [Cytoscape.js文档](https://js.cytoscape.org/)
+
+### RAG资源
+- [LangChain RAG教程](https://python.langchain.com/docs/use_cases/question_answering/)
+- [ChromaDB检索教程](https://docs.trychroma.com/)
+
+---
+
+## 💡 总结
+
+### 核心改造思路
+1. **保留基础框架**：FastAPI + Vue3 + MySQL + LLM
+2. **删除采集模块**：不需要自动采集新闻
+3. **新增图数据库**：Neo4j支持知识图谱
+4. **重构业务逻辑**：从消息管理转向知识管理
+5. **增强AI能力**：RAG问答、案例分析
+
+### 技术亮点
+- ✨ **双数据库架构**：MySQL存储结构化数据 + Neo4j存储关系图谱
+- ✨ **三重检索**：全文检索 + 向量检索 + 图谱检索
+- ✨ **智能问答**：基于RAG的知识问答系统
+- ✨ **可视化图谱**：直观展示思政知识体系
+
+### 预期成果
+- 📚 完整的思政知识库系统
+- 📂 案例更新档案库
+- 🕸️ 知识图谱可视化
+- 🤖 智能问答助手
+
+---
+
+**文档版本**：v1.0  
+**生成日期**：2025-11-29  
+**文档路径**：`D:\AI赋能马院思政课项目\思政课网站改造方案.md`
+

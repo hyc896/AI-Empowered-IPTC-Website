@@ -1,0 +1,936 @@
+# Message Platform 项目架构文档
+
+> **项目定位**：多源消息采集、存储、检索平台，支持从不同消息源采集新闻、学术论文等内容，并提供统一的检索接口和可视化大屏展示。
+
+---
+
+## 📋 项目总览
+
+### 核心功能
+- 27个国际消息源自动采集（RSS、网页爬取）
+- 智能去重与增量更新
+- 向量化存储与语义检索
+- 多语言翻译与摘要生成（5种语言）
+- AI字段增强（地区、行业、AI标签）
+- 定时任务调度与监控
+- 3D地球可视化大屏
+
+### 技术架构
+```
+技术栈：
+├── 后端：FastAPI + SQLAlchemy + Celery
+├── 数据库：MySQL 8.0 + ChromaDB + Redis
+├── 前端：Vue 3 + TypeScript + Element Plus
+├── 采集：Playwright + feedparser + BeautifulSoup4
+├── AI服务：LLM API（OpenAI/通义千问）
+└── 任务调度：Celery Beat
+```
+
+---
+
+## 📁 顶层文件说明
+
+### `start.py` - 统一启动脚本
+**作用**：一键启动所有后端服务（ChromaDB、Celery Worker、Beat、FastAPI）  
+**结构**：
+```python
+# 启动顺序（按依赖关系）
+1. ChromaDB Server（端口11530）
+2. 采集器 Worker（监听 default,collector 队列）
+3. 日报 Worker（监听 report 队列）
+4. Celery Beat（定时调度）
+5. FastAPI Server（端口11528）
+```
+**关键特性**：
+- 进程管理与优雅关闭
+- UTF-8编码环境设置
+- 健康检查与自动重启
+
+---
+
+### `config.yaml` - 全局配置文件
+**作用**：集中管理所有服务的配置（数据库、LLM、浏览器池、Celery等）  
+**结构**：
+```yaml
+配置模块：
+├── llm:                  # LLM配置（Chat、Embedding、Fast三个模型）
+├── database:             # 数据库配置（MySQL、ChromaDB、Redis）
+├── web:                  # Web服务配置（端口11528）
+├── celery:               # Celery任务队列配置
+│   ├── task_routes       # 任务路由（采集器→collector队列，日报→report队列）
+│   └── beat.ai_report_schedule  # AI日报定时任务（每天20:00生成）
+├── browser_pool:         # 浏览器池配置（动态扩缩容0-10实例）
+├── news:                 # 新闻服务配置（去重、摘要）
+└── vector_sync:          # 向量同步配置
+```
+**特色**：支持环境变量替换 `${ENV_VAR:default_value}`
+
+---
+
+### `requirements.txt` - Python依赖
+**作用**：定义后端Python环境依赖（252个包）  
+**核心依赖**：
+```
+核心框架：
+├── fastapi==0.118.0        # Web框架
+├── celery==5.5.3           # 异步任务队列
+├── SQLAlchemy==2.0.43      # ORM
+├── chromadb==1.1.1         # 向量数据库
+├── playwright==1.55.0      # 浏览器自动化
+├── feedparser==6.0.12      # RSS解析
+└── transformers==4.57.1    # AI模型
+
+AI/ML相关：
+├── openai==1.109.1         # LLM API
+├── torch==2.9.0            # 深度学习框架
+├── paddleocr==3.3.0        # OCR识别
+└── marker-pdf==1.10.1      # PDF解析
+```
+
+---
+
+### `package.json` - Node.js依赖（前端）
+**作用**：全局Node.js环境依赖（主要用于前端开发）  
+**内容**：
+```json
+{
+  "dependencies": {
+    "puppeteer": "^24.30.0",       # 浏览器自动化（备用）
+    "puppeteer-core": "^24.30.0"
+  }
+}
+```
+
+---
+
+### 数据库初始化文件
+
+#### `init_db.sql` - 数据库表结构
+**作用**：创建数据库表结构（仅DDL，无数据）  
+**内容**：
+- 消息源配置表（mp_message_sources）
+- 27个消息表（mp_tonghuashun_messages、mp_kr36_messages等）
+- AI日报表（mp_ai_daily_reports）
+- 索引和外键约束
+
+#### `data_message_sources.sql` - 消息源配置数据
+**作用**：插入27个消息源的配置数据（包含采集器模块、RSS URL、Cron表达式等）
+
+#### `full_database_dump.sql` - 完整数据库导出
+**作用**：包含表结构+所有历史数据（32MB，用于快速恢复）
+
+---
+
+## 🔧 Backend 后端架构
+
+### `backend/` 目录结构
+```
+backend/
+├── main.py              # FastAPI主入口
+├── api/                 # API路由层
+├── database/            # 数据模型与连接
+├── services/            # 业务逻辑层
+├── collectors/          # 采集器基础设施
+├── sources/             # 27个消息源采集器
+├── llm/                 # LLM服务
+├── storage/             # 向量存储
+├── tasks/               # Celery异步任务
+├── config/              # 配置管理
+├── utils/               # 工具模块
+└── scripts/             # 运维脚本
+```
+
+---
+
+### `main.py` - FastAPI主入口
+**作用**：应用生命周期管理、路由注册、健康检查  
+**启动流程**：
+```python
+1. 加载配置（config.yaml）
+2. 初始化数据库（MySQL连接池）
+3. 验证配置完整性（startup_validator）
+4. 初始化ChromaDB（server模式）
+5. 初始化LLM客户端（Chat/Embedding/Fast）
+6. 加载API路由（8个router）
+7. 显示数据库统计信息
+```
+**核心端点**：
+- `/health` - 健康检查
+- `/docs` - API文档（Swagger）
+- `/api/v1/*` - RESTful API
+
+---
+
+### `api/` - API路由层
+**作用**：提供RESTful API接口  
+**结构**：
+```
+api/
+├── schemas.py              # Pydantic请求/响应模型
+├── search_routes.py        # 消息搜索API
+├── source_routes.py        # 消息源管理API
+├── collector_routes.py     # 采集器控制API
+├── stats_routes.py         # 统计数据API
+├── geo_routes.py           # 地理位置API
+├── sse_routes.py           # SSE事件流API
+├── ai_report_routes.py     # AI日报API
+└── monitor_routes.py       # 监控数据API
+```
+**设计原则**：
+- 遵循RESTful标准
+- 直接返回数据对象（不包装成`{success, data}`）
+- 使用HTTP状态码表示成功/失败
+- DELETE端点返回204 No Content
+
+---
+
+### `database/` - 数据库层
+**作用**：ORM实体定义、数据库连接管理  
+**结构**：
+```
+database/
+├── entities.py           # 27个ORM类（MessageSource + 26个Message类）
+├── connection.py         # 数据库连接池管理
+├── orm_registry.py       # ORM类自动注册（配置驱动）
+├── startup_validator.py  # 启动配置验证
+└── entities_rand.py      # 随机数据生成（测试用）
+```
+**核心设计**：
+- 统一字段标准（10个核心字段+扩展字段）
+- 外键约束（source_id → mp_message_sources）
+- 索引优化（source_id、published_at、url）
+
+---
+
+### `services/` - 业务逻辑层
+**作用**：核心业务服务（采集、翻译、搜索、日报生成等）  
+**结构**：
+```
+services/
+├── collector_service.py        # 采集器调度服务
+├── browser_pool.py             # 浏览器池服务（动态扩缩容）
+├── field_enricher_service.py   # 字段增强服务（地区、行业、AI标签）
+├── search_service.py           # 搜索服务（向量检索）
+├── ai_report_generator.py      # AI日报生成服务
+├── scheduler_service.py        # 定时任务调度
+├── cache_service.py            # 缓存服务
+├── event_bus.py                # 事件总线
+└── message/
+    └── vector_sync.py          # MySQL→ChromaDB向量同步
+```
+
+#### 核心服务说明
+
+**CollectorService（采集器调度服务）**
+- 作用：管理所有消息源的采集器实例，触发采集任务
+- 特性：动态加载采集器模块、浏览器池注入、错误隔离
+
+**BrowserPool（浏览器池服务）**
+- 作用：共享浏览器实例，降低资源消耗
+- 特性：动态扩缩容（0-10实例）、健康检查、空闲回收
+
+**FieldEnricherService（字段增强服务）**
+- 作用：使用LLM分析消息内容，提取地区、行业标签、AI标签
+- 输入：消息content
+- 输出：`{region, industry_tags, ai_tag}`
+
+**AIReportGenerator（AI日报生成服务）**
+- 作用：每日定时生成AI领域日报（6个类型）
+- 类型：治理、研究、产业、综合、中国AI、上海周报
+
+---
+
+### `collectors/` - 采集器基础设施
+**作用**：提供统一的采集器基类  
+**结构**：
+```
+collectors/
+└── base/
+    └── playwright_collector_base.py  # Playwright采集器基类（222行）
+```
+**基类职责**：
+- 浏览器生命周期管理（从池获取/独立启动）
+- 定时循环执行`_collect_once()`
+- 错误隔离（单次采集失败不影响后续）
+
+**子类实现规范**（三阶段）：
+```python
+class MyCollector(PlaywrightCollectorBase):
+    async def _collect_once(self):
+        # 阶段1：Scraping（数据抓取）
+        articles = await self._scrape_articles()
+        
+        # 阶段2：Processing（预处理，在DB会话外）
+        for article in articles:
+            article['translated'] = await translator.translate(article['content'])
+            article['enriched'] = await field_enricher.enrich(article['content'])
+        
+        # 阶段3：Storing（存储，仅DB操作）
+        with create_session() as db:
+            for article in articles:
+                db.add(MyMessage(**article))
+            db.commit()
+```
+
+---
+
+### `sources/` - 消息源采集器（27个）
+**作用**：每个消息源一个独立目录，包含采集器实现  
+**结构**（以bloomberg为例）：
+```
+sources/
+├── bloomberg/
+│   ├── __init__.py
+│   ├── collector.py        # 采集器实现（继承PlaywrightCollectorBase）
+│   ├── register.sql        # 注册SQL脚本
+│   ├── test_collector.py   # 单元测试（可选）
+│   └── README.md           # 说明文档（可选）
+├── wsj/
+├── axios/
+└── ... (共27个)
+```
+**已迁移至新架构（13个）**：
+- venturebeat, nikkei_asia, techcrunch, techinasia
+- tonghuashun, kr36, securities_times
+- partnership_ai, govai, gcg_ai
+- inteligencia_argentina, lanacion, guardian
+
+**待迁移（14个）**：主要为RSS采集器
+
+---
+
+### `llm/` - LLM服务
+**作用**：LLM客户端管理、翻译、Token统计  
+**结构**：
+```
+llm/
+├── global_llm_manager.py   # 全局LLM管理器（Chat/Embedding/Fast）
+├── llm_client.py           # LLM客户端封装
+├── translator.py           # 翻译服务（支持英/德/法/西→中）
+└── token_metrics.py        # Token使用统计
+```
+**三个模型分工**：
+- **Chat**（qwen3-max）：复杂推理任务（AI日报生成、字段增强）
+- **Embedding**（bge-m3）：文本向量化（语义检索）
+- **Fast**（GLM-4.5-Air）：轻量任务（翻译、摘要）
+
+---
+
+### `storage/` - 向量存储
+**作用**：ChromaDB向量数据库封装  
+**结构**：
+```
+storage/
+└── chromadb_storage.py     # ChromaDB存储服务
+```
+**功能**：
+- 集合管理（每个消息源一个collection）
+- 向量化存储（使用业务ID，非UUID）
+- 批量处理（每批50条）
+
+---
+
+### `tasks/` - Celery异步任务
+**作用**：定义Celery异步任务（采集、日报生成）  
+**结构**：
+```
+tasks/
+├── __init__.py             # Celery app初始化
+├── collector_tasks.py      # 采集器任务（run_collector）
+├── ai_report_tasks.py      # AI日报任务（generate_daily_report）
+└── beat_schedule.py        # Beat定时调度配置
+```
+**任务路由**：
+- 采集器任务 → collector队列（并发度4）
+- AI日报任务 → report队列（并发度1，高优先级）
+
+**定时任务**：
+- 采集器任务：根据source配置的interval/schedule触发
+- AI日报任务：每天20:00生成（6个类型）
+
+---
+
+### `config/` - 配置管理
+**作用**：配置加载、环境变量替换  
+**结构**：
+```
+config/
+├── config_manager.py       # 配置管理器（环境变量替换）
+├── global_config.py        # 全局配置单例
+└── prompt_manager.py       # Prompt模板管理
+```
+
+---
+
+### `utils/` - 工具模块
+**作用**：通用工具函数  
+**结构**：
+```
+utils/
+├── document_reader.py      # 文档解析（PDF、Word）
+└── page_loader.py          # 网页加载工具
+```
+
+---
+
+### `scripts/` - 运维脚本
+**作用**：数据库迁移、数据修复、配置管理  
+**结构**：
+```
+scripts/
+├── add_ai_tag_indexes.sql           # 添加AI标签索引
+├── create_ai_daily_reports_table.sql # 创建AI日报表
+├── backfill_ai_tags.py              # 回填AI标签
+├── enrich_historical_messages.py    # 历史消息字段增强
+├── cleanup_incorrect_summaries.py   # 清理错误摘要
+├── retranslate_summaries.py         # 重新翻译摘要
+├── verify_vector_consistency.py     # 验证向量一致性
+└── manage_source_config.py          # 管理消息源配置
+```
+
+---
+
+## 🌐 Frontend 前端架构
+
+### `global-news-dashboard/` - 可视化大屏
+**作用**：基于Vue 3的国际新闻消息大屏前端项目  
+**技术栈**：
+```
+Vue 3 + TypeScript + Vite
+├── 组件库：Element Plus
+├── 状态管理：Pinia
+├── 路由：Vue Router
+├── HTTP：Axios
+├── 可视化：ECharts + Globe.gl（3D地球）
+├── 样式：SCSS
+└── Markdown渲染：markdown-it + highlight.js
+```
+
+---
+
+### 前端目录结构
+```
+global-news-dashboard/
+├── src/
+│   ├── api/                    # API接口层
+│   │   ├── index.ts           # Axios实例配置
+│   │   ├── message.ts         # 消息API
+│   │   ├── aiReport.ts        # AI日报API
+│   │   ├── geo.ts             # 地理API
+│   │   └── monitor.ts         # 监控API
+│   ├── components/             # 组件
+│   │   ├── common/            # 通用组件
+│   │   │   ├── MessageCard.vue          # 消息卡片
+│   │   │   ├── MessageSourceCard.vue    # 消息源卡片
+│   │   │   └── MarkdownRenderer.vue     # Markdown渲染器
+│   │   ├── report-types/      # 日报类型组件
+│   │   │   ├── governance/    # 治理日报
+│   │   │   ├── research/      # 研究日报
+│   │   │   ├── industry/      # 产业日报
+│   │   │   ├── comprehensive/ # 综合日报
+│   │   │   ├── china-ai/      # 中国AI日报
+│   │   │   └── shanghai-weekly/ # 上海周报
+│   │   ├── AIDailyReportDrawer.vue  # AI日报抽屉
+│   │   └── AITagsObserver.vue       # AI标签观察器
+│   ├── views/                  # 页面视图
+│   │   ├── Messages/          # 消息列表页
+│   │   ├── MessageSources/    # 消息源管理页
+│   │   ├── Globe/             # 3D地球页
+│   │   ├── Globe2D/           # 2D地图页
+│   │   └── Monitor/           # 监控页
+│   ├── stores/                 # Pinia状态管理
+│   │   ├── index.ts
+│   │   └── message.ts         # 消息状态
+│   ├── router/                 # 路由配置
+│   │   └── index.ts
+│   ├── types/                  # TypeScript类型定义
+│   │   ├── api.ts             # API类型
+│   │   ├── models.ts          # 数据模型
+│   │   └── store.ts           # Store类型
+│   ├── utils/                  # 工具函数
+│   │   ├── date.ts            # 日期格式化
+│   │   ├── format.ts          # 数据格式化
+│   │   ├── markdown.ts        # Markdown工具
+│   │   ├── color.ts           # 颜色工具
+│   │   └── countryMapping.ts  # 国家映射
+│   ├── composables/            # 组合式函数
+│   │   └── useAITagsStream.ts # AI标签流Hook
+│   ├── plugins/                # 插件
+│   │   └── message-sources.ts # 消息源插件
+│   ├── constants/              # 常量定义
+│   │   └── index.ts
+│   ├── assets/                 # 静态资源
+│   │   └── styles/            # 全局样式
+│   ├── App.vue                 # 根组件
+│   └── main.ts                 # 入口文件
+├── public/                     # 公共资源
+│   ├── world.json             # 世界地图数据
+│   ├── china.json             # 中国地图数据
+│   ├── world_countries_clean.geojson  # GeoJSON数据
+│   └── world_countries_low.geojson
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+└── README.md
+```
+
+---
+
+### 前端核心功能模块
+
+#### 1. 消息列表页（/messages）
+**作用**：消息展示、筛选、分页  
+**功能**：
+- 按消息源筛选
+- 关键词搜索
+- 分页加载
+- 消息详情查看
+- 统计数据展示
+
+#### 2. 消息源管理页（/message-sources）
+**作用**：消息源配置管理  
+**功能**：
+- 消息源列表展示
+- 新建/编辑/删除消息源
+- 启用/禁用消息源
+- 查看采集状态
+
+#### 3. 3D地球页（/globe）
+**作用**：3D地球可视化展示全球消息分布  
+**技术**：Globe.gl + Three.js  
+**功能**：
+- 按国家聚合消息
+- 热力图展示
+- 交互式查看消息详情
+
+#### 4. 2D地图页（/globe2d）
+**作用**：2D地图展示消息分布  
+**技术**：ECharts Geo  
+**功能**：
+- 2D地图投影
+- 国家/地区统计
+- 消息趋势图
+
+#### 5. AI日报页（/ai-report）
+**作用**：查看AI日报  
+**功能**：
+- 6种日报类型切换
+- Markdown渲染
+- 代码高亮
+- 导出PDF/图片
+
+#### 6. 监控页（/monitor）
+**作用**：系统监控与统计  
+**功能**：
+- 采集器状态监控
+- Token使用统计
+- 消息数量趋势
+- 系统健康检查
+
+---
+
+### 前端API调用
+**Base URL**：`http://localhost:11528`  
+**核心端点**：
+```typescript
+// 消息相关
+GET    /api/v1/messages              # 获取消息列表
+POST   /api/v1/messages/search       # 语义搜索
+
+// 消息源相关
+GET    /api/v1/sources               # 获取消息源列表
+POST   /api/v1/sources               # 创建消息源
+PUT    /api/v1/sources/{id}          # 更新消息源
+DELETE /api/v1/sources/{id}          # 删除消息源
+
+// 统计相关
+GET    /api/v1/stats/overview        # 统计概览
+GET    /api/v1/stats/timeline        # 时间线统计
+
+// 地理相关
+GET    /api/v1/geo/countries         # 国家列表
+GET    /api/v1/geo/heatmap           # 热力图数据
+
+// AI日报相关
+GET    /api/v1/ai-reports            # 获取日报列表
+GET    /api/v1/ai-reports/{id}       # 获取日报详情
+
+// SSE事件流
+GET    /api/v1/sse/ai-tags           # AI标签实时流
+```
+
+---
+
+## 🔄 数据流向
+
+### 1. 消息采集流程
+```
+定时触发（Celery Beat）
+  ↓
+Celery Worker接收任务
+  ↓
+CollectorService调度采集器
+  ↓
+PlaywrightCollectorBase执行_collect_once()
+  ├── 阶段1：Scraping（抓取原始数据）
+  ├── 阶段2：Processing（翻译+字段增强，DB会话外）
+  └── 阶段3：Storing（并发写入MySQL + ChromaDB）
+  ↓
+向量同步服务（VectorSync）
+  ├── 全量同步：所有记录
+  └── 增量同步：最近1000条
+  ↓
+前端实时更新（SSE推送）
+```
+
+### 2. AI日报生成流程
+```
+定时触发（Celery Beat，每天20:00）
+  ↓
+Celery Worker（report队列）接收任务
+  ↓
+AIReportGenerator执行
+  ├── 从ChromaDB检索相关消息（向量检索）
+  ├── 使用Chat模型（qwen3-max）生成日报
+  └── 保存到mp_ai_daily_reports表
+  ↓
+前端查询展示
+```
+
+### 3. 消息检索流程
+```
+用户输入查询（前端）
+  ↓
+POST /api/v1/messages/search
+  ↓
+SearchService执行
+  ├── 使用Embedding模型向量化查询
+  ├── ChromaDB向量检索（语义匹配）
+  └── 结合MySQL筛选（时间、来源）
+  ↓
+返回结果（Markdown渲染）
+```
+
+---
+
+## 🗄️ 数据库架构
+
+### MySQL表结构（核心表）
+
+#### 1. `mp_message_sources` - 消息源配置表
+**作用**：存储27个消息源的配置  
+**核心字段**：
+```sql
+id               VARCHAR(36)    # UUID主键
+name             VARCHAR(200)   # 消息源名称
+display_name     VARCHAR(200)   # 显示名称
+category         VARCHAR(50)    # 分类（news/academic/blog）
+config           JSON           # 配置（mysql_table, collector_module, rss_url等）
+is_active        TINYINT(1)     # 是否启用
+interval         INT            # 采集间隔（秒）
+schedule         VARCHAR(100)   # Cron表达式
+last_crawled_at  DATETIME       # 最后采集时间
+```
+
+#### 2. 消息表（27个，统一字段标准）
+**作用**：存储各消息源的消息数据  
+**核心字段（10个必备）**：
+```sql
+id               VARCHAR(36)    # UUID主键
+source_id        VARCHAR(36)    # 外键→mp_message_sources
+external_id      VARCHAR(100)   # 外部唯一标识
+title            VARCHAR(500)   # 标题
+content          TEXT           # 正文内容
+summary          TEXT           # 摘要
+provider         VARCHAR(500)   # 作者/信息提供方
+published_at     DATETIME       # 发布时间
+crawled_at       DATETIME       # 抓取时间
+url              VARCHAR(500)   # 原文链接
+```
+**扩展字段（可选）**：
+```sql
+region           VARCHAR(200)   # 地区（如"中国/广东省"）
+industry_tags    TEXT           # 行业标签（逗号分隔）
+ai_tag           VARCHAR(50)    # AI相关标签
+language         VARCHAR(10)    # 语言代码
+```
+
+#### 3. `mp_ai_daily_reports` - AI日报表
+**作用**：存储AI日报数据  
+**核心字段**：
+```sql
+id               VARCHAR(36)    # UUID主键
+report_type      VARCHAR(50)    # 日报类型（governance/research等）
+report_date      DATE           # 日报日期
+title            VARCHAR(500)   # 标题
+content          TEXT           # 内容（Markdown格式）
+metadata         JSON           # 元数据（消息来源、Token统计等）
+created_at       DATETIME       # 生成时间
+```
+
+---
+
+### ChromaDB集合结构
+**作用**：向量存储，支持语义检索  
+**集合命名**：每个消息源一个collection（如`bloomberg_tech`）  
+**元数据字段**：
+```json
+{
+  "id": "业务唯一标识",
+  "source_id": "消息源ID",
+  "title": "标题",
+  "summary": "摘要",
+  "published_at": "发布时间",
+  "url": "原文链接"
+}
+```
+
+---
+
+## 🚀 部署与运行
+
+### 1. 环境准备
+```bash
+# 创建Python环境
+conda create -n personal_agent python=3.11 -y
+conda activate personal_agent
+pip install -r requirements.txt
+
+# 安装Playwright浏览器
+playwright install chromium
+```
+
+### 2. 数据库初始化
+```bash
+# 方式一：导入完整数据（推荐）
+mysql -u root -p < full_database_dump.sql
+
+# 方式二：仅创建表结构
+mysql -u root -p < init_db.sql
+mysql -u root -p message_platform < data_message_sources.sql
+```
+
+### 3. 配置环境变量
+创建`.env`文件（或直接修改`config.yaml`）：
+```env
+# 数据库配置
+MYSQL_PASSWORD=your_password
+
+# LLM配置
+LLM_API_KEY=your_llm_api_key
+EMBEDDING_API_KEY=your_embedding_api_key
+FAST_LLM_API_KEY=your_fast_llm_api_key
+
+# Redis配置
+REDIS_PASSWORD=your_redis_password
+```
+
+### 4. 启动后端服务
+```bash
+# 一键启动（推荐）
+conda activate personal_agent
+python start.py
+
+# 或手动启动各服务
+# 1. ChromaDB
+chroma run --path ./data/chromadb --host 0.0.0.0 --port 11530
+
+# 2. Celery Worker（采集器）
+celery -A backend.tasks worker --loglevel=info --pool=solo -Q default,collector -n collector@%h
+
+# 3. Celery Worker（日报）
+celery -A backend.tasks worker --loglevel=info --pool=solo -Q report -n report@%h
+
+# 4. Celery Beat（定时调度）
+celery -A backend.tasks beat --loglevel=info
+
+# 5. FastAPI
+uvicorn backend.main:app --host 0.0.0.0 --port 11528
+```
+
+### 5. 启动前端服务
+```bash
+cd global-news-dashboard
+npm install
+npm run dev
+```
+
+### 6. 访问地址
+- 后端API文档：http://localhost:11528/docs
+- 后端健康检查：http://localhost:11528/health
+- 前端大屏：http://localhost:5173
+- ChromaDB：http://localhost:11530
+
+---
+
+## 📊 统计摘要
+
+### 消息源覆盖
+- **总消息源数**：27个
+- **语言覆盖**：5种（中文、英文、德语、法语、西班牙语）
+- **国家/地区覆盖**：13个（中国、美国、英国、日本、新加坡、加拿大、德国、法国、印度、南非、阿根廷等）
+- **采集类型**：网页爬取（6个）、RSS（20个）、RSS+详情页（1个）
+
+### 代码规模
+- **后端代码**：~20,000行
+  - ORM实体：1,323行
+  - 采集器基础设施：693行
+  - 采集器实现：~13,500行
+  - 服务层：~3,000行
+  - API层：~2,000行
+- **前端代码**：~8,000行
+  - 组件：~4,000行
+  - 视图：~2,000行
+  - API/Store/Utils：~2,000行
+
+### 依赖数量
+- **Python依赖**：252个包
+- **Node.js依赖**：28个包
+
+---
+
+## 🔑 关键特性
+
+### 1. 配置驱动架构
+- 所有消息源配置存储在数据库（mp_message_sources表）
+- 采集器、ORM模型自动注册（零硬编码）
+- 新增消息源仅需3步：创建采集器 → 注册SQL → 激活
+
+### 2. 三阶段数据流（Scraping → Processing → Storing）
+- 严格分离数据抓取、预处理、存储逻辑
+- 避免在DB会话内执行异步IO（防止连接池耗尽）
+- 并发写入MySQL和ChromaDB
+
+### 3. 浏览器池优化
+- 动态扩缩容（0-10实例）
+- 空闲超时回收（5分钟）
+- 健康检查与自动替换
+
+### 4. 多模型LLM架构
+- Chat模型（qwen3-max）：复杂推理
+- Embedding模型（bge-m3）：向量化
+- Fast模型（GLM-4.5-Air）：轻量任务
+
+### 5. 智能去重
+- 多级降级策略（URL → external_id → title）
+- Sliding Window增量采集（遇到latest_url立即停止）
+
+### 6. AI日报定时生成
+- 6种日报类型（治理、研究、产业、综合、中国AI、上海周报）
+- 每天20:00自动生成
+- 向量检索相关消息 + LLM生成
+
+---
+
+## 🛠️ 运维要点
+
+### 1. 监控指标
+- 采集器状态（运行/停止/错误）
+- Token使用量（Chat/Embedding/Fast）
+- 消息数量趋势（MySQL + ChromaDB）
+- 浏览器池状态（活跃/空闲实例数）
+
+### 2. 日志位置
+- FastAPI日志：控制台输出
+- Celery Worker日志：控制台输出
+- ChromaDB日志：./data/chromadb/chroma.log
+
+### 3. 数据备份
+```bash
+# MySQL备份
+mysqldump -u root -p message_platform > backup_$(date +%Y%m%d).sql
+
+# ChromaDB备份
+tar -czf chromadb_backup_$(date +%Y%m%d).tar.gz ./data/chromadb
+```
+
+### 4. 常见问题
+
+**Q1：采集器采集失败**
+- 检查消息源配置（config字段）
+- 检查浏览器池状态
+- 查看Celery Worker日志
+
+**Q2：向量同步失败**
+- 检查ChromaDB连接（端口11530）
+- 检查MySQL数据是否存在
+- 运行`verify_vector_consistency.py`脚本
+
+**Q3：AI日报生成失败**
+- 检查LLM API配置
+- 检查Token余额
+- 查看report队列Worker日志
+
+---
+
+## 📝 文档版本
+
+- **版本**：v1.0
+- **生成日期**：2025-11-29
+- **维护者**：待分配
+- **更新说明**：初始版本，覆盖项目全貌
+
+---
+
+## 附录：快速命令参考
+
+### 后端启动
+```bash
+# 一键启动所有服务
+conda activate personal_agent
+python start.py
+
+# 单独启动FastAPI
+uvicorn backend.main:app --host 0.0.0.0 --port 11528
+```
+
+### 前端启动
+```bash
+# 一键启动
+cd global-news-dashboard && npm install && npm run dev
+
+# 或分步启动
+cd global-news-dashboard
+npm install
+npm run dev
+```
+
+### 数据库操作
+```bash
+# 导入数据
+mysql -u root -p < full_database_dump.sql
+
+# 导出数据
+mysqldump -u root -p message_platform > backup.sql
+
+# 进入MySQL
+mysql -u root -p message_platform
+```
+
+### 采集器手动触发
+```bash
+# 进入Python环境
+conda activate personal_agent
+python
+
+# 执行采集任务
+from backend.tasks.collector_tasks import run_collector
+run_collector.delay('消息源ID')
+```
+
+### AI日报手动生成
+```bash
+# 进入Python环境
+conda activate personal_agent
+python
+
+# 生成日报
+from backend.tasks.ai_report_tasks import generate_daily_report
+generate_daily_report.delay('governance')  # 治理日报
+```
+
+---
+
+**项目路径**：`D:\AI赋能马院思政课项目\message_platform`  
+**文档路径**：`D:\AI赋能马院思政课项目\message_platform\项目架构文档.md`
+
