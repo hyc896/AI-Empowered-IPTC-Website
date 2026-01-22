@@ -53,6 +53,7 @@ class Relation(BaseModel):
 class ExtractRequest(BaseModel):
     """实体提取请求"""
     file_id: str = Field(..., description="文件 ID")
+    filename: str = Field(..., description="文件名")
     text: str = Field(..., description="待提取的文本内容")
     language: str = Field("zh", description="语言，zh 或 en")
     page_range: Optional[str] = Field(None, description="页面范围，如 '1-20'")
@@ -128,3 +129,8 @@ class ExportRequest(BaseModel):
     file_id: str = Field(..., description="文件 ID")
     format: str = Field("json", description="导出格式：json 或 csv")
     include_graph: bool = Field(False, description="是否包含图谱数据")
+
+
+class RenameRequest(BaseModel):
+    """重命名请求"""
+    new_name: str = Field(..., description="新文件名")

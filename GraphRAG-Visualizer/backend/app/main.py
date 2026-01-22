@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.routers import upload, extract, graph
+from app.routers import upload, extract, graph, config
 from app.services.graphrag_service import GraphRAGService
 
 
@@ -16,14 +16,22 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时初始化 GraphRAG 服务
     graphrag_service = GraphRAGService()
-    await graphrag_service.initialize(settings.GRAPHRAG_CONFIG_PATH)
-    print("✅ GraphRAG 服务已初始化")
+    try:
+        await graphrag_service.initialize(settings.GRAPHRAG_CONFIG_PATH)
+        print("✅ GraphRAG 服务已初始化")
+    except Exception as e:
+        print(f"⚠️ GraphRAG 服务初始化失败: {e}")
+        print("⚠️ 服务将继续运行，但 GraphRAG 功能可能不可用")
+        print("⚠️ 请检查 Neo4j 配置和 .env 文件")
 
     yield
 
     # 关闭时清理资源
-    await graphrag_service.close()
-    print("✅ GraphRAG 服务已关闭")
+    try:
+        await graphrag_service.close()
+        print("✅ GraphRAG 服务已关闭")
+    except Exception as e:
+        print(f"⚠️ GraphRAG 服务关闭时出错: {e}")
 
 
 # 创建 FastAPI 应用
@@ -46,6 +54,7 @@ app.add_middleware(
 app.include_router(upload.router, prefix=settings.API_PREFIX)
 app.include_router(extract.router, prefix=settings.API_PREFIX)
 app.include_router(graph.router, prefix=settings.API_PREFIX)
+app.include_router(config.router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")

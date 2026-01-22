@@ -4,12 +4,9 @@
 """
 from fastapi import APIRouter, HTTPException
 from app.models.schemas import ExtractRequest, ExtractResponse
-from app.services.graphrag_service import GraphRAGService
+from app.services.graphrag_service import graphrag_service
 
 router = APIRouter(prefix="/extract", tags=["extract"])
-
-# 全局 GraphRAG 服务实例
-graphrag_service = GraphRAGService()
 
 
 @router.post("", response_model=ExtractResponse)
@@ -24,24 +21,23 @@ async def extract_entities(request: ExtractRequest):
         提取的实体和关系列表
     """
     try:
-        # 提取实体和关系
-        result = await graphrag_service.extract_entities(
+        # 确保服务已初始化
+        if graphrag_service.extractor is None:
+            from app.config import settings
+            await graphrag_service.initialize(settings.GRAPHRAG_CONFIG_PATH)
+
+        # 使用统一的 process_text 方法
+        stats = await graphrag_service.process_text(
             text=request.text,
-            language=request.language
-        )
-
-        # 构建图谱
-        stats = await graphrag_service.build_graph(
             file_id=request.file_id,
-            filename=request.file_id,  # 使用 file_id 作为文件名
-            page_range=request.page_range or "1-20",
-            entities=result['entities'],
-            relations=result['relations']
+            filename=request.filename,
+            page_range=request.page_range or "1-20"
         )
 
+        # 返回统计信息
         return ExtractResponse(
-            entities=result['entities'],
-            relations=result['relations'],
+            entities=[],
+            relations=[],
             stats=stats
         )
 
