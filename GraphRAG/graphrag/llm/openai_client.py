@@ -34,8 +34,9 @@ class OpenAIClient(BaseLLMClient):
             raise ImportError("请安装openai库: pip install openai")
 
         self.model = model
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.async_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        # 设置 180 秒超时，确保大 token 生成有足够时间
+        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=180.0)
+        self.async_client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=180.0)
 
     async def generate_async(
         self,
@@ -43,7 +44,7 @@ class OpenAIClient(BaseLLMClient):
         temperature: float = 0.3,
         max_tokens: int = 2000,
         **kwargs
-    ) -> str:
+    ):
         """异步生成文本
 
         Args:
@@ -53,7 +54,7 @@ class OpenAIClient(BaseLLMClient):
             **kwargs: 其他参数
 
         Returns:
-            str: 生成的文本
+            OpenAI response object
         """
         try:
             response = await self.async_client.chat.completions.create(
@@ -63,7 +64,7 @@ class OpenAIClient(BaseLLMClient):
                 max_tokens=max_tokens,
                 **kwargs
             )
-            return response.choices[0].message.content
+            return response
         except Exception as e:
             logger.error(f"OpenAI API调用失败: {e}")
             raise

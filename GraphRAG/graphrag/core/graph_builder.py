@@ -136,6 +136,7 @@ class GraphBuilderService:
         query = """
         CREATE (m:Message {
             id: $id,
+            name: $name,
             source_id: $source_id,
             source_name: $source_name,
             title: $title,
@@ -155,6 +156,7 @@ class GraphBuilderService:
         # 准备参数
         params = {
             "id": message_id,
+            "name": message_data.get("name", ""),
             "source_id": message_data.get("source_id", ""),
             "source_name": message_data.get("source_name", ""),
             "title": message_data.get("title", ""),
@@ -192,12 +194,17 @@ class GraphBuilderService:
             e.first_mentioned_at = datetime(),
             e.mention_count = 1,
             e.aliases = $aliases,
-            e.description = $description
+            e.description = $description,
+            e.page_range = $page_range
         ON MATCH SET
             e.mention_count = e.mention_count + 1,
             e.aliases = CASE
                 WHEN e.aliases IS NULL THEN $aliases
                 ELSE e.aliases + [x IN $aliases WHERE NOT x IN e.aliases]
+            END,
+            e.page_range = CASE
+                WHEN e.page_range IS NULL THEN $page_range
+                ELSE e.page_range
             END
         RETURN e, (e.mention_count = 1) as is_new
         """
@@ -207,7 +214,8 @@ class GraphBuilderService:
             "name": entity.get("name", ""),
             "type": entity.get("type", ""),
             "aliases": entity.get("aliases", []),
-            "description": entity.get("attributes", {}).get("description", "")
+            "description": entity.get("attributes", {}).get("description", ""),
+            "page_range": entity.get("page_range", "")
         }
 
         # 添加类型特定的属性
@@ -390,13 +398,16 @@ class GraphBuilderService:
         Returns:
             ISO 8601格式字符串
         """
-        if dt is None:
+        if dt is None or dt == "":
             return datetime.now().isoformat()
 
         if isinstance(dt, datetime):
             return dt.isoformat()
 
         if isinstance(dt, str):
+            # 如果字符串为空，返回当前时间
+            if not dt.strip():
+                return datetime.now().isoformat()
             return dt
 
         return datetime.now().isoformat()
