@@ -101,79 +101,165 @@ EXTRACT_PROMPT_TEMPLATE = """你是一位资深的思想政治理论课教师。
 """
 
 
+def split_text_into_chunks(text: str, max_chars: int = 50000) -> List[str]:
+    """
+    将长文本分割成多个块，避免超过LLM的token限制
+
+    Args:
+        text: 原始文本
+        max_chars: 每块最大字符数（约等于token数的1/2）
+
+    Returns:
+        文本块列表
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks = []
+    paragraphs = text.split('\n\n')
+    current_chunk = []
+    current_length = 0
+
+    for para in paragraphs:
+        para_length = len(para)
+
+        if current_length + para_length > max_chars and current_chunk:
+            chunks.append('\n\n'.join(current_chunk))
+            current_chunk = [para]
+            current_length = para_length
+        else:
+            current_chunk.append(para)
+            current_length += para_length + 2
+
+    if current_chunk:
+        chunks.append('\n\n'.join(current_chunk))
+
+    return chunks
+
+
 async def extract_knowledge_points_from_chapter(
     chapter_id: str,
     chapter_name: str,
-    chapter_text: str
+    chapter_text: str,
+    book_name: str = None,
+    book_id: str = None,
+    section_id: str = None,
+    section_name: str = None
 ) -> List[Dict]:
     """
-    从单个章节提取知识点
+    从单个章节或节提取知识点
 
     Args:
         chapter_id: 章节ID
         chapter_name: 章节名称
         chapter_text: 章节文本内容
+        book_name: 书名
+        book_id: 书籍ID
+        section_id: 节ID（可选）
+        section_name: 节名称（可选）
 
     Returns:
         知识点列表
     """
     print(f"\n正在处理章节: {chapter_name}")
 
-    # 填充提示词模板
-    prompt = EXTRACT_PROMPT_TEMPLATE.format(chapter_text=chapter_text)
+    # 检查文本长度，如果太长则分块处理
+    text_chunks = split_text_into_chunks(chapter_text, max_chars=50000)
 
-    # 获取LLM管理器
-    llm_manager = GlobalLLMManager.get_instance()
+    if len(text_chunks) > 1:
+        print(f"  [提示] 章节文本较长，分为 {len(text_chunks)} 块处理")
 
-    try:
-        # 调用LLM
-        response = await llm_manager.chat_client.generate_with_messages_async(
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一位资深的思想政治理论课教师，擅长提取和总结知识点。"
-                },
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,  # 较低温度保证稳定输出
-            max_tokens=3000
-        )
+    all_knowledge_points = []
 
-        # 解析响应
-        content = response.choices[0].message.content
+    for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+        if len(text_chunks) > 1:
+            print(f"  [处理] 第 {chunk_idx}/{len(text_chunks)} 块...")
 
-        # 提取JSON部分（可能包含```json```标记）
-        import re
-        json_match = re.search(r'```json\s*(\[.*?\])\s*```', content, re.DOTALL)
-        if json_match:
-            content = json_match.group(1)
+        # 填充提示词模板
+        prompt = EXTRACT_PROMPT_TEMPLATE.format(chapter_text=chunk_text)
 
-        # 解析JSON
-        knowledge_points = json.loads(content)
+        # 获取LLM管理器
+        llm_manager = GlobalLLMManager.get_instance()
 
-        # 添加章节信息和生成embedding_text
-        for kp in knowledge_points:
-            kp['chapter'] = chapter_name
-            kp['chapter_id'] = chapter_id
+        try:
+            # 调用LLM
+            response = await llm_manager.chat_client.generate_with_messages_async(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是一位资深的思想政治理论课教师，擅长提取和总结知识点。"
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=3000
+            )
 
-            # 生成embedding_text（理论+关键词+场景）
-            keywords_text = ' '.join(kp.get('typical_keywords', []))
-            scenarios_text = ' '.join(kp.get('application_scenarios', []))
-            theory_snippet = kp.get('theory_description', '')[:100]
+            # 解析响应
+            content = response.choices[0].message.content
 
-            kp['embedding_text'] = f"{kp['name']} {theory_snippet} {keywords_text} {scenarios_text}"
+            # 提取JSON部分（可能包含```json```标记）
+            import re
+            json_match = re.search(r'```json\s*(\[.*?\])\s*```', content, re.DOTALL)
+            if json_match:
+                content = json_match.group(1)
 
-        print(f"  [成功] 提取到 {len(knowledge_points)} 个知识点")
-        for kp in knowledge_points:
-            print(f"    - {kp['name']}")
+            # 解析JSON
+            knowledge_points = json.loads(content)
 
-        return knowledge_points
+            # 添加章节信息、书籍信息和生成embedding_text
+            for kp in knowledge_points:
+                # 添加书籍信息
+                if book_name:
+                    kp['book_name'] = book_name
+                if book_id:
+                    kp['book_id'] = book_id
 
-    except Exception as e:
-        print(f"  [错误] 提取失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
+                # 添加章节信息
+                kp['chapter'] = chapter_name
+                kp['chapter_id'] = chapter_id
+
+                # 添加节信息（如果有）
+                if section_name:
+                    kp['section'] = section_name
+                if section_id:
+                    kp['section_id'] = section_id
+
+                # 生成embedding_text（理论+关键词+场景）
+                keywords_text = ' '.join(kp.get('typical_keywords', []))
+                scenarios_text = ' '.join(kp.get('application_scenarios', []))
+                theory_snippet = kp.get('theory_description', '')[:100]
+
+                kp['embedding_text'] = f"{kp['name']} {theory_snippet} {keywords_text} {scenarios_text}"
+
+            all_knowledge_points.extend(knowledge_points)
+
+            if len(text_chunks) > 1:
+                print(f"    提取到 {len(knowledge_points)} 个知识点")
+
+            # 分块处理时增加延迟
+            if len(text_chunks) > 1 and chunk_idx < len(text_chunks):
+                await asyncio.sleep(3)
+
+        except Exception as e:
+            print(f"  [错误] 第 {chunk_idx} 块提取失败: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    # 去重（基于知识点名称）
+    seen_names = set()
+    unique_kps = []
+    for kp in all_knowledge_points:
+        if kp['name'] not in seen_names:
+            seen_names.add(kp['name'])
+            unique_kps.append(kp)
+
+    print(f"  [成功] 提取到 {len(unique_kps)} 个知识点")
+    for kp in unique_kps:
+        print(f"    - {kp['name']}")
+
+    return unique_kps
 
 
 async def extract_all_knowledge_points(
@@ -194,13 +280,30 @@ async def extract_all_knowledge_points(
 
     # 读取教材章节
     with open(textbook_file, 'r', encoding='utf-8') as f:
-        textbook = json.load(f)
+        data = json.load(f)
 
-    print(f"共找到 {len(textbook)} 个章节")
+    # 支持两种格式：
+    # 1. 新格式：{"book_name": "...", "book_id": "...", "chapters": [...]}
+    # 2. 旧格式：[{chapter1}, {chapter2}, ...]
+    if isinstance(data, dict) and 'chapters' in data:
+        # 新格式：包含书籍元数据
+        book_name = data.get('book_name', '未命名教材')
+        book_id = data.get('book_id', 'unknown')
+        chapters = data['chapters']
+        print(f"书名: {book_name}")
+        print(f"书籍ID: {book_id}")
+    else:
+        # 旧格式：直接是章节列表
+        book_name = None
+        book_id = None
+        chapters = data
+        print("[警告] 使用旧格式JSON，缺少书籍元数据")
+
+    print(f"共找到 {len(chapters)} 个章节")
 
     all_knowledge_points = []
 
-    for chapter in textbook:
+    for chapter in chapters:
         # 拼接章节文本（取第一个section的text）
         if 'sections' in chapter and len(chapter['sections']) > 0:
             chapter_text = chapter['sections'][0]['text']
@@ -213,7 +316,9 @@ async def extract_all_knowledge_points(
             kps = await extract_knowledge_points_from_chapter(
                 chapter_id=chapter['chapter_id'],
                 chapter_name=chapter['chapter_name'],
-                chapter_text=chapter_text
+                chapter_text=chapter_text,
+                book_name=book_name,
+                book_id=book_id
             )
 
             all_knowledge_points.extend(kps)
