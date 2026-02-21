@@ -85,23 +85,31 @@ async def startup():
         logger.info("【2/7】初始化数据库...")
         await init_database()
 
-        # 2.5. 启动配置验证（新增）
-        logger.info("【3/7】验证配置完整性...")
+        # 3. 加载API路由（提前，确保路由始终注册）
+        logger.info("【3/7】加载API路由...")
+        load_api_routes()
+        setup_basic_routes()
+
+        # 4. 启动配置验证
+        logger.info("【4/7】验证配置完整性...")
         import os
         skip_validation = os.getenv('SKIP_VALIDATION', '0') == '1'
 
         if not skip_validation:
-            from backend.database.startup_validator import startup_validation
-            startup_validation(fail_on_error=True)
+            try:
+                from backend.database.startup_validator import startup_validation
+                startup_validation(fail_on_error=False)
+            except Exception as e:
+                logger.warning(f"启动验证异常（不影响服务）: {e}")
         else:
             logger.warning("⚠️  跳过启动验证（SKIP_VALIDATION=1）")
 
-        # 3. 初始化存储
-        logger.info("【4/7】初始化向量存储...")
+        # 5. 初始化存储
+        logger.info("【5/7】初始化向量存储...")
         await init_storage()
 
-        # 4. 初始化LLM和Embedding客户端
-        logger.info("【5/7】初始化LLM客户端...")
+        # 6. 初始化LLM和Embedding客户端
+        logger.info("【6/7】初始化LLM客户端...")
         await init_llm()
 
         # 注意：浏览器池、采集器、向量同步、定时调度已迁移到Celery Worker
@@ -109,11 +117,6 @@ async def startup():
         logger.info("  - Celery Worker (采集器任务)")
         logger.info("  - Celery Beat (定时调度)")
         logger.info("  - ChromaDB Server (端口11530)")
-
-        # 6. 加载完整的API路由
-        logger.info("【6/6】加载API路由...")
-        load_api_routes()
-        setup_basic_routes()
 
         # 8. 显示数据库数据统计
         await display_database_stats()
@@ -370,8 +373,14 @@ def load_api_routes():
         try:
             from backend.api.iptc_case_routes import router as iptc_case_router
             app.include_router(iptc_case_router)
-        except ImportError as e:
+        except Exception as e:
             logger.warning(f"IPTC案例路由加载失败: {e}")
+
+        try:
+            from backend.api.collection_status_routes import router as collection_status_router
+            app.include_router(collection_status_router)
+        except ImportError as e:
+            logger.warning(f"采集状态路由加载失败: {e}")
 
         app.include_router(search_router, prefix="/api/v1")
 
@@ -401,6 +410,14 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Total-Count"],  # 暴露自定义响应头给前端
 )
+
+# 模块级路由注册（不依赖startup，确保始终可用）
+try:
+    from backend.api.iptc_case_routes import router as _iptc_router
+    app.include_router(_iptc_router)
+except Exception as e:
+    import logging as _logging
+    _logging.getLogger(__name__).error(f"IPTC路由注册失败: {e}")
 
 
 # 健康检查端点

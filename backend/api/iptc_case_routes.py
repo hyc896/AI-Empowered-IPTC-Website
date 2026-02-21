@@ -112,3 +112,28 @@ def get_statistics(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+
+
+@router.delete("/cases/{case_id}", status_code=204)
+def delete_case(
+    case_id: str,
+    db: Session = Depends(get_db_session)
+):
+    """
+    删除案例
+
+    - **case_id**: 案例ID
+
+    成功返回HTTP 204 No Content
+    案例不存在返回HTTP 404 Not Found
+    """
+    try:
+        success = IPTCCaseService.delete_case(db, case_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="案例不存在")
+        # DELETE成功返回204 No Content，无响应体
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除案例失败: {str(e)}")

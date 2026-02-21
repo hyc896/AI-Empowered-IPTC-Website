@@ -9,14 +9,118 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
+import jieba
+from rank_bm25 import BM25Okapi
 
 from backend.database.entities import IPTCCase, IPTCKnowledgePointStats, IPTCMessageKnowledgeRelation
+from backend.database.orm_registry import get_orm_registry
+from backend.storage import get_chromadb_storage
 
 logger = logging.getLogger(__name__)
 
 
 class IPTCCaseService:
     """思政课案例服务"""
+
+    @staticmethod
+    def _tokenize_text(text: str) -> List[str]:
+        """
+        对文本进行中文分词
+
+        Args:
+            text: 待分词的文本
+
+        Returns:
+            分词后的词语列表
+        """
+        if not text:
+            return []
+        return list(jieba.cut(text.lower()))
+
+    @staticmethod
+    def _build_case_corpus(case: IPTCCase) -> str:
+        """
+        构建案例的搜索语料（标题 + 内容 + 知识点）
+
+        Args:
+            case: 案例对象
+
+        Returns:
+            合并后的文本
+        """
+        corpus_parts = [case.title]
+
+        # 添加内容（限制长度以提高性能）
+        if case.content:
+            # 只取前800字进行分词，避免对超长内容分词导致性能问题
+            corpus_parts.append(case.content[:800])
+
+        # 添加摘要（如果存在）
+        if case.summary:
+            corpus_parts.append(case.summary)
+
+        # 添加知识点名称
+        if case.related_knowledge_points:
+            for kp in case.related_knowledge_points:
+                if isinstance(kp, dict) and 'name' in kp:
+                    corpus_parts.append(kp['name'])
+
+        return " ".join(corpus_parts)
+
+    @staticmethod
+    def _get_source_messages(db: Session, message_ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        获取消息的详细信息（标题和URL）
+
+        Args:
+            db: 数据库会话
+            message_ids: 消息ID列表
+
+        Returns:
+            消息信息列表 [{"title": "...", "url": "...", "source_table": "..."}]
+        """
+        if not message_ids:
+            return []
+
+        registry = get_orm_registry()
+        messages = []
+
+        for msg_id in message_ids:
+            try:
+                # 查询消息-知识点关联表，获取source_table
+                relation = db.query(IPTCMessageKnowledgeRelation).filter(
+                    IPTCMessageKnowledgeRelation.message_id == msg_id
+                ).first()
+
+                if not relation:
+                    logger.warning(f"未找到消息ID {msg_id} 的关联记录")
+                    continue
+
+                # 使用ORM Registry获取对应的模型类
+                model = registry.get_model(relation.source_table)
+
+                if not model:
+                    logger.warning(f"未找到表模型: {relation.source_table}")
+                    continue
+
+                # 查询具体的消息表
+                msg = db.query(model).filter(model.id == msg_id).first()
+
+                if msg:
+                    messages.append({
+                        "title": msg.title,
+                        "url": msg.url if hasattr(msg, 'url') else None,
+                        "source_table": relation.source_table,
+                        "published_at": msg.published_at.isoformat() if hasattr(msg, 'published_at') and msg.published_at else None
+                    })
+                else:
+                    logger.warning(f"未找到消息ID: {msg_id}")
+
+            except Exception as e:
+                logger.error(f"获取消息 {msg_id} 详情失败: {e}")
+                continue
+
+        return messages
 
     @staticmethod
     def get_cases(
@@ -48,22 +152,60 @@ class IPTCCaseService:
                     IPTCCase.related_knowledge_points.contains([{"id": knowledge_point_id}])
                 )
 
-            # 关键词搜索
+            # 查询所有匹配的案例
+            all_cases = query.order_by(desc(IPTCCase.created_at)).all()
+
+            # 关键词搜索（使用BM25算法）
             if search_keyword:
-                search_pattern = f"%{search_keyword}%"
-                query = query.filter(
-                    (IPTCCase.title.like(search_pattern)) |
-                    (IPTCCase.content.like(search_pattern)) |
-                    (IPTCCase.summary.like(search_pattern))
-                )
+                logger.info(f"使用BM25算法搜索关键词: {search_keyword}")
+
+                # 构建语料库和分词
+                corpus_texts = []
+                for case in all_cases:
+                    corpus_text = IPTCCaseService._build_case_corpus(case)
+                    corpus_texts.append(corpus_text)
+
+                # 对语料库进行分词
+                tokenized_corpus = [IPTCCaseService._tokenize_text(text) for text in corpus_texts]
+
+                # 对查询关键词进行分词
+                tokenized_query = IPTCCaseService._tokenize_text(search_keyword)
+
+                # 创建BM25模型
+                bm25 = BM25Okapi(tokenized_corpus)
+
+                # 计算每个案例的BM25分数
+                scores = bm25.get_scores(tokenized_query)
+
+                # 将案例和分数配对，并按分数排序
+                case_score_pairs = list(zip(all_cases, scores))
+
+                # 设置最低分数阈值（过滤掉低相关性结果）
+                # BM25分数通常在0-10之间，3.0可以过滤掉更多低相关性结果，提高搜索质量
+                MIN_BM25_SCORE = 3.0
+
+                # 过滤掉分数低于阈值的案例
+                case_score_pairs = [(case, score) for case, score in case_score_pairs if score >= MIN_BM25_SCORE]
+
+                # 按BM25分数降序排序
+                case_score_pairs.sort(key=lambda x: x[1], reverse=True)
+
+                # 提取排序后的案例
+                all_cases = [case for case, score in case_score_pairs]
+
+                logger.info(f"BM25搜索完成，找到 {len(all_cases)} 个相关案例（阈值: {MIN_BM25_SCORE}）")
+
+                # 记录前5个案例的分数（用于调试）
+                for i, (case, score) in enumerate(case_score_pairs[:5]):
+                    logger.info(f"案例 #{i+1}: {case.title[:30]}... (BM25分数: {score:.4f})")
 
             # 总数
-            total = query.count()
+            total = len(all_cases)
 
-            # 分页查询
-            cases = query.order_by(desc(IPTCCase.created_at)).offset(
-                (page - 1) * page_size
-            ).limit(page_size).all()
+            # 分页
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            cases = all_cases[start_idx:end_idx]
 
             # 转换为前端期望的格式
             items = []
@@ -126,6 +268,11 @@ class IPTCCaseService:
                     if isinstance(kp, dict) and 'name' in kp:
                         knowledge_points.append(kp['name'])
 
+            # 获取所有来源消息的详细信息
+            source_messages = []
+            if case.source_message_ids:
+                source_messages = IPTCCaseService._get_source_messages(db, case.source_message_ids)
+
             return {
                 "id": case.id,
                 "title": case.title,
@@ -133,6 +280,7 @@ class IPTCCaseService:
                 "summary": case.summary or "",
                 "source": "IPTC系统",
                 "sourceUrl": case.source_url,
+                "sourceMessages": source_messages,  # 新增：所有来源消息的详细信息
                 "publishDate": case.published_at.isoformat() if case.published_at else case.created_at.isoformat(),
                 "viewCount": 0,
                 "knowledgePoints": knowledge_points,
@@ -205,8 +353,17 @@ class IPTCCaseService:
             # 案例总数
             total_cases = db.query(func.count(IPTCCase.id)).scalar()
 
-            # 知识点总数
-            total_kps = db.query(func.count(IPTCKnowledgePointStats.id)).scalar()
+            # 知识点总数（从ChromaDB查询）
+            try:
+                chroma_storage = get_chromadb_storage()
+                if chroma_storage and chroma_storage.is_initialized():
+                    total_kps = chroma_storage.get_collection_count('iptc_knowledge_points')
+                else:
+                    # 降级到MySQL查询
+                    total_kps = db.query(func.count(IPTCKnowledgePointStats.id)).scalar()
+            except Exception as e:
+                logger.warning(f"从ChromaDB查询知识点数量失败，降级到MySQL: {e}")
+                total_kps = db.query(func.count(IPTCKnowledgePointStats.id)).scalar()
 
             # 已生成案例的知识点数
             generated_kps = db.query(func.count(IPTCKnowledgePointStats.id)).filter(
@@ -238,4 +395,32 @@ class IPTCCaseService:
 
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")
+            raise
+
+    @staticmethod
+    def delete_case(db: Session, case_id: str) -> bool:
+        """
+        删除案例
+
+        Args:
+            db: 数据库会话
+            case_id: 案例ID
+
+        Returns:
+            删除成功返回True，案例不存在返回False
+        """
+        try:
+            case = db.query(IPTCCase).filter_by(id=case_id).first()
+
+            if not case:
+                return False
+
+            db.delete(case)
+            db.commit()
+            logger.info(f"成功删除案例: {case_id} - {case.title}")
+            return True
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"删除案例失败: {e}")
             raise

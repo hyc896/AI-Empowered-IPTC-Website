@@ -38,6 +38,22 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/graph/mindmap/:bookId',
+    name: 'MindMap',
+    component: () => import('@/views/MindMapView.vue'),
+    meta: {
+      title: '思维导图 - AI赋能思政案例库',
+    },
+  },
+  {
+    path: '/collection-status',
+    name: 'CollectionStatus',
+    component: () => import('@/views/CollectionStatusView.vue'),
+    meta: {
+      title: '采集状态 - AI赋能思政案例库',
+    },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),

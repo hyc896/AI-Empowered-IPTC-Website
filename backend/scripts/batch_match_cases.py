@@ -43,9 +43,11 @@ class BatchMatchCasesService:
     """批量撞库案例生成服务"""
 
     # 配置参数
-    BATCH_SIZE = 200                    # 批量处理消息数（改为200，处理所有消息）
-    SIMILARITY_THRESHOLD = 0.4          # 相似度阈值（降低到0.4以匹配更多CNR地方新闻）
-    CASE_GENERATION_THRESHOLD = 5       # 案例生成阈值（一个知识点需关联至少5条消息才生成案例）
+    BATCH_SIZE = None                   # 批量处理消息数（None表示处理所有未处理消息）
+    SIMILARITY_THRESHOLD = 0.55         # 相似度阈值（提高到0.55以确保更高的匹配质量）
+    CASE_GENERATION_THRESHOLD = 4       # 案例生成阈值（提高到4条以确保案例质量）
+    MAX_MESSAGES_PER_CASE = 6           # 每个案例最多使用的消息数量
+    MAX_MESSAGE_USAGE = 3               # 每条消息最多使用次数（增加以充分利用有限消息）
 
     def __init__(self):
         """初始化服务"""
@@ -54,6 +56,7 @@ class BatchMatchCasesService:
         self.chroma_client = None
         self.kp_collection = None
         self.message_tables = {}  # 动态加载的消息表映射
+        self.knowledge_points = {}  # 知识点完整信息字典 {kp_id: kp_data}
         self._initialize()
 
     def _load_chinese_sources(self):
@@ -172,6 +175,15 @@ class BatchMatchCasesService:
             self.kp_collection = self.chroma_client.get_collection(name="iptc_knowledge_points")
             self.logger.info(f"[初始化] ChromaDB初始化成功，知识点数: {self.kp_collection.count()}")
 
+            # 加载知识点完整信息
+            kp_json_path = project_root / "backend" / "data" / "knowledge_points.json"
+            with open(kp_json_path, 'r', encoding='utf-8') as f:
+                kp_list = json.load(f)
+                # 构建字典映射 {name: kp_data}，因为ChromaDB中使用name作为ID
+                for kp in kp_list:
+                    self.knowledge_points[kp['name']] = kp
+            self.logger.info(f"[初始化] 加载知识点信息成功，共 {len(self.knowledge_points)} 个")
+
         except Exception as e:
             self.logger.error(f"[初始化] 失败: {e}")
             raise
@@ -192,10 +204,12 @@ class BatchMatchCasesService:
 
         try:
             # Step 1: 获取待处理消息
+            # 如果指定了limit，使用limit；否则使用BATCH_SIZE（可能为None表示处理所有）
             batch_size = limit if limit else self.BATCH_SIZE
             messages = self._get_unprocessed_messages(batch_size)
 
-            if len(messages) < batch_size and not limit:
+            # 只有在设置了batch_size且未指定limit时才检查阈值
+            if batch_size is not None and len(messages) < batch_size and not limit:
                 self.logger.info(f"当前未处理消息数: {len(messages)}/{batch_size}，等待积攒")
                 return {
                     "status": "pending",
@@ -244,12 +258,12 @@ class BatchMatchCasesService:
                 "error": str(e)
             }
 
-    def _get_unprocessed_messages(self, limit: int) -> List[Dict[str, Any]]:
+    def _get_unprocessed_messages(self, limit: int = None) -> List[Dict[str, Any]]:
         """
         获取未处理的消息
 
         Args:
-            limit: 最大消息数量
+            limit: 最大消息数量（None表示获取所有未处理消息）
 
         Returns:
             消息列表
@@ -258,7 +272,8 @@ class BatchMatchCasesService:
 
         try:
             with create_session() as db:
-                per_table_limit = limit // len(self.message_tables) if limit else None
+                # 如果limit为None，则获取所有未处理消息；否则每个表固定查询100条
+                per_table_limit = None if limit is None else 100
 
                 for table_name, orm_class in self.message_tables.items():
                     # 子查询：已处理的消息ID
@@ -269,11 +284,17 @@ class BatchMatchCasesService:
                     ).subquery()
 
                     # 查询未处理的消息
-                    results = db.query(orm_class).filter(
+                    query = db.query(orm_class).filter(
                         ~orm_class.id.in_(processed_ids_subquery)
                     ).order_by(
                         orm_class.published_at.desc()
-                    ).limit(per_table_limit).all()
+                    )
+
+                    # 只有在per_table_limit不为None时才应用limit
+                    if per_table_limit is not None:
+                        query = query.limit(per_table_limit)
+
+                    results = query.all()
 
                     for row in results:
                         # 兼容新旧表的url字段（旧表：source_url，新表：url）
@@ -328,17 +349,17 @@ class BatchMatchCasesService:
                     include=['metadatas', 'distances']
                 )
 
-                # 解析结果并筛选相似度>=0.6的知识点
+                # 解析结果并筛选相似度>=阈值的知识点
                 if results and results['ids'] and len(results['ids'][0]) > 0:
                     for j, kp_id in enumerate(results['ids'][0]):
                         # 距离转换为相似度（余弦距离: distance = 1 - similarity）
                         distance = results['distances'][0][j]
                         similarity = 1 - distance
 
-                        # 记录前3个知识点的相似度（调试用）
+                        # 记录前3个知识点的相似度
                         metadata = results['metadatas'][0][j]
                         kp_name = metadata.get('name', '')
-                        self.logger.debug(f"  [{i}] {msg['title'][:30]} <-> {kp_name[:30]}: {similarity:.3f}")
+                        self.logger.info(f"  [{i}] {msg['title'][:30]} <-> {kp_name[:30]}: {similarity:.3f}")
 
                         if similarity >= self.SIMILARITY_THRESHOLD:
                             matches.append({
@@ -403,6 +424,8 @@ class BatchMatchCasesService:
         """
         统计每个知识点的关联消息数
 
+        注意：允许为同一知识点生成多个不同角度的案例
+
         Returns:
             知识点统计字典 {kp_id: {name, count}}
         """
@@ -410,22 +433,12 @@ class BatchMatchCasesService:
 
         try:
             with create_session() as db:
-                # 查询未生成案例的知识点
-                generated_kp_ids = db.query(
-                    IPTCKnowledgePointStats.knowledge_point_id
-                ).filter(
-                    IPTCKnowledgePointStats.case_generated == 1
-                ).all()
-                generated_kp_ids = [row[0] for row in generated_kp_ids]
-
-                # 统计每个知识点的消息数
+                # 统计每个知识点的消息数（不排除已生成案例的知识点）
                 from sqlalchemy import func
                 results = db.query(
                     IPTCMessageKnowledgeRelation.knowledge_point_id,
                     IPTCMessageKnowledgeRelation.knowledge_point_name,
                     func.count(IPTCMessageKnowledgeRelation.message_id).label('count')
-                ).filter(
-                    ~IPTCMessageKnowledgeRelation.knowledge_point_id.in_(generated_kp_ids)
                 ).group_by(
                     IPTCMessageKnowledgeRelation.knowledge_point_id,
                     IPTCMessageKnowledgeRelation.knowledge_point_name
@@ -486,27 +499,67 @@ class BatchMatchCasesService:
 
         return generated_cases
 
+    def _count_message_usage(self, db) -> Dict[str, int]:
+        """
+        统计每条消息的使用次数（通过查询案例表中的source_message_ids）
+
+        Args:
+            db: 数据库会话
+
+        Returns:
+            消息ID -> 使用次数的字典
+        """
+        usage_count = defaultdict(int)
+
+        try:
+            # 查询所有案例的source_message_ids字段
+            cases = db.query(IPTCCase.source_message_ids).all()
+
+            for case in cases:
+                if case.source_message_ids:
+                    # source_message_ids是JSON数组，包含消息ID列表
+                    message_ids = case.source_message_ids
+                    if isinstance(message_ids, list):
+                        for msg_id in message_ids:
+                            usage_count[msg_id] += 1
+
+        except Exception as e:
+            self.logger.error(f"[错误] 统计消息使用次数失败: {e}")
+
+        return dict(usage_count)
+
     def _get_related_messages(self, kp_id: str) -> List[Dict]:
         """
-        获取知识点关联的所有消息
+        获取知识点关联的消息（最多MAX_MESSAGES_PER_CASE条，且每条消息使用次数<MAX_MESSAGE_USAGE）
 
         Args:
             kp_id: 知识点ID
 
         Returns:
-            消息列表
+            消息列表（按相似度降序，最多6条，过滤掉已使用2次的消息）
         """
         messages = []
 
         try:
             with create_session() as db:
+                # 1. 统计所有消息的使用次数
+                message_usage_count = self._count_message_usage(db)
+
+                # 2. 查询知识点关联的所有消息（不限制数量，因为需要过滤）
                 relations = db.query(IPTCMessageKnowledgeRelation).filter_by(
                     knowledge_point_id=kp_id
                 ).order_by(
                     IPTCMessageKnowledgeRelation.similarity_score.desc()
                 ).all()
 
+                # 3. 遍历关联消息，过滤掉使用次数>=MAX_MESSAGE_USAGE的消息
                 for rel in relations:
+                    # 检查消息使用次数
+                    usage_count = message_usage_count.get(rel.message_id, 0)
+                    if usage_count >= self.MAX_MESSAGE_USAGE:
+                        self.logger.debug(f"  跳过消息 {rel.message_id}（已使用{usage_count}次）")
+                        continue
+
                     # 获取对应的ORM类
                     orm_class = self.message_tables.get(rel.source_table)
                     if not orm_class:
@@ -522,9 +575,13 @@ class BatchMatchCasesService:
                             "summary": msg.summary,
                             "provider": getattr(msg, 'provider', '未知'),
                             "published_at": msg.published_at,
-                            "url": msg.url,
+                            "url": getattr(msg, 'url', None) or getattr(msg, 'source_url', ''),
                             "similarity": rel.similarity_score
                         })
+
+                        # 达到最大数量后停止
+                        if len(messages) >= self.MAX_MESSAGES_PER_CASE:
+                            break
 
         except Exception as e:
             self.logger.error(f"[错误] 获取关联消息失败: {e}")
@@ -548,25 +605,56 @@ class BatchMatchCasesService:
         Returns:
             案例字典
         """
-        # 1. 智能聚合消息内容
-        aggregated = self._aggregate_messages(related_messages)
+        # 1. 获取知识点完整信息
+        kp_data = self.knowledge_points.get(knowledge_point_name, {})
 
-        # 2. 读取新的聚合案例提示词模板
-        template_path = r"D:\AI-Empowered IPTC Website\聚合案例提示词.md"
+        # 提取教材元数据
+        book_name = kp_data.get('book_name', '')
+        chapter = kp_data.get('chapter', '')
+        section = kp_data.get('section', '')
+
+        # 构造教学应用说明（章节定位）
+        # 格式：《书名》章 节
+        if book_name and chapter:
+            teaching_application = f"《{book_name}》{chapter}"
+            if section:
+                teaching_application += f" {section}"
+        else:
+            teaching_application = ''
+
+        # 2. 读取新闻转案例提示词模板
+        template_path = r"D:\AI-Empowered IPTC Website\新闻转案例提示词.md"
         try:
             with open(template_path, 'r', encoding='utf-8') as f:
                 prompt_template = f.read()
         except Exception as e:
-            self.logger.error(f"[错误] 读取聚合提示词模板失败: {e}，使用旧模板")
-            template_path = r"D:\AI-Empowered IPTC Website\新闻转案例提示词.md"
-            with open(template_path, 'r', encoding='utf-8') as f:
-                prompt_template = f.read()
+            self.logger.error(f"[错误] 读取提示词模板失败: {e}")
+            raise
 
-        # 3. 填充模板
-        prompt = prompt_template.format(
-            aggregated_content=aggregated['content'],
-            related_knowledge_points=f"- {knowledge_point_name}"
-        )
+        # 3. 构建模板参数
+        template_params = {
+            'related_knowledge_points': f"- {knowledge_point_name}",
+            'teaching_application': teaching_application
+        }
+
+        # 为每条新闻构建参数（最多7条）
+        for i, msg in enumerate(related_messages[:7], 1):
+            template_params[f'news_title_{i}'] = msg['title']
+            template_params[f'news_source_{i}'] = msg['provider']
+            template_params[f'published_at_{i}'] = msg['published_at'].strftime('%Y-%m-%d') if msg['published_at'] else ''
+            template_params[f'url_{i}'] = msg['url']
+            template_params[f'news_content_{i}'] = msg['content'] or msg['summary'] or ''
+
+        # 如果消息数量少于7条，为剩余占位符填充空字符串
+        for i in range(len(related_messages) + 1, 8):
+            template_params[f'news_title_{i}'] = ''
+            template_params[f'news_source_{i}'] = ''
+            template_params[f'published_at_{i}'] = ''
+            template_params[f'url_{i}'] = ''
+            template_params[f'news_content_{i}'] = ''
+
+        # 4. 填充模板
+        prompt = prompt_template.format(**template_params)
 
         # 4. 调用LLM生成案例
         self.logger.info(f"  [LLM] 开始生成案例，知识点: {knowledge_point_name}")
@@ -589,7 +677,7 @@ class BatchMatchCasesService:
 
         # 提取标题（寻找第一行非空文本，或第一个【】前的内容）
         lines = case_content.strip().split('\n')
-        title = aggregated['title']  # 默认使用聚合生成的标题
+        title = related_messages[0]['title'] if related_messages else knowledge_point_name  # 默认使用第一条消息的标题
         for line in lines[:5]:  # 检查前5行
             line = line.strip()
             if line and not line.startswith('【') and not line.startswith('#'):
@@ -644,7 +732,7 @@ class BatchMatchCasesService:
 【消息{i}】
 标题：{msg['title']}
 来源：{msg['provider']}
-时间：{msg['published_at'].strftime("%Y-%m-%d")}
+时间：{msg['published_at'].strftime("%Y-%m-%d") if msg['published_at'] else '未知'}
 内容：{msg['content'][:800] if msg['content'] else msg['summary']}
 """
                 message_summaries.append(msg_text)
@@ -726,7 +814,7 @@ class BatchMatchCasesService:
             content_parts = []
             for i, msg in enumerate(messages, 1):
                 content_parts.append(f"""
-【消息{i}】来源: {msg['provider']} | 时间: {msg['published_at'].strftime("%Y-%m-%d")}
+【消息{i}】来源: {msg['provider']} | 时间: {msg['published_at'].strftime("%Y-%m-%d") if msg['published_at'] else '未知'}
 标题: {msg['title']}
 内容: {msg['content'][:800] if msg['content'] else msg['summary']}...
 """)
@@ -772,15 +860,19 @@ class BatchMatchCasesService:
         """
         try:
             with create_session() as db:
-                # 查询是否已存在
+                # 使用knowledge_point_name作为查询条件，防止重复记录
                 stat = db.query(IPTCKnowledgePointStats).filter_by(
-                    knowledge_point_id=kp_id
+                    knowledge_point_name=kp_name
                 ).first()
 
                 if stat:
+                    # 更新现有记录
                     stat.case_generated = 1
                     stat.last_matched_at = datetime.now()
+                    # 更新knowledge_point_id（可能会变化）
+                    stat.knowledge_point_id = kp_id
                 else:
+                    # 创建新记录
                     stat = IPTCKnowledgePointStats(
                         id=str(uuid.uuid4()),
                         knowledge_point_id=kp_id,
