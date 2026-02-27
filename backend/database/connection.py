@@ -30,7 +30,12 @@ def get_database_config() -> dict:
         # 直接从ConfigManager读取配置（message_platform专用）
         from backend.config.config_manager import ConfigManager
         config_manager = ConfigManager()
-        config_manager.load_config("config.yaml")
+
+        # 计算配置文件的绝对路径（与main.py保持一致）
+        # __file__ = backend/database/connection.py
+        # 向上两级到达项目根目录（一期/）
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'config.yaml')
+        config_manager.load_config(config_path)
         config = config_manager.get_config()
 
         # 获取数据库配置

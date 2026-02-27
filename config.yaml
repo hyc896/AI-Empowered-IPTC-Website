@@ -6,16 +6,16 @@
 llm:
   # Chat模型配置（主模型，用于复杂推理任务）
   chat:
-    base_url: "${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}"
-    api_key: "${LLM_API_KEY:sk-da598e8ebde449dfbb3d4578854b0502}"
-    model: "${LLM_MODEL:qwen3-max}"
+    base_url: "${LLM_BASE_URL:https://api.siliconflow.cn/v1}"
+    api_key: "${LLM_API_KEY:sk-bgvkctcaxpmunpxjcgfdvhbdblhnakffetacrtlqavjeeagc}"
+    model: "${LLM_MODEL:zai-org/GLM-4.6}"
     timeout: 210
     temperature: 0.7
 
   # Embedding模型配置
   embedding:
     base_url: "${EMBEDDING_BASE_URL:https://api.siliconflow.cn/v1}"
-    api_key: "${EMBEDDING_API_KEY:sk-tpnnprwtipwwbtojamuccbosjlezyhlqhvplyxnqmqyfiqyg}"
+    api_key: "${EMBEDDING_API_KEY:sk-hvpyzlmtoxsehqponnxkaahecqprmrqpphbfxncooqbwyuly}"
     model: "${EMBEDDING_MODEL:BAAI/bge-m3}"
     timeout: 30
     output_dim: 1024  # bge-m3的向量维度
@@ -23,8 +23,8 @@ llm:
   # Fast模型配置（轻量快速模型，用于简单任务如摘要、翻译等）
   fast:
     base_url: "${FAST_LLM_BASE_URL:https://api.siliconflow.cn/v1}"
-    api_key: "${FAST_LLM_API_KEY:sk-tpnnprwtipwwbtojamuccbosjlezyhlqhvplyxnqmqyfiqyg}"
-    model: "${FAST_LLM_MODEL:zai-org/GLM-4.5-Air}"
+    api_key: "${FAST_LLM_API_KEY:sk-yfjwwvffzxfuwyrepjbkeezcrgnzsuoseckmsxszckxzpmwv}"
+    model: "${FAST_LLM_MODEL:deepseek-ai/DeepSeek-V3.2-Exp}"
     timeout: 60
     temperature: 0.7
 
@@ -38,7 +38,7 @@ database:
     port: "${MYSQL_PORT:3306}"
     user: "${MYSQL_USER:root}"
     password: "${MYSQL_PASSWORD}"
-    database: "${MYSQL_DATABASE:personal_agent}"
+    database: "${MYSQL_DATABASE:message_platform}"
     charset: "utf8mb4"
     pool_size: 10
     max_overflow: 20
@@ -120,7 +120,7 @@ agent:
 # Retrieval Configuration
 # ========================
 retrieval:
-  similarity_threshold: 0.4  # 向量检索相似度阈值
+  similarity_threshold: 0.52  # 向量检索相似度阈值
   rrf_k: 60  # RRF融合参数
 
 # ========================

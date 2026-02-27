@@ -10,10 +10,11 @@ import { getStatistics } from '@/api';
 export const useAppStore = defineStore('app', () => {
   // 状态
   const statistics = ref<Statistics>({
-    totalCases: 0,
-    totalKnowledgePoints: 0,
-    totalTopics: 0,
-    recentUpdates: 0,
+    total_cases: 0,
+    total_knowledge_points: 0,
+    generated_knowledge_points: 0,
+    total_relations: 0,
+    latest_cases: [],
   });
 
   const loading = ref(false);
@@ -26,7 +27,7 @@ export const useAppStore = defineStore('app', () => {
 
     try {
       const response = await getStatistics();
-      statistics.value = response.data as Statistics;
+      statistics.value = response as Statistics;
     } catch (err: any) {
       console.error('获取统计数据失败:', err);
     } finally {

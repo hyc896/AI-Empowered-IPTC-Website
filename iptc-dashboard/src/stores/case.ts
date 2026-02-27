@@ -19,7 +19,7 @@ export const useCaseStore = defineStore('case', () => {
   // 搜索和筛选参数
   const searchParams = ref<SearchParams>({
     page: 1,
-    pageSize: 20,
+    pageSize: 18,
     keyword: '',
     sortBy: 'date',
     sortOrder: 'desc',
@@ -103,16 +103,8 @@ export const useCaseStore = defineStore('case', () => {
     error.value = null;
 
     try {
-      // 从JSON文件读取所有案例，然后找到对应ID的案例
-      const response = await fetch('/cases.json');
-      const data = await response.json();
-      const caseItem = data.data.items.find((item: Case) => item.id === id);
-
-      if (caseItem) {
-        currentCase.value = caseItem;
-      } else {
-        error.value = '案例不存在';
-      }
+      const response = await getCaseById(id);
+      currentCase.value = response.data;
     } catch (err: any) {
       error.value = err.message || '获取案例详情失败';
       console.error('获取案例详情失败:', err);
@@ -124,26 +116,11 @@ export const useCaseStore = defineStore('case', () => {
   // 获取相关案例
   async function fetchRelatedCases(caseId: string) {
     try {
-      // 从JSON文件读取所有案例，然后找到相关的案例（相同知识点）
-      const response = await fetch('/cases.json');
-      const data = await response.json();
-      const currentCaseItem = data.data.items.find((item: Case) => item.id === caseId);
-
-      if (currentCaseItem && currentCaseItem.knowledgePoints.length > 0) {
-        // 找到具有相同知识点的案例（排除当前案例）
-        const related = data.data.items.filter((item: Case) =>
-          item.id !== caseId &&
-          item.knowledgePoints.some((kp: string) =>
-            currentCaseItem.knowledgePoints.includes(kp)
-          )
-        ).slice(0, 3); // 最多返回3个相关案例
-
-        relatedCases.value = related;
-      } else {
-        relatedCases.value = [];
-      }
+      const response = await getRelatedCases(caseId, 3);
+      relatedCases.value = response.data;
     } catch (err: any) {
       console.error('获取相关案例失败:', err);
+      relatedCases.value = [];
     }
   }
 
@@ -151,7 +128,7 @@ export const useCaseStore = defineStore('case', () => {
   function resetFilters() {
     searchParams.value = {
       page: 1,
-      pageSize: 20,
+      pageSize: 18,
       keyword: '',
       sortBy: 'date',
       sortOrder: 'desc',

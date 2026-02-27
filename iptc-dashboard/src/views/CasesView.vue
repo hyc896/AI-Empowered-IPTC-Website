@@ -35,8 +35,9 @@
           <input
             v-model="keyword"
             type="text"
-            placeholder="搜索革命精神、时代楷模、理论要点..."
+            placeholder="搜索案例标题或知识点..."
             class="search-input"
+            @input="handleInputSearch"
             @keyup.enter="handleSearch"
           />
           <button class="search-button" @click="handleSearch">
@@ -88,6 +89,15 @@
         >
           <!-- 红色装饰条 -->
           <div class="card-accent"></div>
+
+          <!-- 删除按钮 -->
+          <button
+            class="delete-button"
+            @click.stop="showDeleteConfirm(caseItem.id, caseItem.title)"
+            title="删除案例"
+          >
+            ×
+          </button>
 
           <!-- 知识点标签 -->
           <div class="case-tags">
@@ -147,6 +157,28 @@
         <div class="refresh-text">每小时自动更新</div>
         <div class="refresh-progress" :style="{ width: `${refreshProgress}%` }"></div>
       </div>
+
+      <!-- 删除确认对话框 -->
+      <div v-if="showDeleteDialog" class="dialog-overlay" @click="cancelDelete">
+        <div class="dialog-content" @click.stop>
+          <div class="dialog-header">
+            <h3>确认删除</h3>
+          </div>
+          <div class="dialog-body">
+            <p>确定要删除以下案例吗？</p>
+            <p class="case-title-preview">{{ deleteTarget.title }}</p>
+            <p class="warning-text">此操作不可恢复</p>
+          </div>
+          <div class="dialog-footer">
+            <button class="dialog-button cancel-button" @click="cancelDelete">
+              取消
+            </button>
+            <button class="dialog-button confirm-button" @click="confirmDelete" :disabled="isDeleting">
+              {{ isDeleting ? '删除中...' : '确认删除' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -156,6 +188,8 @@ import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useCaseStore } from '@/stores';
 import { formatDate } from '@/utils';
+import { deleteCase } from '@/api/cases';
+import { getStatistics } from '@/api';
 
 const router = useRouter();
 const caseStore = useCaseStore();
@@ -163,17 +197,31 @@ const caseStore = useCaseStore();
 const keyword = ref('');
 const selectedKnowledgePoints = ref<string[]>([]);
 const refreshProgress = ref(0);
-const knowledgePointCount = ref(61);
+const knowledgePointCount = ref(0);
 const lastUpdateTime = ref('刚刚');
+
+// 删除相关状态
+const showDeleteDialog = ref(false);
+const deleteTarget = ref({ id: '', title: '' });
+const isDeleting = ref(false);
 
 let refreshInterval: number | null = null;
 let progressInterval: number | null = null;
+let searchDebounceTimer: number | null = null;
 
-onMounted(() => {
+onMounted(async () => {
   caseStore.fetchCases();
   startAutoRefresh();
   startProgressAnimation();
   updateLastUpdateTime();
+
+  // 获取知识点数量
+  try {
+    const stats = await getStatistics();
+    knowledgePointCount.value = stats.total_knowledge_points;
+  } catch (error) {
+    console.error('获取统计数据失败:', error);
+  }
 });
 
 onUnmounted(() => {
@@ -183,6 +231,19 @@ onUnmounted(() => {
 
 const handleSearch = () => {
   caseStore.search(keyword.value);
+};
+
+// 实时搜索（带防抖）
+const handleInputSearch = () => {
+  // 清除之前的定时器
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
+  }
+
+  // 设置新的定时器，500ms后执行搜索
+  searchDebounceTimer = window.setTimeout(() => {
+    caseStore.search(keyword.value);
+  }, 500);
 };
 
 const removeKnowledgePoint = (kp: string) => {
@@ -242,6 +303,41 @@ const updateLastUpdateTime = () => {
   const hours = now.getHours().toString().padStart(2, '0');
   const minutes = now.getMinutes().toString().padStart(2, '0');
   lastUpdateTime.value = `${hours}:${minutes}`;
+};
+
+// 删除相关方法
+const showDeleteConfirm = (id: string, title: string) => {
+  deleteTarget.value = { id, title };
+  showDeleteDialog.value = true;
+};
+
+const cancelDelete = () => {
+  showDeleteDialog.value = false;
+  deleteTarget.value = { id: '', title: '' };
+};
+
+const confirmDelete = async () => {
+  if (isDeleting.value) return;
+
+  try {
+    isDeleting.value = true;
+    await deleteCase(deleteTarget.value.id);
+
+    // 删除成功，关闭对话框
+    showDeleteDialog.value = false;
+    deleteTarget.value = { id: '', title: '' };
+
+    // 刷新案例列表
+    await caseStore.fetchCases();
+
+    // 可选：显示成功提示
+    console.log('案例删除成功');
+  } catch (error) {
+    console.error('删除案例失败:', error);
+    alert('删除失败，请稍后重试');
+  } finally {
+    isDeleting.value = false;
+  }
 };
 </script>
 
@@ -548,9 +644,12 @@ const updateLastUpdateTime = () => {
 /* ========== 案例网格 ========== */
 .cases-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 32px;
   margin-bottom: 60px;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .case-card {
@@ -808,7 +907,171 @@ const updateLastUpdateTime = () => {
   transition: width 1s linear;
 }
 
+/* ========== 删除按钮 ========== */
+.delete-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(208, 48, 80, 0.1);
+  color: #D03050;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+}
+
+.case-card:hover .delete-button {
+  opacity: 1;
+}
+
+.delete-button:hover {
+  background: #D03050;
+  color: white;
+  transform: scale(1.1);
+}
+
+/* ========== 删除确认对话框 ========== */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dialog-content {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(50px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.dialog-header {
+  padding: 24px 24px 16px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.dialog-header h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.dialog-body {
+  padding: 24px;
+}
+
+.dialog-body p {
+  margin: 0 0 12px;
+  color: #666;
+  line-height: 1.6;
+}
+
+.case-title-preview {
+  padding: 12px;
+  background: #f8f8f8;
+  border-radius: 6px;
+  color: #1a1a1a;
+  font-weight: 500;
+  margin: 16px 0;
+}
+
+.warning-text {
+  color: #D03050;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.dialog-footer {
+  padding: 16px 24px 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.dialog-button {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.cancel-button {
+  background: #f0f0f0;
+  color: #666;
+}
+
+.cancel-button:hover {
+  background: #e0e0e0;
+}
+
+.confirm-button {
+  background: #D03050;
+  color: white;
+}
+
+.confirm-button:hover:not(:disabled) {
+  background: #b02040;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(208, 48, 80, 0.3);
+}
+
+.confirm-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ========== 响应式设计 ========== */
+/* 平板设备 - 2列布局 */
+@media (max-width: 1200px) and (min-width: 769px) {
+  .cases-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 28px;
+  }
+}
+
+/* 手机设备 - 1列布局 */
 @media (max-width: 768px) {
   .container {
     padding: 60px 16px 40px;

@@ -346,13 +346,13 @@ class BrowserPool:
                     to_destroy.append((browser_id, f"idle {wrapper.idle_seconds:.0f}s"))
                     continue
 
-                # 检查生命周期
-                if wrapper.age_seconds > self.max_lifetime:
+                # 检查生命周期（但不销毁正在使用的浏览器）
+                if wrapper.page_count == 0 and wrapper.age_seconds > self.max_lifetime:
                     to_destroy.append((browser_id, f"lifetime {wrapper.age_seconds:.0f}s"))
                     continue
 
-                # 检查页面数限制
-                if wrapper.total_pages_created > self.max_pages_per_browser * 2:
+                # 检查页面数限制（但不销毁正在使用的浏览器）
+                if wrapper.page_count == 0 and wrapper.total_pages_created > self.max_pages_per_browser * 2:
                     to_destroy.append((browser_id, f"pages {wrapper.total_pages_created}"))
 
         # 执行销毁（在锁外执行异步操作，保持min_size）

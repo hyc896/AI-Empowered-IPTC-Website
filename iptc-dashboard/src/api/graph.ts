@@ -55,6 +55,68 @@ export function getKnowledgePointGraph(knowledgePointId: string): Promise<ApiRes
   });
 }
 
+/**
+ * 获取所有书籍列表
+ */
+export function getBookList(): Promise<ApiResponse<any>> {
+  return request({
+    url: '/api/books/list',
+    method: 'get',
+  });
+}
+
+/**
+ * 获取指定书籍的知识图谱
+ */
+export function getBookGraph(bookId: string): Promise<ApiResponse<GraphData>> {
+  return request({
+    url: `/api/books/${bookId}/graph`,
+    method: 'get',
+  });
+}
+
+/**
+ * 获取节点为中心的子图
+ */
+export function getNodeSubgraph(data: { node_id: string; book_id?: string; depth: number }): Promise<ApiResponse<GraphData>> {
+  return request({
+    url: '/api/books/node/subgraph',
+    method: 'post',
+    data,
+  });
+}
+
+/**
+ * 获取层级知识图谱数据（书->章->节->知识点）
+ */
+export function getKnowledgeGraphData(bookId?: string): Promise<ApiResponse<GraphData>> {
+  return request({
+    url: '/api/v1/knowledge-graph/data',
+    method: 'get',
+    params: bookId ? { book_id: bookId } : undefined,
+  });
+}
+
+/**
+ * 获取知识图谱书籍列表
+ */
+export function getKnowledgeGraphBooks(): Promise<ApiResponse<any[]>> {
+  return request({
+    url: '/api/v1/knowledge-graph/books',
+    method: 'get',
+  });
+}
+
+/**
+ * 获取知识点详细信息
+ */
+export function getKnowledgePointDetail(kpId: string): Promise<ApiResponse<any>> {
+  return request({
+    url: `/api/v1/knowledge-graph/knowledge-point/${kpId}`,
+    method: 'get',
+  });
+}
+
 
 
 

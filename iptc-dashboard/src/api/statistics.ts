@@ -3,14 +3,14 @@
  */
 
 import request from './request';
-import type { ApiResponse, Statistics } from '@/types';
+import type { Statistics } from '@/types';
 
 /**
  * 获取统计数据
  */
-export function getStatistics(): Promise<ApiResponse<Statistics>> {
+export function getStatistics(): Promise<Statistics> {
   return request({
-    url: '/api/statistics',
+    url: '/api/v1/iptc/statistics',
     method: 'get',
   });
 }

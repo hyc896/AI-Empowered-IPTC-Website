@@ -123,8 +123,8 @@ async def build_knowledge_point_vectors():
                 "typical_keywords": json.dumps(kp['typical_keywords'], ensure_ascii=False)
             }
 
-            # 存入ChromaDB
-            collection.add(
+            # 存入ChromaDB（使用upsert避免重复ID错误）
+            collection.upsert(
                 ids=[kp_id],
                 embeddings=[embedding],
                 documents=[kp['theory_description']],

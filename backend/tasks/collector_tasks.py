@@ -284,7 +284,7 @@ def _load_source_config(source_name: str) -> Optional[Dict[str, Any]]:
                 "collector_module": config.get("collector_module", ""),
                 "interval": config.get("interval", 60),
                 "enabled": True,
-                "config": config,
+                "config": config.get("config", {}),  # 传递嵌套的config对象，而不是整个source.config
                 "last_crawled_at": source.last_crawled_at,
                 "schedule": source.schedule
             }

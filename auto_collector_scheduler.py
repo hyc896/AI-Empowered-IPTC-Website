@@ -96,13 +96,13 @@ def main():
     print('\n[启动] 立即执行第一次采集...')
     trigger_all_collectors()
 
-    # 设置定时任务：每2小时采集，每天23:00匹配
+    # 设置定时任务：每2小时采集，每24小时匹配
     schedule.every(2).hours.do(trigger_all_collectors)
-    schedule.every().day.at("23:00").do(run_batch_match)
+    schedule.every(24).hours.do(run_batch_match)
 
     print('[调度器] 进入定时循环，等待下次执行...\n')
     print('  - 采集任务: 每2小时')
-    print('  - 消息匹配: 每天 23:00\n')
+    print('  - 消息匹配: 每24小时\n')
 
     # 持续运行
     try:

@@ -4,4 +4,5 @@
 
 export * from './useSearch';
 export * from './useGraph';
+export * from './useD3Graph';
 export * from './usePagination';

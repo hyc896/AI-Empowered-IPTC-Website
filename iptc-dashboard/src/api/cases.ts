@@ -8,13 +8,17 @@ import type { ApiResponse, Case, PaginatedResponse, SearchParams } from '@/types
 /**
  * 获取案例列表
  */
-export async function getCases(params: SearchParams): Promise<ApiResponse<PaginatedResponse<Case>>> {
-  // 从本地JSON文件读取数据
-  const response = await fetch('/cases.json');
-  const data = await response.json();
-
-  // 返回符合前端期望的格式
-  return data;
+export function getCases(params: SearchParams): Promise<ApiResponse<PaginatedResponse<Case>>> {
+  return request({
+    url: '/api/v1/iptc/cases',
+    method: 'get',
+    params: {
+      page: params.page || 1,
+      page_size: params.pageSize || 20,
+      knowledge_point_id: params.knowledgePoint,
+      search: params.keyword,
+    },
+  });
 }
 
 /**
@@ -56,5 +60,15 @@ export function increaseCaseView(caseId: string): Promise<ApiResponse<void>> {
   return request({
     url: `/api/cases/${caseId}/view`,
     method: 'post',
+  });
+}
+
+/**
+ * 删除案例
+ */
+export function deleteCase(caseId: string): Promise<void> {
+  return request({
+    url: `/api/v1/iptc/cases/${caseId}`,
+    method: 'delete',
   });
 }

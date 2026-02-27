@@ -4,8 +4,8 @@
 
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { GraphData, GraphNode, GraphEdge, KnowledgePoint, GraphLayoutConfig } from '@/types';
-import { getGraphData, getKnowledgePoints, getCaseGraph, getKnowledgePointGraph } from '@/api';
+import type { GraphData, GraphNode, GraphEdge, KnowledgePoint, GraphLayoutConfig, BookInfo } from '@/types';
+import { getGraphData, getKnowledgePoints, getCaseGraph, getKnowledgePointGraph, getBookList, getBookGraph, getNodeSubgraph, getKnowledgeGraphData, getKnowledgePointDetail, getKnowledgeGraphBooks } from '@/api';
 
 export const useGraphStore = defineStore('graph', () => {
   // 状态
@@ -15,6 +15,10 @@ export const useGraphStore = defineStore('graph', () => {
   const highlightedNodes = ref<Set<string>>(new Set());
   const loading = ref(false);
   const error = ref<string | null>(null);
+
+  // 书籍相关状态
+  const bookList = ref<BookInfo[]>([]);
+  const selectedBook = ref<BookInfo | null>(null);
 
   // 布局配置
   const layoutConfig = ref<GraphLayoutConfig>({
@@ -114,6 +118,97 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  // 获取书籍列表
+  async function fetchBookList() {
+    try {
+      const response = await getBookList();
+      bookList.value = response.books || [];
+    } catch (err: any) {
+      console.error('获取书籍列表失败:', err);
+    }
+  }
+
+  // 获取书籍图谱
+  async function fetchBookGraph(bookId: string) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const response = await getBookGraph(bookId);
+      graphData.value = response as GraphData;
+    } catch (err: any) {
+      error.value = err.message || '获取书籍图谱失败';
+      console.error('获取书籍图谱失败:', err);
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 获取节点子图（点击节点时展开）
+  async function fetchNodeSubgraph(nodeId: string, depth: number = 1) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const response = await getNodeSubgraph({
+        node_id: nodeId,
+        book_id: selectedBook.value?.book_id,
+        depth,
+      });
+      graphData.value = response as GraphData;
+    } catch (err: any) {
+      error.value = err.message || '获取节点子图失败';
+      console.error('获取节点子图失败:', err);
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 获取层级知识图谱数据（书->章->节->知识点）
+  async function fetchKnowledgeGraphData(bookId?: string) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const response = await getKnowledgeGraphData(bookId);
+      graphData.value = response.data as GraphData;
+    } catch (err: any) {
+      error.value = err.message || '获取知识图谱数据失败';
+      console.error('获取知识图谱数据失败:', err);
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 获取知识图谱书籍列表
+  async function fetchKnowledgeGraphBooks() {
+    try {
+      const response = await getKnowledgeGraphBooks();
+      bookList.value = response.data || [];
+    } catch (err: any) {
+      console.error('获取书籍列表失败:', err);
+    }
+  }
+
+  // 获取知识点详细信息
+  async function fetchKnowledgePointDetail(kpId: string) {
+    try {
+      const response = await getKnowledgePointDetail(kpId);
+      return response.data;
+    } catch (err: any) {
+      console.error('获取知识点详情失败:', err);
+      return null;
+    }
+  }
+
+  // 选择书籍
+  function selectBook(book: BookInfo | null) {
+    selectedBook.value = book;
+    if (book) {
+      fetchBookGraph(book.book_id);
+    }
+  }
+
   // 选择节点
   function selectNode(node: GraphNode | null) {
     selectedNode.value = node;
@@ -161,6 +256,8 @@ export const useGraphStore = defineStore('graph', () => {
     error,
     layoutConfig,
     filterNodeType,
+    bookList,
+    selectedBook,
 
     // 计算属性
     filteredGraphData,
@@ -174,7 +271,14 @@ export const useGraphStore = defineStore('graph', () => {
     fetchKnowledgePoints,
     fetchCaseGraph,
     fetchKnowledgePointGraph,
+    fetchBookList,
+    fetchBookGraph,
+    fetchNodeSubgraph,
+    fetchKnowledgeGraphData,
+    fetchKnowledgeGraphBooks,
+    fetchKnowledgePointDetail,
     selectNode,
+    selectBook,
     updateLayoutConfig,
     updateNodeFilter,
     resetGraph,

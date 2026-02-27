@@ -122,6 +122,7 @@ class MessageSource(Base):
     qstheory_messages = relationship("QstheoryMessage", back_populates="source", cascade="all, delete-orphan")
     gmw_theory_messages = relationship("GmwTheoryMessage", back_populates="source", cascade="all, delete-orphan")
     cssn_messages = relationship("CssnMessage", back_populates="source", cascade="all, delete-orphan")
+    cssn_phil_messages = relationship("CssnPhilMessage", back_populates="source", cascade="all, delete-orphan")
     xinhua_messages = relationship("XinhuaMessage", back_populates="source", cascade="all, delete-orphan")
     huanqiu_messages = relationship("HuanqiuMessage", back_populates="source", cascade="all, delete-orphan")
     guancha_messages = relationship("GuanchaMessage", back_populates="source", cascade="all, delete-orphan")
@@ -136,6 +137,15 @@ class MessageSource(Base):
     dazhong_daily_messages = relationship("DazhongDailyMessage", back_populates="source", cascade="all, delete-orphan")
     sichuan_online_messages = relationship("SichuanOnlineMessage", back_populates="source", cascade="all, delete-orphan")
     cnr_local_messages = relationship("CNRLocalMessage", back_populates="source", cascade="all, delete-orphan")
+    china_mil_messages = relationship("ChinaMilMessage", back_populates="source", cascade="all, delete-orphan")
+    huanqiu_mil_messages = relationship("HuanqiuMilMessage", back_populates="source", cascade="all, delete-orphan")
+    ctnews_messages = relationship("CtnewsMessage", back_populates="source", cascade="all, delete-orphan")
+    wenlv_china_messages = relationship("WenlvChinaMessage", back_populates="source", cascade="all, delete-orphan")
+    jyb_messages = relationship("JybMessage", back_populates="source", cascade="all, delete-orphan")
+    eol_messages = relationship("EolMessage", back_populates="source", cascade="all, delete-orphan")
+    stdaily_messages = relationship("StdailyMessage", back_populates="source", cascade="all, delete-orphan")
+    cas_news_messages = relationship("CasNewsMessage", back_populates="source", cascade="all, delete-orphan")
+    chinanews_minsheng_messages = relationship("ChinanewsMinshengMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
@@ -1556,6 +1566,49 @@ class CssnMessage(Base):
     )
 
 
+class CssnPhilMessage(Base):
+    """中国社会科学网-哲学频道消息表（马克思主义哲学理论）"""
+    __tablename__ = "mp_cssn_phil_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要（取content前200字）")
+    provider = Column(String(500), default="中国社会科学网-哲学频道", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式，默认'中国'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签（AI科研信息/AI产业信息/AI治理信息）")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="cssn_phil_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_region", "region"),
+        Index("idx_ai_tag", "ai_tag"),
+    )
+
+
 class XinhuaMessage(Base):
     """新华网消息表（国内新闻）"""
     __tablename__ = "mp_xinhua_messages"
@@ -2201,6 +2254,366 @@ class IPTCKnowledgePointStats(Base):
         Index("idx_message_count", "matched_message_count"),
         Index("idx_case_generated", "case_generated"),
         Index("idx_kp_name", "knowledge_point_name"),
+    )
+
+
+class ChinaMilMessage(Base):
+    """中国军网消息表"""
+    __tablename__ = "mp_china_mil_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="中国军网", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式，默认'中国'）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="china_mil_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
+    )
+
+
+class HuanqiuMilMessage(Base):
+    """环球网军事频道消息表"""
+    __tablename__ = "mp_huanqiu_mil_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="环球网", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="全球", comment="地区（中文格式）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="huanqiu_mil_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
+    )
+
+
+class CtnewsMessage(Base):
+    """中国旅游新闻网消息表"""
+    __tablename__ = "mp_ctnews_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="中国旅游新闻网", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="ctnews_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
+    )
+
+
+class WenlvChinaMessage(Base):
+    """文旅中国消息表"""
+    __tablename__ = "mp_wenlv_china_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="文旅中国", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="wenlv_china_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
+    )
+
+
+class JybMessage(Base):
+    """中国教育新闻网消息表"""
+    __tablename__ = "mp_jyb_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="中国教育新闻网", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="jyb_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
+    )
+
+
+class EolMessage(Base):
+    """中国教育在线消息表"""
+    __tablename__ = "mp_eol_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="中国教育在线", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="eol_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
+    )
+
+
+class StdailyMessage(Base):
+    """科技日报消息表"""
+    __tablename__ = "mp_stdaily_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="科技日报", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="stdaily_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
+    )
+
+
+class CasNewsMessage(Base):
+    """中国科学院新闻消息表"""
+    __tablename__ = "mp_cas_news_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="中国科学院", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="cas_news_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
+    )
+
+
+class ChinanewsMinshengMessage(Base):
+    """中国新闻网民生频道消息表"""
+    __tablename__ = "mp_chinanews_minsheng_messages"
+
+    # 核心必备字段（遵循2025统一标准）
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="中国新闻网", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+
+    # 新增必备字段（2025年强制要求）
+    region = Column(String(200), default="中国", comment="地区（中文格式）")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔，最多3个）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+
+    # 扩展字段
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言（zh=中文）")
+    tags = Column(JSON, comment="标签列表（JSON数组）")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据（JSON对象）")
+
+    # 关系
+    source = relationship("MessageSource", back_populates="chinanews_minsheng_messages")
+
+    # 索引（强制要求）
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_external_id", "external_id"),
     )
 
 

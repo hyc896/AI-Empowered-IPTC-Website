@@ -12,6 +12,7 @@
         <router-link to="/" class="nav-link">首页</router-link>
         <router-link to="/cases" class="nav-link">案例库</router-link>
         <router-link to="/graph" class="nav-link">知识图谱</router-link>
+        <router-link to="/collection-status" class="nav-link">采集状态</router-link>
       </nav>
 
       <div class="header-right">
@@ -28,6 +29,7 @@
           <router-link to="/" class="mobile-nav-link" @click="closeMobileMenu">首页</router-link>
           <router-link to="/cases" class="mobile-nav-link" @click="closeMobileMenu">案例库</router-link>
           <router-link to="/graph" class="mobile-nav-link" @click="closeMobileMenu">知识图谱</router-link>
+          <router-link to="/collection-status" class="mobile-nav-link" @click="closeMobileMenu">采集状态</router-link>
         </nav>
       </div>
     </transition>

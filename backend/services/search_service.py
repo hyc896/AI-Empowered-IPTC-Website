@@ -158,7 +158,7 @@ class SearchService:
                     )
                     tasks.append(task)
             else:
-                # 搜索模式：MySQL + ChromaDB并发查询
+                # 搜索模式：MySQL + ChromaDB并发查询 + 知识点搜索
                 for source in sources:
                     display_name = source.get('display_name', source['name'])
                     logger.info(f"【任务创建】为消息源 {display_name} 创建 MySQL + ChromaDB 并发检索任务")
@@ -193,6 +193,21 @@ class SearchService:
 
                     tasks.extend([mysql_task, chroma_task])
 
+                # 添加知识点搜索任务（仅在搜索模式下）
+                if self.chroma_storage and self.embedding_client:
+                    if not hasattr(self, '_query_embedding') or self._query_embedding is None:
+                        logger.info(f"【向量化】正在生成查询向量: '{query}'")
+                        self._query_embedding = self.embedding_client.generate_embedding(query)
+                        logger.info(f"【向量化】查询向量生成完成 (维度: {len(self._query_embedding)})")
+
+                    logger.info(f"【任务创建】创建知识点搜索任务")
+                    kp_task = self._search_knowledge_points(
+                        query_embedding=self._query_embedding,
+                        limit=limit,
+                        similarity_threshold=self.similarity_threshold
+                    )
+                    tasks.append(kp_task)
+
             # 执行并发检索
             logger.info(f"【并发执行】开始执行 {len(tasks)} 个检索任务...")
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -201,6 +216,7 @@ class SearchService:
             all_results = []
             mysql_count = 0
             chroma_count = 0
+            kp_count = 0
 
             for result in results:
                 if isinstance(result, Exception):
@@ -213,9 +229,11 @@ class SearchService:
                             mysql_count += 1
                         elif item.get('source') == 'chromadb':
                             chroma_count += 1
+                        elif item.get('source') == 'knowledge_point':
+                            kp_count += 1
                     all_results.extend(result)
 
-            logger.info(f"【检索完成】MySQL: {mysql_count} 条, ChromaDB: {chroma_count} 条, 总计: {len(all_results)} 条")
+            logger.info(f"【检索完成】MySQL: {mysql_count} 条, ChromaDB: {chroma_count} 条, 知识点: {kp_count} 条, 总计: {len(all_results)} 条")
 
             # 根据模式选择不同的处理策略
             if is_empty_query:
@@ -582,6 +600,94 @@ class SearchService:
         """空的ChromaDB搜索（当ChromaDB不可用时）"""
         logger.info(f"【向量检索】{display_name} - ChromaDB不可用，跳过向量检索")
         return []
+
+    async def _search_knowledge_points(
+        self,
+        query_embedding: List[float],
+        limit: int = 20,
+        similarity_threshold: float = 0.4
+    ) -> List[Dict[str, Any]]:
+        """
+        搜索知识点
+
+        Args:
+            query_embedding: 查询向量
+            limit: 返回结果数量
+            similarity_threshold: 相似度阈值
+
+        Returns:
+            知识点搜索结果列表
+        """
+        try:
+            logger.info(f"【知识点检索】开始搜索知识点，向量维度: {len(query_embedding)}, 相似度阈值: {similarity_threshold}")
+
+            if not self.chroma_storage:
+                logger.warning(f"【知识点检索】ChromaDB存储未初始化")
+                return []
+
+            # 搜索知识点集合
+            results = self.chroma_storage.search(
+                collection_name="iptc_knowledge_points",
+                query_embeddings=[query_embedding],
+                n_results=limit
+            )
+
+            if not results or "ids" not in results:
+                logger.info(f"【知识点检索】未找到结果")
+                return []
+
+            result_count = len(results["ids"][0])
+            logger.info(f"【知识点检索】原始检索到 {result_count} 条结果")
+
+            formatted_results = []
+            filtered_count = 0
+
+            for i in range(result_count):
+                metadata = results["metadatas"][0][i] if "metadatas" in results else {}
+
+                # 获取知识点信息
+                kp_id = results["ids"][0][i]
+                kp_name = metadata.get("name", kp_id)
+                kp_content = results["documents"][0][i] if "documents" in results else ""
+
+                distance = results["distances"][0][i] if "distances" in results else None
+                similarity = 1 - distance if distance is not None else 0.0
+
+                if i < 3:
+                    logger.info(f"【知识点检索】结果 #{i+1}: 相似度={similarity:.4f}, 知识点='{kp_name}'")
+
+                # 相似度阈值过滤
+                if similarity < similarity_threshold:
+                    filtered_count += 1
+                    continue
+
+                # 格式化为统一的结果格式
+                result = {
+                    "id": kp_id,
+                    "title": f"【知识点】{kp_name}",
+                    "content": kp_content,
+                    "url": "",
+                    "published_at": None,
+                    "provider": "IPTC知识库",
+                    "distance": distance,
+                    "similarity": similarity,
+                    "source": "knowledge_point",
+                    "source_name": "知识点",
+                    "collection_name": "iptc_knowledge_points",
+                    "knowledge_point_name": kp_name
+                }
+                formatted_results.append(result)
+
+            if filtered_count > 0:
+                logger.info(f"【知识点检索】过滤掉 {filtered_count} 条低相似度结果（< {similarity_threshold}），保留 {len(formatted_results)} 条")
+            else:
+                logger.info(f"【知识点检索】全部 {len(formatted_results)} 条结果均满足相似度要求")
+
+            return formatted_results
+
+        except Exception as e:
+            logger.error(f"【知识点检索】检索失败: {e}")
+            return []
 
     async def _count_total_messages(
         self,

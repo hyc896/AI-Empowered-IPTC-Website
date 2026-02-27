@@ -84,10 +84,10 @@ const statisticsData = ref([
 onMounted(async () => {
   await appStore.fetchStatistics();
   statisticsData.value = [
-    { label: '案例总数', value: appStore.statistics.totalCases },
-    { label: '知识点', value: appStore.statistics.totalKnowledgePoints },
-    { label: '覆盖主题', value: appStore.statistics.totalTopics },
-    { label: '最近更新', value: appStore.statistics.recentUpdates },
+    { label: '案例总数', value: appStore.statistics.total_cases },
+    { label: '知识点总数', value: appStore.statistics.total_knowledge_points },
+    { label: '已生成案例', value: appStore.statistics.generated_knowledge_points },
+    { label: '关联总数', value: appStore.statistics.total_relations },
   ];
 });
 

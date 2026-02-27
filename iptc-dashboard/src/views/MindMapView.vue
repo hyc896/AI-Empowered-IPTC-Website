@@ -110,7 +110,7 @@ function drawTree(el: HTMLElement, book: any) {
 
     const link = g.selectAll<SVGPathElement, any>('path.link').data(links, (d: any) => d.target.id);
     link.enter().insert('path', 'g').attr('class', 'link')
-      .attr('fill', 'none').attr('stroke', 'rgba(255,255,255,0.25)').attr('stroke-width', 1.5)
+      .attr('fill', 'none').attr('stroke', 'rgba(0,0,0,0.18)').attr('stroke-width', 1.5)
       .attr('d', () => diagonal({ x: src.x0, y: src.y0 }, { x: src.x0, y: src.y0 }))
       .merge(link as any).transition().duration(300)
       .attr('d', (d: any) => diagonal(d.source, d.target));
@@ -140,7 +140,7 @@ function drawTree(el: HTMLElement, book: any) {
 
     merged.select('circle')
       .attr('r', (d: any) => d.data.type === 'book' ? 8 : 5)
-      .attr('fill', (d: any) => d._children ? COLORS[d.data.type] : 'rgba(255,255,255,0.15)')
+      .attr('fill', (d: any) => d._children ? COLORS[d.data.type] : '#f0f0f0')
       .attr('stroke', (d: any) => COLORS[d.data.type] ?? '#fff')
       .attr('stroke-width', 2);
 
@@ -149,7 +149,7 @@ function drawTree(el: HTMLElement, book: any) {
       .attr('text-anchor', (d: any) => (d.children || d._children) ? 'end' : 'start')
       .style('font-size', (d: any) => d.data.type === 'kp' ? '11px' : '12px')
       .style('fill', (d: any) => COLORS[d.data.type] ?? '#fff')
-      .style('text-shadow', '0 1px 3px rgba(0,0,0,0.8)')
+      .style('text-shadow', '0 1px 2px rgba(255,255,255,0.9)')
       .text((d: any) => truncate(d.data.name, d.data.type === 'kp' ? 14 : 18));
 
     merged.select('title').text((d: any) => d.data.name);
@@ -225,6 +225,10 @@ function drawTree(el: HTMLElement, book: any) {
 .mindmap-container {
   flex: 1;
   overflow: hidden;
+  margin: 16px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
 }
 
 .kp-panel {

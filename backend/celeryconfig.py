@@ -95,6 +95,11 @@ except Exception as e:
     beat_schedule = {}
 
 # ========================
+# Beat Scheduler (使用非持久化调度器，避免Windows下的dbm兼容性问题)
+# ========================
+beat_scheduler = 'celery.beat:Scheduler'
+
+# ========================
 # Logging
 # ========================
 worker_log_format = '[%(asctime)s: %(levelname)s/%(processName)s] %(message)s'

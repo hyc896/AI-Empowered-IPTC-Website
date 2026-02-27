@@ -165,7 +165,7 @@ class TokenMetrics:
             # TPM告警（限制为30000 TPM）
             if current_tpm > 27000:  # 90%阈值
                 print(
-                    f"\n⚠️  【Token告警】TPM接近限制！\n"
+                    f"\n[警告] 【Token告警】TPM接近限制！\n"
                     f"   当前TPM: {current_tpm:,}/30,000 ({current_tpm/30000*100:.1f}%)\n"
                     f"   来源分布: {self._format_source_distribution()}\n",
                     flush=True

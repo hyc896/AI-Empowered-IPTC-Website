@@ -91,8 +91,8 @@ class IPTCAutoScheduler:
                 self.logger.info("[测试模式] 限制处理5条消息")
                 service.run_batch_match(limit=5, dry_run=False)
             else:
-                # 正常模式：处理所有新消息
-                service.run_batch_match(limit=None, dry_run=False)
+                # 正常模式：处理所有新消息（设置足够大的limit以处理所有消息）
+                service.run_batch_match(limit=1000, dry_run=False)
 
             self.logger.info("✅ [案例生成] 任务完成")
 
@@ -146,7 +146,7 @@ class IPTCAutoScheduler:
             return
 
         # 正常模式：设置定时任务
-        schedule.every().hour.do(self.run_hourly_task)
+        schedule.every(2).hours.do(self.run_hourly_task)
 
         # 立即执行一次
         self.logger.info("⏰ 立即执行首次任务...")

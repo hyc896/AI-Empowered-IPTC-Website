@@ -19,6 +19,23 @@ export function useGraph(options: UseGraphOptions) {
   const graph = ref<Graph | null>(null);
   const loading = ref(false);
 
+  // 数据验证函数：过滤掉源节点或目标节点不存在的边
+  const validateGraphData = (graphData: GraphData): GraphData => {
+    const nodeIds = new Set(graphData.nodes.map(node => node.id));
+    const validEdges = graphData.edges.filter(edge => {
+      const isValid = nodeIds.has(edge.source) && nodeIds.has(edge.target);
+      if (!isValid) {
+        console.warn(`过滤无效边: ${edge.id} (source: ${edge.source}, target: ${edge.target})`);
+      }
+      return isValid;
+    });
+
+    return {
+      nodes: graphData.nodes,
+      edges: validEdges
+    };
+  };
+
   // 初始化图谱
   const initGraph = () => {
     if (!container.value) return;
@@ -109,8 +126,9 @@ export function useGraph(options: UseGraphOptions) {
     });
 
     // 渲染数据
-    if (data.value) {
-      graph.value.data(data.value);
+    if (data.value && data.value.nodes.length > 0) {
+      const validatedData = validateGraphData(data.value);
+      graph.value.data(validatedData);
       graph.value.render();
     }
   };
@@ -120,7 +138,19 @@ export function useGraph(options: UseGraphOptions) {
     if (!graph.value) return;
 
     loading.value = true;
-    graph.value.changeData(newData);
+
+    // 清除所有节点和边的状态，避免G6访问不存在的项
+    const nodes = graph.value.getNodes();
+    const edges = graph.value.getEdges();
+    nodes.forEach((node) => {
+      graph.value?.clearItemStates(node);
+    });
+    edges.forEach((edge) => {
+      graph.value?.clearItemStates(edge);
+    });
+
+    const validatedData = validateGraphData(newData);
+    graph.value.changeData(validatedData);
     loading.value = false;
   };
 

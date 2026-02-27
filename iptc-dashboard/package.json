@@ -11,7 +11,9 @@
   "dependencies": {
     "@antv/g6": "^4.8.0",
     "@element-plus/icons-vue": "^2.3.0",
+    "@types/d3": "^7.4.3",
     "axios": "^1.6.0",
+    "d3": "^7.9.0",
     "dayjs": "^1.11.0",
     "element-plus": "^2.5.0",
     "highlight.js": "^11.9.0",

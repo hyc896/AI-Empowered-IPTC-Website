@@ -129,6 +129,11 @@ class CNRLocalCollector(PlaywrightCollectorBase):
         articles = []
         page = None
 
+        # 动态年份过滤：接受当前年份和前一年的文章
+        current_year = datetime.now().year
+        valid_year_patterns = [f'/t{current_year}', f'/t{current_year-1}']
+        logger.info(f"【CNR地方新闻】年份过滤器: {valid_year_patterns}")
+
         try:
             page = await self._browser.new_page()
 
@@ -136,9 +141,9 @@ class CNRLocalCollector(PlaywrightCollectorBase):
             await page.goto(self.url, wait_until="domcontentloaded", timeout=60000)
             await asyncio.sleep(3)
 
-            # 查找所有同时包含p标签和ul>li>a的div（省份容器）
-            province_divs = await page.query_selector_all('div:has(p):has(ul > li > a)')
-            logger.info(f"【CNR地方新闻】找到 {len(province_divs)} 个候选容器")
+            # 查找所有省份容器（使用div.item选择器）
+            province_divs = await page.query_selector_all('div.item')
+            logger.info(f"【CNR地方新闻】找到 {len(province_divs)} 个省份容器")
 
             processed = 0
             valid_provinces = 0
@@ -148,26 +153,37 @@ class CNRLocalCollector(PlaywrightCollectorBase):
                     break
 
                 try:
-                    # 提取省份名称（从p标签）
-                    province_name_elem = await province_div.query_selector('p')
+                    # 提取省份名称（从div[1]的文本中提取，只取第一行）
+                    province_name_elem = await province_div.query_selector('div:nth-of-type(1)')
                     if not province_name_elem:
                         continue
 
-                    province_name = await province_name_elem.inner_text()
-                    province_name = province_name.strip()
+                    province_text = await province_name_elem.inner_text()
+                    # 只取第一行作为省份名称（去掉副标题）
+                    province_name = province_text.strip().split('\n')[0].strip()
 
-                    # 跳过导航菜单等非省份容器
-                    if province_name in ['导航', ''] or len(province_name) > 10:
+                    # 跳过空名称或异常长度
+                    if not province_name or len(province_name) > 10:
                         continue
 
                     valid_provinces += 1
                     logger.info(f"【CNR地方新闻】处理省份 ({valid_provinces}): {province_name}")
 
-                    # 提取该省份的新闻链接
-                    news_links = await province_div.query_selector_all('ul > li > a')
-                    logger.debug(f"【CNR地方新闻】{province_name} 找到 {len(news_links)} 个链接")
+                    # 提取该省份的所有新闻链接（第1条 + 第2-6条）
+                    all_links = []
 
-                    for link in news_links:
+                    # 第1条新闻（div[2]/p/a）
+                    first_link = await province_div.query_selector('div:nth-of-type(2) > p > a')
+                    if first_link:
+                        all_links.append(first_link)
+
+                    # 第2-6条新闻（ul/li/a）
+                    other_links = await province_div.query_selector_all('ul > li > a')
+                    all_links.extend(other_links)
+
+                    logger.debug(f"【CNR地方新闻】{province_name} 找到 {len(all_links)} 个链接")
+
+                    for link in all_links:
                         if processed >= self.max_articles:
                             break
 
@@ -195,7 +211,7 @@ class CNRLocalCollector(PlaywrightCollectorBase):
                                 continue
 
                             # 只采集新闻文章链接（包含日期和文章ID）
-                            if '/t2024' not in href and '/t2025' not in href:
+                            if not any(pattern in href for pattern in valid_year_patterns):
                                 continue
 
                             # 跳过已存在的URL
@@ -233,44 +249,69 @@ class CNRLocalCollector(PlaywrightCollectorBase):
         return articles
 
     async def _enrich_fields(self, articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """阶段2：字段补全（访问详情页提取内容）"""
+        """阶段2：字段补全（并发访问详情页提取内容）"""
+        CONCURRENT_LIMIT = 10  # 并发数量限制
         enriched = []
 
-        for i, article in enumerate(articles, 1):
-            page = None
-            try:
-                logger.info(f"【CNR地方新闻】补全字段 ({i}/{len(articles)}): {article['title'][:30]}")
+        # 分批并发处理
+        total_batches = (len(articles) + CONCURRENT_LIMIT - 1) // CONCURRENT_LIMIT
 
-                # 访问详情页提取内容
-                page = await self._browser.new_page()
-                await page.goto(article['url'], wait_until="domcontentloaded", timeout=60000)
-                await asyncio.sleep(2)
+        for i in range(0, len(articles), CONCURRENT_LIMIT):
+            batch = articles[i:i + CONCURRENT_LIMIT]
+            batch_num = i // CONCURRENT_LIMIT + 1
+            logger.info(f"【CNR地方新闻】处理批次 {batch_num}/{total_batches}，本批 {len(batch)} 篇")
 
-                # 提取正文内容
-                content = await self._extract_content(page)
+            # 并发处理这一批文章
+            tasks = [
+                self._enrich_single_article(article, idx + i + 1, len(articles))
+                for idx, article in enumerate(batch)
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                # 提取发布时间
-                published_at = await self._extract_publish_time(page)
+            # 收集成功的结果
+            for result in results:
+                if isinstance(result, dict):
+                    enriched.append(result)
+                elif isinstance(result, Exception):
+                    logger.error(f"【CNR地方新闻】字段补全异常: {result}")
 
-                article['content'] = content
-                article['published_at'] = published_at
-
-                # 生成摘要
-                if content:
-                    article['summary'] = content[:200]
-                else:
-                    article['summary'] = ""
-
-                enriched.append(article)
-
-            except Exception as e:
-                logger.error(f"【CNR地方新闻】字段补全失败 {article['url']}: {e}")
-                continue
-            finally:
-                if page:
-                    await page.close()
-
+        logger.info(f"【CNR地方新闻】字段补全完成，成功 {len(enriched)}/{len(articles)} 篇")
         return enriched
+
+    async def _enrich_single_article(self, article: Dict[str, Any], index: int, total: int) -> Dict[str, Any]:
+        """处理单篇文章的字段补全"""
+        page = None
+        try:
+            logger.debug(f"【CNR地方新闻】补全字段 ({index}/{total}): {article['title'][:30]}")
+
+            # 访问详情页提取内容
+            page = await self._browser.new_page()
+            await page.goto(article['url'], wait_until="domcontentloaded", timeout=60000)
+            await asyncio.sleep(1)  # 减少等待时间到1秒
+
+            # 提取正文内容
+            content = await self._extract_content(page)
+
+            # 提取发布时间
+            published_at = await self._extract_publish_time(page)
+
+            article['content'] = content
+            article['published_at'] = published_at
+
+            # 生成摘要
+            if content:
+                article['summary'] = content[:200]
+            else:
+                article['summary'] = ""
+
+            return article
+
+        except Exception as e:
+            logger.error(f"【CNR地方新闻】字段补全失败 {article.get('url', 'unknown')}: {e}")
+            raise
+        finally:
+            if page:
+                await page.close()
 
     async def _extract_content(self, page: Page) -> str:
         """从详情页提取正文内容"""
@@ -358,6 +399,10 @@ class CNRLocalCollector(PlaywrightCollectorBase):
 
     async def _store_articles(self, articles: List[Dict[str, Any]]) -> None:
         """阶段3：存储到数据库和向量库"""
+        saved_count = 0
+        duplicate_count = 0
+        error_count = 0
+
         with create_session() as db:
             for article in articles:
                 try:
@@ -377,15 +422,25 @@ class CNRLocalCollector(PlaywrightCollectorBase):
                     )
 
                     db.add(message)
-                    db.commit()
-                    logger.info(f"【CNR地方新闻】已保存: {article['title'][:30]} ({article.get('region', '')})")
+                    saved_count += 1
 
                 except IntegrityError:
                     db.rollback()
-                    logger.warning(f"【CNR地方新闻】重复URL: {article['url']}")
+                    duplicate_count += 1
+                    logger.debug(f"【CNR地方新闻】重复URL: {article['url']}")
                 except Exception as e:
                     db.rollback()
+                    error_count += 1
                     logger.error(f"【CNR地方新闻】保存失败: {e}")
+
+            # 批量提交所有成功的记录
+            try:
+                db.commit()
+                logger.info(f"【CNR地方新闻】存储完成 - 成功: {saved_count}, 重复: {duplicate_count}, 失败: {error_count}")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"【CNR地方新闻】批量提交失败: {e}")
+                raise
 
     def _extract_external_id(self, url: str) -> str:
         """从URL中提取外部ID"""

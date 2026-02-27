@@ -1,0 +1,39 @@
+entity_extraction:
+  entity_types:
+  - Company
+  - Person
+  - Technology
+  - Product
+  - Organization
+  - Event
+  - Concept
+  - Location
+  max_chunk_chars: 20000
+  relation_types:
+  - WORKS_AT
+  - INVESTS_IN
+  - DEVELOPS
+  - COMPETES_WITH
+  - PARTNERS_WITH
+  - BASED_ON
+  - LOCATED_IN
+llm:
+  api_key: sk-da598e8ebde449dfbb3d4578854b0502
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  max_tokens: 4000
+  model: qwen-plus
+  provider: openai
+  temperature: 0.3
+logging:
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  level: INFO
+neo4j:
+  connection_timeout: 30
+  database: ${NEO4J_DATABASE:neo4j}
+  max_connection_pool_size: 50
+  password: ${NEO4J_PASSWORD:0DGX3iYUVH6EmVuKpaoxAaOg6_BmhiWOcstzPilQMGs}
+  uri: ${NEO4J_URI:neo4j+s://aff8bf0d.databases.neo4j.io}
+  user: ${NEO4J_USER:neo4j}
+normalization:
+  enable_auto_merge: true
+  similarity_threshold: 0.9

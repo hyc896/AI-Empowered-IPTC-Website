@@ -24,6 +24,14 @@ export interface PaginatedResponse<T> {
   totalPages: number;
 }
 
+// 来源消息类型
+export interface SourceMessage {
+  title: string;
+  url: string | null;
+  source_table: string;
+  published_at: string | null;
+}
+
 // 案例类型
 export interface Case {
   id: string;
@@ -32,6 +40,7 @@ export interface Case {
   summary: string;
   source: string;
   sourceUrl?: string;
+  sourceMessages?: SourceMessage[];  // 新增：所有来源消息的详细信息
   publishDate: string;
   viewCount: number;
   knowledgePoints: string[];
@@ -84,7 +93,8 @@ export interface GraphData {
 // 搜索参数
 export interface SearchParams extends PaginationParams {
   keyword?: string;
-  knowledgePoints?: string[];
+  knowledgePoint?: string;  // 单个知识点ID（用于后端API）
+  knowledgePoints?: string[];  // 多个知识点（用于前端筛选）
   startDate?: string;
   endDate?: string;
   sortBy?: 'relevance' | 'date';
@@ -109,10 +119,15 @@ export interface UserInfo {
 
 // 统计数据
 export interface Statistics {
-  totalCases: number;
-  totalKnowledgePoints: number;
-  totalTopics: number;
-  recentUpdates: number;
+  total_cases: number;                    // 案例总数
+  total_knowledge_points: number;         // 知识点总数
+  generated_knowledge_points: number;     // 已生成案例的知识点数
+  total_relations: number;                // 消息-知识点关联总数
+  latest_cases: Array<{                   // 最近生成的案例
+    id: string;
+    title: string;
+    created_at: string;
+  }>;
 }
 
 // 图谱布局选项
@@ -127,4 +142,26 @@ export interface GraphLayoutConfig {
 export interface LoadingState {
   loading: boolean;
   error: string | null;
+}
+
+// 书籍信息
+export interface BookInfo {
+  book_id: string;
+  book_name: string;
+  upload_time: string;
+  entity_count: number;
+  relation_count: number;
+}
+
+// 书籍列表响应
+export interface BookListResponse {
+  books: BookInfo[];
+  total: number;
+}
+
+// 节点子图请求
+export interface NodeSubgraphRequest {
+  node_id: string;
+  book_id?: string;
+  depth: number;
 }

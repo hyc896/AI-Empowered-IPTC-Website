@@ -27,11 +27,38 @@
                 <span class="meta-icon">📅</span>
                 {{ formatDate(caseStore.currentCase.publishDate, 'YYYY-MM-DD') }}
               </span>
-              <span class="meta-item" v-if="caseStore.currentCase.sourceUrl">
-                <span class="meta-icon">🔗</span>
-                <a :href="caseStore.currentCase.sourceUrl" target="_blank">查看来源</a>
-              </span>
             </div>
+
+            <!-- 来源消息列表（可折叠） -->
+            <div v-if="caseStore.currentCase.sourceMessages && caseStore.currentCase.sourceMessages.length > 0" class="source-messages">
+              <div class="source-messages-header" @click="toggleSourceMessages">
+                <span class="meta-icon">🔗</span>
+                <span class="source-messages-title">来源消息 ({{ caseStore.currentCase.sourceMessages.length }}条)</span>
+                <span class="toggle-icon">{{ showSourceMessages ? '▼' : '▶' }}</span>
+              </div>
+              <transition name="slide-fade">
+                <div v-show="showSourceMessages" class="source-messages-list">
+                  <div
+                    v-for="(msg, index) in caseStore.currentCase.sourceMessages"
+                    :key="index"
+                    class="source-message-item"
+                  >
+                    <span class="message-index">{{ index + 1 }}.</span>
+                    <a
+                      v-if="msg.url"
+                      :href="msg.url"
+                      target="_blank"
+                      class="message-link"
+                      :title="msg.title"
+                    >
+                      {{ msg.title }}
+                    </a>
+                    <span v-else class="message-title-no-link">{{ msg.title }}</span>
+                  </div>
+                </div>
+              </transition>
+            </div>
+
             <div class="case-tags">
               <span
                 v-for="kp in caseStore.currentCase.knowledgePoints"
@@ -90,6 +117,13 @@ const router = useRouter();
 const caseStore = useCaseStore();
 
 const caseId = computed(() => route.params.id as string);
+
+// 控制来源消息列表的展开/折叠
+const showSourceMessages = ref(false);
+
+const toggleSourceMessages = () => {
+  showSourceMessages.value = !showSourceMessages.value;
+};
 
 // 配置marked
 marked.setOptions({
@@ -348,6 +382,126 @@ const exportPDF = () => {
 .meta-item a:hover {
   color: #004499;
   text-decoration: underline;
+}
+
+.case-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* 来源消息列表样式 */
+.source-messages {
+  margin-top: 16px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.source-messages-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.source-messages-header:hover {
+  background: rgba(0, 102, 204, 0.05);
+}
+
+.source-messages-header:active {
+  background: rgba(0, 102, 204, 0.1);
+}
+
+.source-messages-title {
+  color: #0066cc;
+  flex: 1;
+}
+
+.toggle-icon {
+  color: #0066cc;
+  font-size: 12px;
+  transition: transform 0.3s ease;
+}
+
+.source-messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 折叠/展开动画 */
+.slide-fade-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.slide-fade-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.slide-fade-enter-from {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.slide-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.source-message-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.source-message-item:hover {
+  background: #f0f7ff;
+}
+
+.message-index {
+  flex-shrink: 0;
+  color: #666;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 24px;
+}
+
+.message-link {
+  color: #0066cc;
+  text-decoration: none;
+  font-size: 14px;
+  line-height: 1.5;
+  transition: color 0.2s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.message-link:hover {
+  color: #004499;
+  text-decoration: underline;
+}
+
+.message-title-no-link {
+  color: #666;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .case-tags {

@@ -32,22 +32,32 @@ request.interceptors.request.use(
 
 // 响应拦截器
 request.interceptors.response.use(
-  (response: AxiosResponse<ApiResponse>) => {
-    const res = response.data;
-
-    // 如果返回的状态码不是 200，则判断为错误
-    if (res.code !== 200 && res.code !== 0) {
-      console.error('接口错误:', res.message || 'Error');
-
-      // 可以在这里处理特定错误码
-      if (res.code === 401) {
-        // 未授权，跳转到登录页
-        // router.push('/login');
-      }
-
-      return Promise.reject(new Error(res.message || 'Error'));
+  (response: AxiosResponse) => {
+    // 处理 204 No Content 响应（如 DELETE 操作）
+    if (response.status === 204) {
+      return null;
     }
 
+    const res = response.data;
+
+    // 检查是否是包装格式（有code字段）
+    if (res && typeof res === 'object' && 'code' in res) {
+      // 包装格式：{ code, message, data }
+      if (res.code !== 200 && res.code !== 0) {
+        console.error('接口错误:', res.message || 'Error');
+
+        // 可以在这里处理特定错误码
+        if (res.code === 401) {
+          // 未授权，跳转到登录页
+          // router.push('/login');
+        }
+
+        return Promise.reject(new Error(res.message || 'Error'));
+      }
+      return res;
+    }
+
+    // RESTful格式：直接返回数据对象
     return res;
   },
   (error: AxiosError) => {

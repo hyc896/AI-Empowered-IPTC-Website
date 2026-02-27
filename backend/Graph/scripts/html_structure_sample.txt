@@ -1,0 +1,46 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!DOCTYPE html>
+
+<html epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="en" xml:lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head></head>
+<body><div class="stl_ stl_02">
+<div class="stl_03">
+<object class="stl_04" data="images/img_02.svg" style="position:absolute; width:49.5833em; height:70.0833em;" type="image/svg+xml">
+<embed src="images/img_02.svg" type="image/svg+xml"/>
+</object>
+</div>
+</div>
+<div class="stl_ stl_02">
+<div class="stl_03">
+<object class="stl_04" data="images/img_05.svg" style="position:absolute; width:49.5833em; height:70.0833em;" type="image/svg+xml">
+<embed src="images/img_05.svg" type="image/svg+xml"/>
+</object>
+</div>
+<div class="stl_view">
+<div class="stl_05 stl_06">
+<div class="stl_01" style="left:14.64em;top:13.304em;"><span class="stl_07 stl_08 stl_09">•</span><span class="stl_10 stl_08 stl_09">马克思主义理论研究和建设工程重点教材  </span></div>
+<div class="stl_01" style="left:11.85em;top:17.1449em;"><span class="stl_11 stl_08 stl_09">毛泽东思想和中国特色  </span></div>
+<div class="stl_01" style="left:11.78em;top:21.3449em;"><span class="stl_11 stl_08 stl_09">社会主义理论体系概论  </span></div>
+<div class="stl_01" style="left:20.24em;top:26.4993em;"><span class="stl_12 stl_08 stl_09">（</span><span class="stl_13 stl_14 stl_15" style="word-spacing:-0.0581em;">2023 </span><span class="stl_12 stl_08 stl_09">年版）  </span></div>
+<div class="stl_01" style="left:21.91em;top:30.0127em;"><span class="stl_16 stl_08 stl_17">本书编写组  </span></div>
+</div>
+</div>
+</div>
+<div class="stl_ stl_02">
+<div class="stl_03">
+<object class="stl_04" data="images/img_07.svg" style="position:absolute; width:49.5833em; height:70.0833em;" type="image/svg+xml">
+<embed src="images/img_07.svg" type="image/svg+xml"/>
+</object>
+</div>
+<div class="stl_view">
+<div class="stl_05 stl_06">
+<div class="stl_01" style="left:12.04em;top:12.8737em;"><span class="stl_18 stl_08 stl_09">图书在版编目</span><span class="stl_19 stl_08 stl_09">（</span><span class="stl_20 stl_21 stl_22" style="word-spacing:0.0068em;">C I P</span><span class="stl_19 stl_08 stl_09">）</span><span class="stl_18 stl_08 stl_09">数据  </span></div>
+<div class="stl_01" style="left:12.04em;top:15.1988em;"><span class="stl_18 stl_08 stl_09">毛泽东思想和中国特色社会主义理论体系概论：  </span></div>
+<div class="stl_01" style="left:10.37em;top:16.3988em;"><span class="stl_23 stl_08 stl_24">202</span><span class="stl_23 stl_08 stl_25">3</span><span class="stl_18 stl_08 stl_09">年版</span><span class="stl_26 stl_08 stl_27">/</span><span class="stl_18 stl_08 stl_28">《毛泽东思想和中国特色社会主义理论体系  </span></div>
+<div class="stl_01" style="left:10.37em;top:17.5988em;"><span class="stl_18 stl_08 stl_09">概论</span><span class="stl_29 stl_08 stl_09">（</span><span class="stl_23 stl_08 stl_24">202</span><span class="stl_23 stl_08 stl_25">3</span><span class="stl_18 stl_08 stl_09">年版）》编写组编</span><span class="stl_26 stl_08 stl_30">.</span><span class="stl_18 stl_08 stl_31">一</span><span class="stl_23 stl_08 stl_32">8</span><span class="stl_18 stl_08 stl_33">版</span><span class="stl_26 stl_08 stl_27">.</span><span class="stl_18 stl_08 stl_09">一北京：高等  </span></div>
+<div class="stl_01" style="left:10.37em;top:18.7988em;"><span class="stl_18 stl_08 stl_09">教育出版社，</span><span class="stl_23 stl_08 stl_09" style="word-spacing:0em;">2023. 2  </span></div>
+<div class="stl_01" style="left:12.0399em;top:20.0331em;"><span class="stl_23 stl_08 stl_34" style="word-spacing:0.0022em;">ISBN 978-7-04-059903-9  </span></div>
+<div class="stl_01" style="left:12.0399em;top:22.2586em;"><span class="stl_23 stl_08 stl_35" style="word-spacing:-0.0143em;">I .</span><span class="stl_18 stl_08 stl_09">①毛</span><span class="stl_26 stl_08 stl_09">…</span><span class="stl_23 stl_08 stl_36">ii.</span><span class="stl_18 stl_08 stl_09">①毛</span><span class="stl_26 stl_08 stl_37">…</span><span class="stl_23 stl_08 stl_36">in.</span><span class="stl_18 stl_08 stl_38">①毛泽东思想</span><span class="stl_26 stl_08 stl_39">-</span><span class="stl_18 stl_08 stl_09">高等学校  </span></div>
+<div class="stl_01" style="left:10.37em;top:23.4188em;"><span class="stl_26 stl_08 stl_40">-</span><span class="stl_18 stl_08 stl_09">教材②中国特色社会主义理论体系</span><span class="stl_26 stl_08 stl_27">-</span><span class="stl_18 stl_08 stl_09">高等学校</span><span class="stl_26 stl_08 stl_27">-</span><span class="stl_18 stl_08 stl_09">教材  </span></div>
+<div class="stl_01" style="left:10.37em;top:24.6232em;"><span class="stl_23 stl_08 stl_27" style="word-spacing:-0.014em;">IV .</span><span class="stl_29 stl_08 stl_09" style="word-spacing:-0.021em;">① </span><span class="stl_23 stl_08 stl_09" style="word-spacing:0em;">A84 </span><span class="stl_29 stl_08 stl_09" style="word-spacing:-0.007em;">② </span><span class="stl_23 stl_08 stl_36">D610  </span></div>
+<div class="stl_01" style="left:12.04em;top:26.8588em;"><span class="stl_18 stl_08 stl_09">中国国家版本</span><span class="stl_18 stl_08 stl_41">馆</span><span class="stl_23 st

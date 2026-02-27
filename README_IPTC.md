@@ -26,12 +26,12 @@
 
 **终端1 - Celery Worker**：
 ```powershell
-conda activate personal_agent; cd "D:\AI-Empowered IPTC Website\message_platform"; python -m celery -A backend.tasks worker --loglevel=info --pool=solo -Q collector,default
+conda activate personal_agent; cd "D:\AI-Empowered IPTC Website\一期"; python -m celery -A backend.tasks worker --loglevel=info --pool=solo -Q collector,default
 ```
 
 **终端2 - Celery Beat**：
 ```powershell
-conda activate personal_agent; cd "D:\AI-Empowered IPTC Website\message_platform"; python -m celery -A backend.tasks beat --loglevel=info
+conda activate personal_agent; cd "D:\AI-Empowered IPTC Website\一期"; python -m celery -A backend.tasks beat --loglevel=info
 ```
 
 ### 步骤2：等待消息入库（10-30分钟）
@@ -45,7 +45,7 @@ mysql -u root -pHyc174513 -D message_platform -e "SELECT 'people_theory' as sour
 
 **终端3 - IPTC Scheduler**：
 ```powershell
-conda activate personal_agent; cd "D:\AI-Empowered IPTC Website\message_platform"; python backend/scripts/iptc_auto_scheduler.py
+conda activate personal_agent; cd "D:\AI-Empowered IPTC Website\一期"; python backend/scripts/iptc_auto_scheduler.py
 ```
 
 ## 常用查询命令
