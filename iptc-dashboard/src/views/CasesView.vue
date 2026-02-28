@@ -118,7 +118,7 @@
           <div class="case-footer">
             <div class="case-date">
               <span class="date-icon">📅</span>
-              {{ formatDate(caseItem.publishDate) }}
+              {{ formatDate(caseItem.createdAt) }}
             </div>
             <div class="case-arrow">→</div>
           </div>

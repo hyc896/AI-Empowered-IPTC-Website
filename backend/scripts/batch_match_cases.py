@@ -634,7 +634,9 @@ class BatchMatchCasesService:
         # 3. 构建模板参数
         template_params = {
             'related_knowledge_points': f"- {knowledge_point_name}",
-            'teaching_application': teaching_application
+            'teaching_application': teaching_application,
+            'book_name': book_name if book_name else '思想政治理论课',
+            'case_date': datetime.now().strftime('%Y-%m-%d')
         }
 
         # 为每条新闻构建参数（最多7条）

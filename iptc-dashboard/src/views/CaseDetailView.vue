@@ -25,7 +25,7 @@
             <div class="case-meta">
               <span class="meta-item">
                 <span class="meta-icon">📅</span>
-                {{ formatDate(caseStore.currentCase.publishDate, 'YYYY-MM-DD') }}
+                {{ formatDate(caseStore.currentCase.createdAt, 'YYYY-MM-DD') }}
               </span>
             </div>
 
