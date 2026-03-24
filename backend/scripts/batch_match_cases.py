@@ -29,7 +29,9 @@ from database.entities import (
 from database.orm_registry import get_orm_registry, auto_register_all_models
 from llm.global_llm_manager import GlobalLLMManager
 from config import GlobalConfig
+from clients.message_platform_client import MessagePlatformClient
 import chromadb
+import asyncio
 
 # 配置日志
 logging.basicConfig(
@@ -55,12 +57,14 @@ class BatchMatchCasesService:
         self.llm_manager = None
         self.chroma_client = None
         self.kp_collection = None
-        self.message_tables = {}  # 动态加载的消息表映射
+        self.message_platform_client = MessagePlatformClient()  # API客户端
+        self.chinese_sources = []  # 中国消息源列表
+        self.message_tables = {}  # 消息表字典 {table_name: orm_class}
         self.knowledge_points = {}  # 知识点完整信息字典 {kp_id: kp_data}
         self._initialize()
 
     def _load_chinese_sources(self):
-        """动态加载所有中国来源的消息表"""
+        """加载所有中国来源的消息源列表（API化改造）"""
         try:
             orm_registry = get_orm_registry()
 
@@ -75,22 +79,22 @@ class BatchMatchCasesService:
                     if not self._is_chinese_source(source):
                         continue
 
-                    # 从config中获取mysql_table
+                    self.chinese_sources.append({
+                        'id': source.id,
+                        'name': source.name,
+                        'display_name': source.display_name
+                    })
+
+                    # 获取表名和ORM类
                     config = source.config or {}
-                    table_name = config.get('mysql_table')
+                    table_name = config.get('mysql_table', f"mp_{source.name}_messages")
+                    orm_class = orm_registry.get_model(table_name)
 
-                    if not table_name:
-                        self.logger.warning(f"消息源 '{source.name}' 缺少mysql_table配置")
-                        continue
-
-                    # 从ORM Registry获取对应的ORM类
-                    model_class = orm_registry.get_model(table_name)
-                    if not model_class:
-                        self.logger.warning(f"消息源 '{source.name}' 的表 '{table_name}' 未找到对应的ORM类")
-                        continue
-
-                    self.message_tables[table_name] = model_class
-                    self.logger.debug(f"加载中国来源: {source.name} → {table_name}")
+                    if orm_class:
+                        self.message_tables[table_name] = orm_class
+                        self.logger.debug(f"加载中国来源: {source.display_name} -> {table_name}")
+                    else:
+                        self.logger.warning(f"未找到表模型: {table_name}")
 
         except Exception as e:
             self.logger.error(f"加载中国来源失败: {e}")
@@ -275,43 +279,44 @@ class BatchMatchCasesService:
                 # 如果limit为None，则获取所有未处理消息；否则每个表固定查询100条
                 per_table_limit = None if limit is None else 100
 
-                for table_name, orm_class in self.message_tables.items():
-                    # 子查询：已处理的消息ID
-                    processed_ids_subquery = db.query(
-                        IPTCMessageKnowledgeRelation.message_id
-                    ).filter(
-                        IPTCMessageKnowledgeRelation.source_table == table_name
-                    ).subquery()
+                for source in self.chinese_sources:
+                    source_name = source['name']
+                    source_table = f"mp_{source_name}_messages"
 
-                    # 查询未处理的消息
-                    query = db.query(orm_class).filter(
-                        ~orm_class.id.in_(processed_ids_subquery)
-                    ).order_by(
-                        orm_class.published_at.desc()
+                    # 获取已处理的消息ID
+                    processed_ids = {
+                        row.message_id for row in db.query(
+                            IPTCMessageKnowledgeRelation.message_id
+                        ).filter(
+                            IPTCMessageKnowledgeRelation.source_table == source_table
+                        ).all()
+                    }
+
+                    # 从API获取消息
+                    api_messages = asyncio.run(
+                        self.message_platform_client.search_messages(
+                            source_id=source['id'],
+                            limit=per_table_limit or 1000
+                        )
                     )
 
-                    # 只有在per_table_limit不为None时才应用limit
-                    if per_table_limit is not None:
-                        query = query.limit(per_table_limit)
+                    # 过滤未处理的消息
+                    unprocessed_count = 0
+                    for msg in api_messages:
+                        if msg['id'] not in processed_ids:
+                            messages.append({
+                                "id": msg['id'],
+                                "title": msg['title'],
+                                "content": msg['content'],
+                                "summary": msg.get('summary', ''),
+                                "published_at": msg['published_at'],
+                                "url": msg.get('url', ''),
+                                "provider": msg.get('provider', source['display_name']),
+                                "source_table": source_table
+                            })
+                            unprocessed_count += 1
 
-                    results = query.all()
-
-                    for row in results:
-                        # 兼容新旧表的url字段（旧表：source_url，新表：url）
-                        url = getattr(row, 'url', None) or getattr(row, 'source_url', '')
-
-                        messages.append({
-                            "id": row.id,
-                            "title": row.title,
-                            "content": row.content,
-                            "summary": row.summary,
-                            "published_at": row.published_at,
-                            "url": url,
-                            "provider": getattr(row, 'provider', '未知'),
-                            "source_table": table_name
-                        })
-
-                    self.logger.debug(f"[{table_name}] 获取 {len(results)} 条未处理消息")
+                    self.logger.debug(f"[{source_table}] 获取 {unprocessed_count} 条未处理消息")
 
         except Exception as e:
             self.logger.error(f"[错误] 获取未处理消息失败: {e}")

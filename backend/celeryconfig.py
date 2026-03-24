@@ -118,4 +118,5 @@ task_send_sent_event = True
 imports = (
     'backend.tasks.collector_tasks',
     'backend.tasks.ai_report_tasks',
+    'backend.tasks.sync_tasks',
 )

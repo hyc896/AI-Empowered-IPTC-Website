@@ -408,3 +408,8 @@ curl http://localhost:11528/api/v1/cases?page=1&page_size=20
 撞库并生成案例
   cd "D:/AI-Empowered IPTC Website/一期"
   python backend/scripts/batch_match_cases.py
+
+
+   uvicorn backend.main:app --host 0.0.0.0 --port 11528
+    cd iptc-dashboard                   
+>> npm run dev 

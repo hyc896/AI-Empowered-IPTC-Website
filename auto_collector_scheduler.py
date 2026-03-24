@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from backend.database.connection import create_session
 from backend.database.entities import MessageSource
-from backend.tasks.collector_tasks import run_collector
+from backend.tasks.sync_tasks import sync_messages_from_platform
 
 SCRIPT_PATH = Path(__file__).parent / 'backend' / 'scripts' / 'batch_match_cases.py'
 
@@ -46,45 +46,32 @@ def run_batch_match():
         print(f'❌ 消息匹配任务失败: {e}')
 
 
-def trigger_all_collectors():
-    """触发所有激活的采集器"""
+def trigger_message_sync():
+    """触发消息同步任务"""
     sys.stdout.reconfigure(encoding='utf-8')
 
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f'\n{"="*60}')
-    print(f'[{current_time}] 开始触发采集任务')
+    print(f'[{current_time}] 开始触发消息同步任务')
     print(f'{"="*60}')
 
     try:
-        with create_session() as db:
-            active_sources = db.query(MessageSource).filter(
-                MessageSource.is_active == True
-            ).all()
-
-            print(f'激活的采集器数量: {len(active_sources)}\n')
-
-            task_ids = []
-            for source in active_sources:
-                result = run_collector.apply_async(
-                    args=(source.name,),
-                    queue='collector',
-                    priority=5
-                )
-                print(f'  ✓ {source.name:20s} - 任务ID: {result.id}')
-                task_ids.append(result.id)
-
-            print(f'\n所有采集任务已提交到队列')
-            print(f'下次执行时间: 2小时后')
-            print(f'{"="*60}\n')
+        result = sync_messages_from_platform.apply_async(
+            queue='default',
+            priority=5
+        )
+        print(f'  ✓ 消息同步任务已提交 - 任务ID: {result.id}')
+        print(f'\n下次执行时间: 2小时后')
+        print(f'{"="*60}\n')
 
     except Exception as e:
-        print(f'❌ 触发采集任务失败: {e}')
+        print(f'❌ 触发同步任务失败: {e}')
 
 
 def main():
     """主函数"""
     print('='*60)
-    print('定时采集调度器已启动')
+    print('定时消息同步调度器已启动')
     print('='*60)
     print('配置:')
     print('  - 执行频率: 每2小时')
@@ -93,15 +80,15 @@ def main():
     print('='*60)
 
     # 启动时立即执行一次
-    print('\n[启动] 立即执行第一次采集...')
-    trigger_all_collectors()
+    print('\n[启动] 立即执行第一次消息同步...')
+    trigger_message_sync()
 
-    # 设置定时任务：每2小时采集，每24小时匹配
-    schedule.every(2).hours.do(trigger_all_collectors)
+    # 设置定时任务：每2小时同步，每24小时匹配
+    schedule.every(2).hours.do(trigger_message_sync)
     schedule.every(24).hours.do(run_batch_match)
 
     print('[调度器] 进入定时循环，等待下次执行...\n')
-    print('  - 采集任务: 每2小时')
+    print('  - 消息同步: 每2小时')
     print('  - 消息匹配: 每24小时\n')
 
     # 持续运行
