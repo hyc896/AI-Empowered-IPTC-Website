@@ -1,67 +1,49 @@
-# 敏感文件
-.env
-*.env
-.env.*
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
+dist/
+build/
 *.egg
 
-# Node
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Node.js
 node_modules/
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# Environment variables
+.env
+config/.env
 
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# 临时文件
-~$*
-*.tmp
-*.temp
-
-# 日志
+# Logs
 *.log
-logs/
+backend.log
+frontend.log
 
-# 数据库
+# Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Jupyter
-.ipynb_checkpoints/
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# 测试覆盖率
-.coverage
-htmlcov/
-.pytest_cache/
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Build output
+二期/frontend/dist/
+
+# Large data files
+二期/backend/venues_raw.json
