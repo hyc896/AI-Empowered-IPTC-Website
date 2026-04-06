@@ -47,3 +47,9 @@ nul
 
 # Large data files
 二期/backend/venues_raw.json
+
+# Large PDF files (exceed GitHub 100MB limit)
+文件/马克思主义基本原理 (2023年版)【马工程重点教材】.pdf
+文件/思想道德与法治 (2023年版).pdf
+文件/习近平新时代中国特色社会主义思想概论2023版.pdf
+文件/中国近现代史纲要2023年版.pdf
