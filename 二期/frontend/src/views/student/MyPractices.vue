@@ -54,7 +54,8 @@
           </div>
           <div class="card-actions">
             <el-button v-if="item.generation_status === 'success'" size="small" type="primary" @click="viewPlan(item)">查看方案</el-button>
-            <el-button v-if="item.generation_status === 'success'" size="small" @click="goSubmit(item)">去提交</el-button>
+            <el-button v-if="item.generation_status === 'success' && !submittedPlanIds.has(item.id)" size="small" @click="goSubmit(item)">去提交</el-button>
+            <el-tag v-if="submittedPlanIds.has(item.id)" type="success" size="small">已提交</el-tag>
             <el-tag v-if="item.generation_status === 'generating'" type="warning" size="small">生成中...</el-tag>
             <el-tag v-if="item.generation_status === 'failed'" type="danger" size="small">生成失败</el-tag>
             <el-button size="small" type="danger" text @click="deletePlan(item)">删除</el-button>
@@ -166,6 +167,9 @@ const plans = ref([])
 const planTotal = ref(0)
 const planPage = ref(1)
 
+// 已提交的方案ID集合（用于隐藏"去提交"按钮）
+const submittedPlanIds = ref(new Set())
+
 // 批量选择
 const batchMode = ref(false)
 const selectedPlans = ref([])
@@ -239,6 +243,16 @@ const fetchPlans = async () => {
     const res = await practiceAPI.getMyPlans({ page: planPage.value, page_size: pageSize.value })
     plans.value = res.items
     planTotal.value = res.total
+
+    // 获取所有提交记录，标记已提交的方案
+    const subRes = await submissionAPI.getList({ page: 1, page_size: 999 })
+    const nonDraftIds = new Set()
+    for (const sub of subRes.items) {
+      if (sub.status !== 'draft') {
+        nonDraftIds.add(sub.plan_id)
+      }
+    }
+    submittedPlanIds.value = nonDraftIds
   } catch (e) {
     console.error(e)
   } finally {

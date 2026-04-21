@@ -29,10 +29,10 @@
 
         <el-form-item label="成果形式" prop="result_form">
           <el-checkbox-group v-model="resultFormArr">
-            <el-checkbox label="文本图片">文本图片</el-checkbox>
-            <el-checkbox label="音频视频">音频视频</el-checkbox>
-            <el-checkbox label="实物">实物</el-checkbox>
-            <el-checkbox label="其他">其他</el-checkbox>
+            <el-checkbox value="文本图片">文本图片</el-checkbox>
+            <el-checkbox value="音频视频">音频视频</el-checkbox>
+            <el-checkbox value="实物">实物</el-checkbox>
+            <el-checkbox value="其他">其他</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
 

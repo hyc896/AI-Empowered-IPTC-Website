@@ -92,10 +92,21 @@ class SubmissionService:
         return self._to_response(submission)
 
     def _to_response(self, submission) -> SubmissionResponse:
-        """将 ORM 对象转为响应，附带 user_name"""
+        """将 ORM 对象转为响应，附带 user_name 和 review"""
         user = self.db.query(User).filter(User.id == submission.user_id).first()
         resp = SubmissionResponse.from_orm(submission)
         resp.user_name = user.real_name if user else "未知"
+        # 附带审核信息
+        if submission.review:
+            from schemas.submission import ReviewInfo
+            resp.review = ReviewInfo(
+                id=submission.review.id,
+                status=submission.review.status.value if hasattr(submission.review.status, 'value') else submission.review.status,
+                score=submission.review.score,
+                comment=submission.review.comment,
+                reviewer_id=submission.review.reviewer_id,
+                reviewed_at=submission.review.reviewed_at
+            )
         return resp
 
     def update_submission(

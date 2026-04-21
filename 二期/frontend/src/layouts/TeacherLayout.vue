@@ -157,7 +157,19 @@ const handleCommand = async (cmd) => {
   cursor: pointer;
   color: #333;
 }
-.main-content { background: #f5f7fa; padding: 20px; height: calc(100vh - 60px); overflow: hidden; box-sizing: border-box; }
-.menu-badge { margin-left: 8px; }
-.menu-badge :deep(.el-badge__content) { background-color: #f56c6c; }
+.main-content { background: #f5f7fa; padding: 20px; height: calc(100vh - 60px); overflow-y: auto; box-sizing: border-box; }
+.menu-badge {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+.menu-badge :deep(.el-badge__content) {
+  background-color: #f56c6c;
+  position: static;
+  transform: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 </style>

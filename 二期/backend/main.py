@@ -8,8 +8,10 @@ import logging
 import traceback
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import os
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -77,6 +79,12 @@ async def root():
 async def health_check():
     """健康检查"""
     return {"status": "healthy"}
+
+
+# 挂载静态文件服务（上传的图片、视频、音频等）
+upload_dir = os.path.join(os.path.dirname(__file__), "data", "uploads")
+os.makedirs(upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
 
 
 if __name__ == "__main__":

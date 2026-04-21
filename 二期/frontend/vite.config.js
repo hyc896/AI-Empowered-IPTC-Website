@@ -16,6 +16,10 @@ export default defineConfig({
         target: 'http://localhost:8001',
         changeOrigin: true
       },
+      '/uploads': {
+        target: 'http://localhost:8001',
+        changeOrigin: true
+      },
       // 一期案例平台API代理
       '/case-api': {
         target: 'http://localhost:11528',

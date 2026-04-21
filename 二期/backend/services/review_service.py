@@ -10,7 +10,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from database.entities import PracticeReview, PracticeSubmission, User, SubmissionStatus
+from database.entities import PracticeReview, PracticeSubmission, User, SubmissionStatus, PracticeType
 from schemas.review import (
     ReviewCreate,
     ReviewResponse,
@@ -205,7 +205,7 @@ class ReviewService:
             reviewer: 审核教师
 
         Returns:
-            统计数据
+            统计数据（包含总数、各状态数量、实践类型分布）
         """
         # 教师只统计自己学生的提交
         if reviewer.role.value == "teacher":
@@ -218,12 +218,35 @@ class ReviewService:
         else:
             base_query = self.db.query(PracticeSubmission)
 
+        # 排除草稿，只统计已提交的
+        submitted_query = base_query.filter(PracticeSubmission.status != SubmissionStatus.DRAFT)
+
+        total = submitted_query.count()
         pending = base_query.filter(PracticeSubmission.status == SubmissionStatus.SUBMITTED).count()
         approved = base_query.filter(PracticeSubmission.status == SubmissionStatus.APPROVED).count()
         rejected = base_query.filter(PracticeSubmission.status == SubmissionStatus.REJECTED).count()
+        draft = base_query.filter(PracticeSubmission.status == SubmissionStatus.DRAFT).count()
+
+        # 实践类型分布（只统计已提交/已审核的）
+        type_map = {
+            PracticeType.WRITING: "写作设计",
+            PracticeType.PRESENTATION: "宣传表达",
+            PracticeType.VISIT: "参观研学",
+            PracticeType.PERFORMANCE: "表演体验",
+            PracticeType.INTERACTION: "交往行动",
+            PracticeType.PRODUCTION: "生产改造",
+            PracticeType.FREE: "自由申请",
+        }
+        type_distribution = []
+        for pt, label in type_map.items():
+            count = submitted_query.filter(PracticeSubmission.practice_type == pt).count()
+            type_distribution.append({"name": label, "value": count})
 
         return {
+            "total": total,
             "pending": pending,
             "approved": approved,
-            "rejected": rejected
+            "rejected": rejected,
+            "draft": draft,
+            "type_distribution": type_distribution
         }

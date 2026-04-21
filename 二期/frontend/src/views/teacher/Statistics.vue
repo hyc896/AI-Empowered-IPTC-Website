@@ -31,11 +31,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
+import { reviewAPI } from '@/api'
 
 const typeChartRef = ref(null)
 const statusChartRef = ref(null)
+let typeChart = null
+let statusChart = null
 
 const summaryStats = ref([
   { label: '总提交数', value: 0, color: '#409eff' },
@@ -46,44 +49,77 @@ const summaryStats = ref([
 
 const initCharts = () => {
   // 实践类型分布饼图
-  const typeChart = echarts.init(typeChartRef.value)
+  typeChart = echarts.init(typeChartRef.value)
   typeChart.setOption({
     tooltip: { trigger: 'item' },
     legend: { bottom: 0 },
     series: [{
       type: 'pie',
       radius: ['40%', '70%'],
-      data: [
-        { value: 0, name: '写作设计' },
-        { value: 0, name: '宣传表达' },
-        { value: 0, name: '参观研学' },
-        { value: 0, name: '表演体验' },
-        { value: 0, name: '交往行动' },
-        { value: 0, name: '生产改造' },
-        { value: 0, name: '自由申请' }
-      ]
+      data: []
     }]
   })
 
   // 审核状态分布
-  const statusChart = echarts.init(statusChartRef.value)
+  statusChart = echarts.init(statusChartRef.value)
   statusChart.setOption({
     tooltip: { trigger: 'item' },
     legend: { bottom: 0 },
     series: [{
       type: 'pie',
       radius: '60%',
-      data: [
-        { value: 0, name: '草稿', itemStyle: { color: '#909399' } },
-        { value: 0, name: '审核中', itemStyle: { color: '#e6a23c' } },
-        { value: 0, name: '已通过', itemStyle: { color: '#67c23a' } },
-        { value: 0, name: '未通过', itemStyle: { color: '#f56c6c' } }
-      ]
+      data: []
     }]
   })
 }
 
-onMounted(initCharts)
+const fetchStatistics = async () => {
+  try {
+    const res = await reviewAPI.getStatistics()
+
+    // 更新摘要统计
+    summaryStats.value = [
+      { label: '总提交数', value: res.total || 0, color: '#409eff' },
+      { label: '待审核', value: res.pending || 0, color: '#e6a23c' },
+      { label: '已通过', value: res.approved || 0, color: '#67c23a' },
+      { label: '未通过', value: res.rejected || 0, color: '#f56c6c' }
+    ]
+
+    // 更新实践类型分布图
+    if (typeChart && res.type_distribution) {
+      typeChart.setOption({
+        series: [{
+          data: res.type_distribution.map(item => ({
+            name: item.name,
+            value: item.value
+          }))
+        }]
+      })
+    }
+
+    // 更新审核状态分布图
+    if (statusChart) {
+      statusChart.setOption({
+        series: [{
+          data: [
+            { value: res.draft || 0, name: '草稿', itemStyle: { color: '#909399' } },
+            { value: res.pending || 0, name: '待审核', itemStyle: { color: '#e6a23c' } },
+            { value: res.approved || 0, name: '已通过', itemStyle: { color: '#67c23a' } },
+            { value: res.rejected || 0, name: '未通过', itemStyle: { color: '#f56c6c' } }
+          ]
+        }]
+      })
+    }
+  } catch (e) {
+    console.error('获取统计数据失败', e)
+  }
+}
+
+onMounted(async () => {
+  initCharts()
+  await nextTick()
+  fetchStatistics()
+})
 </script>
 
 <style scoped>

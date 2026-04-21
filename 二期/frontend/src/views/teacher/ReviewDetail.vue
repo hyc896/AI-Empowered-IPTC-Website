@@ -10,48 +10,140 @@
       <el-row :gutter="20" v-if="submission">
         <!-- 左侧：学生提交内容 -->
         <el-col :span="16">
+          <!-- 基本信息卡片 -->
           <el-card>
             <template #header>
               <div style="display:flex;justify-content:space-between;align-items:center">
-                <span>{{ submission.title }}</span>
+                <span class="card-header-title">{{ submission.title }}</span>
                 <el-tag>{{ typeLabel(submission.practice_type) }}</el-tag>
               </div>
             </template>
 
             <el-descriptions :column="2" border size="small" style="margin-bottom:16px">
               <el-descriptions-item label="学生">{{ submission.user_name }}</el-descriptions-item>
+              <el-descriptions-item label="班级学号">{{ submission.class_name_id || '-' }}</el-descriptions-item>
               <el-descriptions-item label="完成日期">{{ formatDate(submission.completion_date) }}</el-descriptions-item>
               <el-descriptions-item label="提交时间">{{ formatDate(submission.submitted_at) }}</el-descriptions-item>
               <el-descriptions-item label="实践类型">{{ typeLabel(submission.practice_type) }}</el-descriptions-item>
+              <el-descriptions-item label="成果形式">{{ submission.result_form || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="任课教师">{{ submission.instructor_name || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="展示偏好">{{ showcaseLabel(submission.showcase_preference) }}</el-descriptions-item>
             </el-descriptions>
+          </el-card>
 
-            <div class="content-section">
-              <h4>实践描述</h4>
-              <div class="content-text">{{ submission.content }}</div>
+          <!-- 实践方案卡片 -->
+          <el-card v-if="plan" style="margin-top:16px">
+            <template #header>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span class="card-header-title">📋 实践方案</span>
+                <el-tag type="info" size="small">{{ plan.difficulty || '标准' }} · 预计{{ plan.estimated_hours || '?' }}小时</el-tag>
+              </div>
+            </template>
+
+            <div class="plan-info">
+              <div v-if="plan.knowledge_point" class="plan-meta">
+                <el-tag size="small" type="info">{{ plan.knowledge_point.category }}</el-tag>
+                <span>{{ plan.knowledge_point.name }}</span>
+              </div>
+              <div v-if="plan.content" class="plan-content formatted-text" v-html="renderMarkdown(plan.content)"></div>
             </div>
+          </el-card>
 
-            <div class="content-section" v-if="submission.reflection">
-              <h4>实践感想</h4>
-              <div class="content-text">{{ submission.reflection }}</div>
-            </div>
+          <!-- 实践内容 - 按步骤展示 -->
+          <el-card style="margin-top:16px">
+            <template #header>
+              <span class="card-header-title">📝 实践内容</span>
+            </template>
 
-            <!-- 附件 -->
-            <div class="content-section" v-if="submission.files?.length">
-              <h4>附件材料</h4>
-              <div class="files-grid">
-                <div v-for="file in submission.files" :key="file.path" class="file-item">
+            <!-- 有方案任务时，按步骤展示 -->
+            <template v-if="plan?.tasks?.length && parsedContent.length">
+              <div v-for="(task, taskIndex) in plan.tasks" :key="taskIndex" class="task-section">
+                <div class="task-header">
+                  <div class="task-step-badge">步骤 {{ taskIndex + 1 }}</div>
+                  <span class="task-title">{{ task.task }}</span>
+                </div>
+                <div v-if="task.description" class="task-description">{{ task.description }}</div>
+
+                <!-- 该步骤的提交内容 -->
+                <div class="task-content-list">
+                  <template v-if="parsedContent[taskIndex]">
+                    <div v-for="(text, reqIndex) in parsedContent[taskIndex]" :key="reqIndex" class="content-item">
+                      <div v-if="task.submission_requirements && task.submission_requirements[reqIndex]" class="req-label">
+                        <el-icon><EditPen /></el-icon>
+                        <span>{{ task.submission_requirements[reqIndex].description || getReqLabel(task.submission_requirements[reqIndex].type) }}</span>
+                      </div>
+                      <div class="formatted-text" v-if="text && text.trim()">{{ text }}</div>
+                      <div v-else class="empty-hint">（未填写）</div>
+                    </div>
+                  </template>
+                  <div v-else class="empty-hint">（该步骤未提交内容）</div>
+                </div>
+              </div>
+            </template>
+
+            <!-- 没有方案任务时，直接显示原始内容 -->
+            <template v-else>
+              <div class="formatted-text">{{ displayContent }}</div>
+            </template>
+          </el-card>
+
+          <!-- 学生建议 -->
+          <el-card v-if="submission.reflection" style="margin-top:16px">
+            <template #header>
+              <span class="card-header-title">💬 学生建议</span>
+            </template>
+            <div class="formatted-text">{{ submission.reflection }}</div>
+          </el-card>
+
+          <!-- 附件材料 -->
+          <el-card v-if="submission.files?.length" style="margin-top:16px">
+            <template #header>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span class="card-header-title">📎 附件材料</span>
+                <el-tag size="small">{{ submission.files.length }} 个文件</el-tag>
+              </div>
+            </template>
+            <div class="files-list">
+              <div v-for="file in submission.files" :key="file.path" class="file-block">
+                <!-- 图片 -->
+                <template v-if="isImage(file.type)">
                   <el-image
-                    v-if="isImage(file.type)"
                     :src="file.path"
                     :preview-src-list="imageUrls"
-                    fit="cover"
+                    fit="contain"
                     class="file-image"
                   />
-                  <div v-else class="file-doc">
-                    <el-icon><Document /></el-icon>
-                    <span>{{ file.filename }}</span>
+                  <div class="file-name">{{ file.filename }}</div>
+                </template>
+                <!-- 视频 -->
+                <template v-else-if="isVideo(file.type)">
+                  <video controls class="file-video" preload="metadata">
+                    <source :src="file.path" :type="file.type" />
+                    您的浏览器不支持视频播放
+                  </video>
+                  <div class="file-name">{{ file.filename }}</div>
+                </template>
+                <!-- 音频 -->
+                <template v-else-if="isAudio(file.type)">
+                  <div class="audio-block">
+                    <el-icon :size="24" color="#409eff"><Headset /></el-icon>
+                    <div class="audio-info">
+                      <div class="file-name">{{ file.filename }}</div>
+                      <audio controls class="file-audio" preload="metadata">
+                        <source :src="file.path" :type="file.type" />
+                        您的浏览器不支持音频播放
+                      </audio>
+                    </div>
                   </div>
-                </div>
+                </template>
+                <!-- 其他文件 -->
+                <template v-else>
+                  <div class="file-doc">
+                    <el-icon :size="20"><Document /></el-icon>
+                    <a :href="file.path" target="_blank" class="file-link">{{ file.filename }}</a>
+                    <span class="file-size" v-if="file.size">{{ formatFileSize(file.size) }}</span>
+                  </div>
+                </template>
               </div>
             </div>
           </el-card>
@@ -189,7 +281,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { submissionAPI, reviewAPI, annotationAPI } from '@/api'
+import { submissionAPI, reviewAPI, annotationAPI, practiceAPI } from '@/api'
 import { ElMessage } from 'element-plus'
 import PageLoading from '@/components/PageLoading.vue'
 
@@ -198,6 +290,7 @@ const router = useRouter()
 const loading = ref(true)
 const submitting = ref(false)
 const submission = ref(null)
+const plan = ref(null)
 const reviewFormRef = ref(null)
 const aiLoading = ref(false)
 const aiResult = ref(null)
@@ -212,13 +305,74 @@ const reviewRules = {
 
 const typeLabel = (t) => ({ writing:'写作设计', presentation:'宣传表达', visit:'参观研学', performance:'表演体验', interaction:'交往行动', production:'生产改造', free:'自由申请' }[t] || t)
 const formatDate = (d) => d ? new Date(d).toLocaleString('zh-CN') : '-'
+const showcaseLabel = (s) => ({ none: '不展示', original: '原样展示', anonymous: '匿名展示' }[s] || s || '-')
 const isImage = (type) => type?.startsWith('image/')
+const isVideo = (type) => type?.startsWith('video/')
+const isAudio = (type) => type?.startsWith('audio/')
 const imageUrls = computed(() => submission.value?.files?.filter(f => isImage(f.type)).map(f => f.path) || [])
+
+const getReqLabel = (type) => {
+  const labels = { photo: '照片说明', video: '视频说明', audio: '音频说明', document: '文档内容', text: '文字说明', url: '链接' }
+  return labels[type] || '内容描述'
+}
+
+const formatFileSize = (bytes) => {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+// 解析 JSON 内容为二维数组
+const parsedContent = computed(() => {
+  if (!submission.value?.content) return []
+  try {
+    const parsed = JSON.parse(submission.value.content)
+    if (Array.isArray(parsed)) return parsed
+    return []
+  } catch {
+    return []
+  }
+})
+
+// 如果 JSON 解析失败，直接显示原始文本
+const displayContent = computed(() => {
+  if (parsedContent.value.length > 0) return ''
+  return submission.value?.content || ''
+})
+
+// 简单的 Markdown 渲染（处理标题、加粗、换行等）
+const renderMarkdown = (text) => {
+  if (!text) return ''
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  // 标题
+  html = html.replace(/^### (.+)$/gm, '<h5>$1</h5>')
+  html = html.replace(/^## (.+)$/gm, '<h4>$1</h4>')
+  html = html.replace(/^# (.+)$/gm, '<h3>$1</h3>')
+  // 加粗
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  // 列表
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>')
+  html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+  // 换行
+  html = html.replace(/\n/g, '<br>')
+  return html
+}
 
 const fetchSubmission = async () => {
   loading.value = true
   try {
     submission.value = await submissionAPI.getDetail(route.params.id)
+    // 获取关联的实践方案
+    if (submission.value.plan_id) {
+      try {
+        plan.value = await practiceAPI.getPlanDetail(submission.value.plan_id)
+      } catch (e) {
+        console.warn('获取方案详情失败', e)
+      }
+    }
   } catch (e) {
     ElMessage.error('获取提交详情失败')
   } finally {
@@ -325,12 +479,120 @@ onMounted(() => {
 .review-detail { width: 100%; }
 .page-header { margin-bottom: 20px; }
 .page-header h2 { font-size: 22px; color: #333; margin: 8px 0; }
-.content-section { margin-bottom: 20px; }
-.content-section h4 { font-size: 15px; color: #333; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #f0f0f0; }
-.content-text { font-size: 14px; color: #555; line-height: 1.8; white-space: pre-wrap; }
-.files-grid { display: flex; flex-wrap: wrap; gap: 10px; }
-.file-image { width: 120px; height: 90px; border-radius: 4px; }
-.file-doc { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: #f5f7fa; border-radius: 4px; font-size: 13px; color: #666; }
+.card-header-title { font-size: 16px; font-weight: bold; color: #333; }
+
+/* ====== 格式化文本样式 ====== */
+.formatted-text {
+  font-family: 'SimSun', '宋体', 'Noto Serif SC', serif;
+  font-size: 15px;
+  color: #333;
+  line-height: 2.0;
+  text-indent: 2em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.formatted-text :deep(h3),
+.formatted-text :deep(h4),
+.formatted-text :deep(h5) {
+  text-indent: 0;
+  margin: 16px 0 8px;
+  color: #1a1a2e;
+}
+.formatted-text :deep(h3) { font-size: 20px; }
+.formatted-text :deep(h4) { font-size: 18px; }
+.formatted-text :deep(h5) { font-size: 16px; }
+.formatted-text :deep(li) {
+  text-indent: 0;
+  margin-left: 2em;
+  line-height: 2.0;
+}
+.formatted-text :deep(strong) {
+  color: #1a1a2e;
+}
+
+/* ====== 方案信息 ====== */
+.plan-info { }
+.plan-meta {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px; font-size: 14px; color: #555;
+}
+.plan-content {
+  padding: 16px;
+  background: #fafbfc;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+}
+
+/* ====== 步骤展示 ====== */
+.task-section {
+  padding: 20px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+.task-section:last-child { border-bottom: none; }
+.task-section:first-child { padding-top: 0; }
+.task-header {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px;
+}
+.task-step-badge {
+  background: #409eff; color: #fff; font-size: 12px;
+  padding: 2px 12px; border-radius: 12px; white-space: nowrap;
+  font-weight: bold;
+}
+.task-title { font-size: 16px; font-weight: bold; color: #1a1a2e; }
+.task-description {
+  font-size: 14px; color: #666; line-height: 1.7;
+  padding: 12px 16px; background: #f5f7fa; border-radius: 6px;
+  margin-bottom: 16px; border-left: 3px solid #409eff;
+}
+.task-content-list { display: flex; flex-direction: column; gap: 12px; }
+.content-item {
+  padding: 12px 16px;
+  background: #fffdf5;
+  border-radius: 6px;
+  border: 1px solid #f0ecd8;
+}
+.req-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500; color: #409eff;
+  margin-bottom: 8px;
+}
+.empty-hint { font-size: 14px; color: #ccc; font-style: italic; }
+
+/* ====== 附件文件 ====== */
+.files-list { display: flex; flex-direction: column; gap: 16px; }
+.file-block { }
+.file-image {
+  width: 100%;
+  max-height: 500px;
+  border-radius: 8px;
+  border: 1px solid #eee;
+}
+.file-video {
+  width: 100%;
+  max-height: 500px;
+  border-radius: 8px;
+  background: #000;
+}
+.audio-block {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+.audio-info { flex: 1; }
+.file-audio { width: 100%; margin-top: 8px; }
+.file-name { font-size: 13px; color: #888; margin-top: 6px; }
+.file-doc {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; background: #f5f7fa; border-radius: 6px;
+  font-size: 14px;
+}
+.file-link { color: #409eff; text-decoration: none; }
+.file-link:hover { text-decoration: underline; }
+.file-size { font-size: 12px; color: #999; margin-left: auto; }
+
+/* ====== 审核表单 ====== */
 .review-form-card { position: sticky; top: 20px; }
 .ai-result { background: #f0f9ff; border: 1px solid #b3d8ff; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
 .ai-result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-weight: bold; color: #409eff; }
@@ -343,6 +605,8 @@ onMounted(() => {
 .ai-section { margin-bottom: 8px; }
 .ai-section-title { font-size: 13px; font-weight: bold; color: #333; margin-bottom: 4px; }
 .ai-tag-item { font-size: 13px; color: #555; line-height: 1.8; }
+
+/* ====== 批注 ====== */
 .add-annotation { margin-bottom: 12px; }
 .annotation-item { padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
 .annotation-item:last-child { border-bottom: none; }
