@@ -47,7 +47,7 @@
             </div>
             <div class="card-meta">
               <span>{{ typeLabel(item.practice_type) }}</span>
-              <span v-if="item.knowledge_point">{{ item.knowledge_point.category }} · {{ item.knowledge_point.name }}</span>
+              <span v-if="item.knowledge_point">{{ categoryFullName(item.knowledge_point.category) }} · {{ item.knowledge_point.name }}</span>
               <span>生成时间：{{ formatDate(item.created_at) }}</span>
               <span v-if="item.estimated_hours">预计 {{ item.estimated_hours }} 小时</span>
             </div>
@@ -144,6 +144,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { practiceAPI, submissionAPI, authAPI } from '@/api'
+import { categoryFullName } from '@/utils/category'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useTaskStore } from '@/stores/task'
@@ -245,7 +246,7 @@ const fetchPlans = async () => {
     planTotal.value = res.total
 
     // 获取所有提交记录，标记已提交的方案
-    const subRes = await submissionAPI.getList({ page: 1, page_size: 999 })
+    const subRes = await submissionAPI.getList({ page: 1, page_size: 100 })
     const nonDraftIds = new Set()
     for (const sub of subRes.items) {
       if (sub.status !== 'draft') {

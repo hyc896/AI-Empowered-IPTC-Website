@@ -8,27 +8,21 @@
     <!-- 步骤条 -->
     <el-steps :active="0" finish-status="success" class="steps">
       <el-step title="选择知识点" />
-      <el-step title="设置参数" />
+      <el-step title="自定义详情" />
       <el-step title="选择实践类型" />
       <el-step title="查看方案" />
     </el-steps>
 
     <!-- 搜索和筛选 -->
-    <el-card class="filter-card">
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-input v-model="keyword" placeholder="搜索知识点..." prefix-icon="Search" clearable @input="fetchList" />
-        </el-col>
-        <el-col :span="12">
-          <el-radio-group v-model="category" @change="fetchList">
-            <el-radio-button value="">全部</el-radio-button>
-            <el-radio-button value="习概">习概</el-radio-button>
-            <el-radio-button value="思修">思修</el-radio-button>
-            <el-radio-button value="马原">马原</el-radio-button>
-          </el-radio-group>
-        </el-col>
-      </el-row>
-    </el-card>
+    <div class="filter-row">
+      <el-input v-model="keyword" placeholder="搜索知识点..." prefix-icon="Search" clearable class="search-input" @input="fetchList" />
+      <el-radio-group v-model="category" class="category-group" @change="fetchList">
+        <el-radio-button value="">全部</el-radio-button>
+        <el-radio-button value="习概">习近平新时代中国特色社会主义思想概论</el-radio-button>
+        <el-radio-button value="思修">思想道德基础与法律修养</el-radio-button>
+        <el-radio-button value="马原">马克思主义基本原理概论</el-radio-button>
+      </el-radio-group>
+    </div>
 
     <!-- 知识点列表 -->
     <PageLoading v-if="loading" />
@@ -43,7 +37,7 @@
         shadow="hover"
       >
         <div class="card-header">
-          <el-tag :type="tagType(item.category)" size="small">{{ item.category }}</el-tag>
+          <el-tag :type="tagType(item.category)" size="small">{{ categoryFullName(item.category) }}</el-tag>
         </div>
         <h4>{{ item.name }}</h4>
         <p class="desc">{{ item.description || '暂无描述' }}</p>
@@ -62,7 +56,7 @@
       <div class="footer-right">
         <span v-if="selected" class="selected-tip">已选：{{ selected.name }}</span>
         <el-button type="primary" :disabled="!selected" @click="goNext">
-          下一步：设置参数 <el-icon><ArrowRight /></el-icon>
+          下一步：自定义详情 <el-icon><ArrowRight /></el-icon>
         </el-button>
       </div>
     </div>
@@ -73,6 +67,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { knowledgeAPI } from '@/api'
+import { categoryFullName } from '@/utils/category'
 import PageLoading from '@/components/PageLoading.vue'
 
 const router = useRouter()
@@ -80,7 +75,7 @@ const loading = ref(false)
 const list = ref([])
 const total = ref(0)
 const page = ref(1)
-const pageSize = ref(15)
+const pageSize = ref(12)
 const keyword = ref('')
 const category = ref('')
 const selected = ref(null)
@@ -128,12 +123,25 @@ onMounted(fetchList)
 .page-header h2 { font-size: 22px; color: #333; margin-bottom: 4px; }
 .page-header p { color: #666; font-size: 14px; }
 .steps { margin-bottom: 16px; flex-shrink: 0; }
-.filter-card { margin-bottom: 16px; flex-shrink: 0; }
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+.search-input {
+  flex: 1;
+  min-width: 120px;
+}
+.category-group {
+  flex-shrink: 0;
+}
 
 .knowledge-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(5, 1fr);
+  grid-template-rows: repeat(4, 1fr);
   gap: 12px;
   flex: 1;
   min-height: 0;
@@ -154,17 +162,18 @@ onMounted(fetchList)
 }
 .knowledge-card.selected { border-color: #c0392b; background: #fff5f5; }
 .knowledge-card:hover { border-color: #c0392b; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-.card-header { margin-bottom: 8px; flex-shrink: 0; }
-.knowledge-card h4 { font-size: 14px; color: #333; margin-bottom: 6px; line-height: 1.4; flex-shrink: 0; }
+.card-header { margin-bottom: 6px; flex-shrink: 0; }
+.card-header :deep(.el-tag) { font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-card h4 { font-size: 15px; color: #333; margin-bottom: 6px; line-height: 1.4; flex-shrink: 0; }
 .desc {
-  font-size: 12px;
+  font-size: 14px;
   color: #888;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  flex: 1;
-  line-height: 1.5;
+  line-height: 1.6;
+  max-height: calc(1.6em * 2);
 }
 
 .bottom-bar {

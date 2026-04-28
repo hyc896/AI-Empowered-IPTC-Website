@@ -42,7 +42,7 @@
 
             <div class="plan-info">
               <div v-if="plan.knowledge_point" class="plan-meta">
-                <el-tag size="small" type="info">{{ plan.knowledge_point.category }}</el-tag>
+                <el-tag size="small" type="info">{{ categoryFullName(plan.knowledge_point.category) }}</el-tag>
                 <span>{{ plan.knowledge_point.name }}</span>
               </div>
               <div v-if="plan.content" class="plan-content formatted-text" v-html="renderMarkdown(plan.content)"></div>
@@ -282,6 +282,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { submissionAPI, reviewAPI, annotationAPI, practiceAPI } from '@/api'
+import { categoryFullName } from '@/utils/category'
 import { ElMessage } from 'element-plus'
 import PageLoading from '@/components/PageLoading.vue'
 

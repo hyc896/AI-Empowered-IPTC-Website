@@ -7,7 +7,7 @@
           <el-button text @click="$router.back()"><el-icon><ArrowLeft /></el-icon> 返回</el-button>
           <el-steps :active="3" finish-status="success" class="steps">
             <el-step title="选择知识点" />
-            <el-step title="设置参数" />
+            <el-step title="自定义详情" />
             <el-step title="选择实践类型" />
             <el-step title="查看方案" />
           </el-steps>
@@ -53,7 +53,7 @@
                 <el-descriptions-item label="知识点来源">
                   <template v-if="plan.knowledge_point">
                     <div class="kp-source">
-                      <el-tag size="small" type="info">{{ plan.knowledge_point.category }}</el-tag>
+                      <el-tag size="small" type="info">{{ categoryFullName(plan.knowledge_point.category) }}</el-tag>
                       <span v-if="plan.knowledge_point.chapter" class="kp-chapter">{{ plan.knowledge_point.chapter }}</span>
                       <span class="kp-name">{{ plan.knowledge_point.name }}</span>
                     </div>
@@ -115,6 +115,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { practiceAPI, venueAPI } from '@/api'
+import { categoryFullName } from '@/utils/category'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import PageLoading from '@/components/PageLoading.vue'

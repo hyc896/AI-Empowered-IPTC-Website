@@ -2,13 +2,13 @@
   <div class="practice-options">
     <div class="page-header">
       <el-button text @click="$router.back()"><el-icon><ArrowLeft /></el-icon> 返回</el-button>
-      <h2>设置实践参数</h2>
+      <h2>自定义详情</h2>
       <p>已选知识点：<strong>{{ kpName }}</strong></p>
     </div>
 
     <el-steps :active="1" finish-status="success" class="steps">
       <el-step title="选择知识点" />
-      <el-step title="设置参数" />
+      <el-step title="自定义详情" />
       <el-step title="选择实践类型" />
       <el-step title="查看方案" />
     </el-steps>
@@ -16,14 +16,14 @@
     <div class="content-wrapper">
       <!-- 左侧：完成方式 -->
       <el-card class="option-card left-card">
-        <template #header><span>👥 完成方式</span></template>
+        <template #header><span>完成方式</span></template>
         <div class="mode-grid">
           <div
             class="mode-item"
             :class="{ selected: mode === 'individual' }"
             @click="mode = 'individual'"
           >
-            <div class="mode-icon">🧑</div>
+            <div class="mode-icon"><el-icon :size="32"><User /></el-icon></div>
             <div class="mode-label">个人完成</div>
             <div class="mode-desc">独立完成全部任务，自主安排时间</div>
           </div>
@@ -32,7 +32,7 @@
             :class="{ selected: mode === 'group' }"
             @click="mode = 'group'"
           >
-            <div class="mode-icon">👥</div>
+            <div class="mode-icon"><el-icon :size="32"><UserFilled /></el-icon></div>
             <div class="mode-label">集体完成</div>
             <div class="mode-desc">团队协作，分工合作完成任务</div>
           </div>
@@ -41,21 +41,36 @@
         <!-- 集体分工 -->
         <div v-if="mode === 'group'" class="group-division">
           <el-divider />
-          <div class="division-label">团队分工说明 <span class="required">*</span></div>
-          <el-input
-            v-model="groupDivision"
-            type="textarea"
-            :rows="4"
-            placeholder="请描述团队成员的分工安排，例如：共3人，A负责资料收集，B负责实地调研，C负责报告撰写..."
-            maxlength="500"
-            show-word-limit
-          />
+          <div class="division-label">团队成员与分工 <span class="required">*</span></div>
+          <el-table :data="groupMembers" border style="width: 100%" size="small">
+            <el-table-column label="姓名" width="120">
+              <template #default="{ row }">
+                <el-input v-model="row.name" placeholder="成员姓名" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="学号" width="140">
+              <template #default="{ row }">
+                <el-input v-model="row.studentId" placeholder="学号" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="负责内容">
+              <template #default="{ row }">
+                <el-input v-model="row.task" placeholder="负责的具体任务" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="60" align="center">
+              <template #default="{ $index }">
+                <el-button v-if="groupMembers.length > 2" type="danger" link size="small" @click="groupMembers.splice($index, 1)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-button size="small" style="margin-top: 8px" @click="groupMembers.push({ name: '', studentId: '', task: '' })">+ 添加成员</el-button>
         </div>
       </el-card>
 
       <!-- 右侧：难度选择 -->
       <el-card class="option-card right-card">
-        <template #header><span>⚡ 任务难度</span></template>
+        <template #header><span>任务难度</span></template>
         <div class="difficulty-grid">
           <div
             v-for="d in difficulties"
@@ -78,7 +93,7 @@
 
     <!-- 场馆选择 -->
     <el-card class="venue-option-card">
-      <template #header><span>📍 实践场馆（可选）</span></template>
+      <template #header><span>实践场馆（可选）</span></template>
       <div class="venue-option-body">
         <div class="venue-option-desc">可以预先选择实践场馆，AI将根据场馆特点生成更具针对性的方案</div>
         <el-input
@@ -112,7 +127,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import VenueSelect from '@/components/VenueSelect.vue'
@@ -123,7 +138,10 @@ const kpId = route.query.kpId
 const kpName = route.query.kpName
 
 const mode = ref('individual')
-const groupDivision = ref('')
+const groupMembers = reactive([
+  { name: '', studentId: '', task: '' },
+  { name: '', studentId: '', task: '' }
+])
 const difficulty = ref('easy')
 const showVenueDialog = ref(false)
 const selectedVenueId = ref('')
@@ -132,8 +150,8 @@ const selectedVenueName = ref('')
 const difficulties = [
   {
     value: 'easy',
-    label: '简单',
-    icon: '🌱',
+    label: '基础',
+    icon: 'I',
     hours: '2-3小时',
     tagType: 'success',
     recommend: '推荐个人',
@@ -141,8 +159,8 @@ const difficulties = [
   },
   {
     value: 'medium',
-    label: '中等',
-    icon: '🔥',
+    label: '进阶',
+    icon: 'II',
     hours: '4-6小时',
     tagType: 'warning',
     recommend: '个人/团队均可',
@@ -150,8 +168,8 @@ const difficulties = [
   },
   {
     value: 'hard',
-    label: '困难',
-    icon: '💎',
+    label: '挑战',
+    icon: 'III',
     hours: '8小时以上',
     tagType: 'danger',
     recommend: '推荐团队',
@@ -160,7 +178,9 @@ const difficulties = [
 ]
 
 const canNext = computed(() => {
-  if (mode.value === 'group' && !groupDivision.value.trim()) return false
+  if (mode.value === 'group') {
+    return groupMembers.some(m => m.name.trim() && m.task.trim())
+  }
   return true
 })
 
@@ -181,16 +201,19 @@ const clearVenue = () => {
 
 const goNext = () => {
   if (!canNext.value) {
-    ElMessage.warning('请填写团队分工说明')
+    ElMessage.warning('请至少填写一位团队成员的姓名和负责内容')
     return
   }
+  const groupDivisionStr = mode.value === 'group'
+    ? groupMembers.filter(m => m.name.trim()).map(m => `${m.name}（${m.studentId}）：${m.task}`).join('；')
+    : undefined
   router.push({
     name: 'PracticeTypeSelect',
     query: {
       kpId,
       kpName,
       mode: mode.value,
-      groupDivision: mode.value === 'group' ? groupDivision.value : undefined,
+      groupDivision: groupDivisionStr,
       difficulty: difficulty.value,
       venueId: selectedVenueId.value || undefined,
       venueName: selectedVenueName.value || undefined
@@ -252,7 +275,7 @@ const goNext = () => {
 }
 .mode-item:hover { border-color: #c0392b; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .mode-item.selected { border-color: #c0392b; background: #fff5f5; }
-.mode-icon { font-size: 36px; margin-bottom: 10px; }
+.mode-icon { font-size: 32px; margin-bottom: 10px; color: #666; }
 .mode-label { font-size: 16px; font-weight: bold; color: #333; margin-bottom: 6px; }
 .mode-desc { font-size: 13px; color: #888; }
 
@@ -279,7 +302,7 @@ const goNext = () => {
 .difficulty-item.selected.medium { border-color: #e6a23c; background: #fdf6ec; }
 .difficulty-item.selected.hard { border-color: #f56c6c; background: #fef0f0; }
 
-.diff-icon { font-size: 32px; grid-row: 1 / 3; }
+.diff-icon { font-size: 18px; font-weight: 800; grid-row: 1 / 3; color: #999; letter-spacing: 1px; font-family: serif; }
 .diff-label { font-size: 16px; font-weight: bold; color: #333; }
 .diff-tag { grid-row: 1 / 3; justify-self: end; }
 .diff-hours { font-size: 12px; color: #999; grid-column: 2; }

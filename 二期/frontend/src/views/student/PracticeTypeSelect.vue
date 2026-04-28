@@ -8,7 +8,7 @@
 
     <el-steps :active="currentTask?.status === 'generating' ? 3 : 2" finish-status="success" class="steps">
       <el-step title="选择知识点" />
-      <el-step title="设置参数" />
+      <el-step title="自定义详情" />
       <el-step title="选择实践类型" :description="currentTask?.status === 'generating' ? currentTask.text : ''" />
       <el-step title="查看方案" />
     </el-steps>

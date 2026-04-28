@@ -8,7 +8,7 @@
 
     <el-steps :active="3" finish-status="success" class="steps">
       <el-step title="选择知识点" />
-      <el-step title="设置参数" />
+      <el-step title="自定义详情" />
       <el-step title="选择实践类型" />
       <el-step title="填写方案" />
     </el-steps>
