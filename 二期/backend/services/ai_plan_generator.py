@@ -274,9 +274,27 @@ class AIPlanGenerator:
         return ""
 
     def _parse_response(self, response: str, practice_type: PracticeType) -> Dict[str, Any]:
-        """解析LLM响应"""
+        """解析LLM响应，清理推理标签和markdown包裹"""
+        import re
+
+        cleaned = response.strip()
+
+        # 1. 去除 <think>...</think> 推理标签（DeepSeek等模型）
+        cleaned = re.sub(r'<think>[\s\S]*?</think>', '', cleaned).strip()
+
+        # 2. 去除 markdown 代码块包裹
+        if '```json' in cleaned:
+            cleaned = cleaned.split('```json')[1].split('```')[0].strip()
+        elif '```' in cleaned:
+            cleaned = cleaned.split('```')[1].split('```')[0].strip()
+
+        # 3. 尝试提取第一个 JSON 对象（跳过前导文本）
+        json_match = re.search(r'\{[\s\S]*\}', cleaned)
+        if json_match:
+            cleaned = json_match.group()
+
         try:
-            plan_data = json.loads(response)
+            plan_data = json.loads(cleaned)
             if "title" not in plan_data:
                 plan_data["title"] = f"{practice_type.value}实践方案"
             if "content" not in plan_data:
@@ -291,7 +309,7 @@ class AIPlanGenerator:
         except json.JSONDecodeError:
             return {
                 "title": f"{practice_type.value}实践方案",
-                "content": response,
+                "content": cleaned,
                 "tasks": [
                     {"task": "完成实践活动", "description": "按照方案要求完成实践", "required": True}
                 ],

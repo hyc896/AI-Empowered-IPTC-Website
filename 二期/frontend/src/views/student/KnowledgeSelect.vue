@@ -18,9 +18,9 @@
       <el-input v-model="keyword" placeholder="搜索知识点..." prefix-icon="Search" clearable class="search-input" @input="fetchList" />
       <el-radio-group v-model="category" class="category-group" @change="fetchList">
         <el-radio-button value="">全部</el-radio-button>
-        <el-radio-button value="习概">习近平新时代中国特色社会主义思想概论</el-radio-button>
-        <el-radio-button value="思修">思想道德基础与法律修养</el-radio-button>
-        <el-radio-button value="马原">马克思主义基本原理概论</el-radio-button>
+        <el-radio-button value="xi_thought">习近平新时代中国特色社会主义思想概论</el-radio-button>
+        <el-radio-button value="morality">思想道德与法治</el-radio-button>
+        <el-radio-button value="marxism">马克思主义基本原理</el-radio-button>
       </el-radio-group>
     </div>
 
@@ -80,7 +80,7 @@ const keyword = ref('')
 const category = ref('')
 const selected = ref(null)
 
-const tagType = (cat) => ({ '习概': 'primary', '思修': 'success', '马原': 'warning' }[cat] || 'info')
+const tagType = (cat) => ({ 'xi_thought': 'primary', 'morality': 'success', 'marxism': 'warning' }[cat] || 'info')
 
 const fetchList = async () => {
   loading.value = true

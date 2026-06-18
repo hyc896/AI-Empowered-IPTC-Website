@@ -1,0 +1,221 @@
+version: "3.8"
+
+name: iptc-platform
+
+# ================================================================
+# 统一部署编排：一期（案例采集）+ 二期（学生实践）
+# MySQL 单实例承载 iptc_main + iptc_practice 两个 Schema
+# ================================================================
+
+services:
+
+  # ---------------------------------------------------------------
+  # 基础设施
+  # ---------------------------------------------------------------
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-iptc_prod_2025}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --max-connections=300
+      --innodb-buffer-pool-size=512M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-iptc_prod_2025}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # 二期：学生实践平台（Vue3 + FastAPI 8001）
+  # ---------------------------------------------------------------
+
+  practice-backend:
+    build:
+      context: ./二期
+      dockerfile: Dockerfile
+    volumes:
+      - uploads_data:/app/backend/data/uploads
+      - ./二期/.env.production:/app/config/.env:ro
+    env_file:
+      - ./二期/.env.production
+    environment:
+      - TZ=Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  practice-celery:
+    build:
+      context: ./二期
+      dockerfile: Dockerfile
+    command: celery -A celery_app worker --loglevel=info --pool=solo --concurrency=2
+    working_dir: /app/backend
+    volumes:
+      - uploads_data:/app/backend/data/uploads
+      - ./二期/.env.production:/app/config/.env:ro
+    env_file:
+      - ./二期/.env.production
+    environment:
+      - TZ=Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./二期/nginx.conf:/etc/nginx/nginx.conf:ro
+      - frontend_dist:/usr/share/nginx/html:ro
+    depends_on:
+      - practice-backend
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # 一期：案例采集平台（FastAPI 11528 + Celery Beat）
+  # ---------------------------------------------------------------
+
+  collector-backend:
+    build:
+      context: ./一期
+      dockerfile: Dockerfile
+    ports:
+      - "11528:11528"
+    volumes:
+      - chromadb_data:/app/backend/data/chromadb
+      - prompts_data:/app/backend/data/prompts
+      - ./一期/config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=iptc_main
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-iptc_prod_2025}
+      - CHROMADB_MODE=local
+      - CHROMADB_PATH=/app/backend/data/chromadb
+      - REDIS_HOST=redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  collector-celery-worker:
+    build:
+      context: ./一期
+      dockerfile: Dockerfile
+    command: celery -A backend.tasks worker -Q collector,default --loglevel=info --pool=solo --concurrency=1
+    volumes:
+      - chromadb_data:/app/backend/data/chromadb
+      - prompts_data:/app/backend/data/prompts
+      - ./一期/config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=iptc_main
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-iptc_prod_2025}
+      - CHROMADB_MODE=local
+      - CHROMADB_PATH=/app/backend/data/chromadb
+      - REDIS_HOST=redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    restart: unless-stopped
+
+  collector-celery-beat:
+    build:
+      context: ./一期
+      dockerfile: Dockerfile
+    command: celery -A backend.tasks beat --loglevel=info --scheduler celery.beat:Scheduler
+    volumes:
+      - chromadb_data:/app/backend/data/chromadb
+      - prompts_data:/app/backend/data/prompts
+      - ./一期/config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=iptc_main
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-iptc_prod_2025}
+      - CHROMADB_MODE=local
+      - CHROMADB_PATH=/app/backend/data/chromadb
+      - REDIS_HOST=redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:
+  uploads_data:
+  chromadb_data:
+  prompts_data:
+  frontend_dist:

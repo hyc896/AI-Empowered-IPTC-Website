@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import collectorRequest from '@/utils/collectorRequest'
 
 // 认证相关API
 export const authAPI = {
@@ -195,5 +196,35 @@ export const annotationAPI = {
   // 删除批注
   delete(annotationId) {
     return request.delete(`/annotations/${annotationId}`)
+  }
+}
+
+// 一期案例库API
+export const caseAPI = {
+  getList(params) {
+    return collectorRequest.get('/iptc/cases', { params })
+  },
+  getDetail(id) {
+    return collectorRequest.get(`/iptc/cases/${id}`)
+  },
+  getKnowledgePoints() {
+    return collectorRequest.get('/iptc/knowledge-points')
+  },
+  getStatistics() {
+    return collectorRequest.get('/iptc/statistics')
+  }
+}
+
+// 一期知识图谱API
+export const graphAPI = {
+  getBooks() {
+    return collectorRequest.get('/knowledge-graph/books')
+  },
+  getGraphData(bookId) {
+    const params = bookId ? { book_id: bookId } : {}
+    return collectorRequest.get('/knowledge-graph/data', { params })
+  },
+  getKnowledgePointDetail(kpId) {
+    return collectorRequest.get(`/knowledge-graph/knowledge-point/${kpId}`)
   }
 }

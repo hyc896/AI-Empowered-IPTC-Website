@@ -33,11 +33,11 @@ export const useTaskStore = defineStore('task', {
     _startStepAnimation(taskId) {
       const stages = [
         { step: 0, text: '正在分析知识点...', delay: 0 },
-        { step: 1, text: '构建方案框架...', delay: 5000 },
-        { step: 2, text: 'AI生成详细步骤...', delay: 15000 },
-        { step: 3, text: '整理推荐场馆...', delay: 30000 },
-        { step: 4, text: '方案即将完成...', delay: 50000 },
-        { step: 5, text: '最终检查中...', delay: 70000 },
+        { step: 1, text: '构建方案框架...', delay: 6000 },
+        { step: 2, text: 'AI生成详细步骤...', delay: 14000 },
+        { step: 3, text: '整理推荐场馆...', delay: 22000 },
+        { step: 4, text: '方案即将完成...', delay: 30000 },
+        { step: 5, text: '最终检查中...', delay: 36000 },
       ]
       const timers = []
       stages.forEach(({ step, text, delay }) => {

@@ -273,15 +273,3 @@ def delete_venue(
     return {"message": "场馆已删除"}
 
 
-@router.post("/extract", summary="从上海消息中提取场馆信息（管理员）")
-def extract_venues(
-    limit: int = Query(50, ge=1, le=200, description="处理消息数量上限"),
-    current_user=Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    if current_user.role.value not in ["admin", "teacher"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
-    from services.venue_extract_service import VenueExtractService
-    service = VenueExtractService(db)
-    stats = service.process_shanghai_messages(limit=limit)
-    return {"message": "场馆提取完成", "stats": stats}

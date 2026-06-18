@@ -89,13 +89,7 @@ const roleDesc = computed(() => {
 })
 
 const goToCases = () => {
-  const a = document.createElement('a')
-  a.href = 'http://localhost:5714'
-  a.target = '_blank'
-  a.rel = 'noopener noreferrer'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+  router.push('/case-platform')
 }
 
 const goToPractice = () => {
@@ -116,7 +110,7 @@ const handleLogout = async () => {
 <style scoped>
 .home-container {
   min-height: 100vh;
-  background: url('@/assets/bg-main.png') center/cover no-repeat fixed;
+  background: url('@/assets/bg-main.webp') center/cover no-repeat fixed;
   position: relative;
 }
 .home-container::before {
@@ -172,6 +166,8 @@ const handleLogout = async () => {
   transition: all 0.3s;
   position: relative;
   color: #fff;
+  display: flex;
+  flex-direction: column;
 }
 .module-card:hover {
   transform: translateY(-4px);
@@ -205,7 +201,7 @@ const handleLogout = async () => {
 }
 .feature-list li::before { content: '· '; color: rgba(255,255,255,0.4); }
 
-.module-footer { display: flex; justify-content: space-between; align-items: center; }
+.module-footer { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
 .role-tag {
   font-size: 12px;
   color: rgba(255,255,255,0.5);

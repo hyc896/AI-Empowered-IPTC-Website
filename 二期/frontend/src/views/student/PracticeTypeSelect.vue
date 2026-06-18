@@ -84,7 +84,7 @@
           填写自由申请方案 <el-icon><EditPen /></el-icon>
         </template>
         <template v-else>
-          生成实践方案（约15秒）<el-icon><MagicStick /></el-icon>
+          生成实践方案（约10秒）<el-icon><MagicStick /></el-icon>
         </template>
       </el-button>
     </div>

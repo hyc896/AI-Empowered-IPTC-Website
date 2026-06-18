@@ -148,6 +148,8 @@ class Venue(Base):
     images = Column(JSON, comment="场馆图片URL列表")
     source = Column(String(50), comment="数据来源")
     source_url = Column(String(500), comment="来源新闻URL")
+    case_id = Column(String(36), comment="来源案例ID（对应 iptc_main.iptc_cases.id）")
+    relevance_reason = Column(Text, comment="与案例的关联理由（AI提取）")
     is_verified = Column(Boolean, default=False, comment="是否已人工审核")
     is_active = Column(Boolean, default=True, comment="是否启用")
     created_at = Column(DateTime, default=datetime.now, nullable=False)

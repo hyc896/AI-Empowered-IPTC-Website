@@ -80,6 +80,9 @@ class RealLLMClient:
                 )
                 resp.raise_for_status()
                 content = resp.json()["choices"][0]["message"]["content"]
+                # 去除 DeepSeek 推理模型的 <think>...</think> 标签
+                import re
+                content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
                 if "```json" in content:
                     content = content.split("```json")[1].split("```")[0].strip()
                 elif "```" in content:

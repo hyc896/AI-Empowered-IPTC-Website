@@ -26,6 +26,37 @@ const routes = [
     component: () => import('@/views/ShowcaseWall.vue'),
     meta: { requiresAuth: false }
   },
+  // 案例平台路由（不需要认证）
+  {
+    path: '/case-platform',
+    name: 'CasePlatformHome',
+    component: () => import('@/views/cases/CasePlatformHome.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/cases',
+    name: 'CaseLibrary',
+    component: () => import('@/views/cases/CasesView.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/cases/:id',
+    name: 'CaseDetail',
+    component: () => import('@/views/cases/CaseDetail.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/case-platform/graph',
+    name: 'GraphView',
+    component: () => import('@/views/cases/GraphView.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/case-platform/mindmap',
+    name: 'MindMapView',
+    component: () => import('@/views/cases/MindMapView.vue'),
+    meta: { requiresAuth: false }
+  },
   // 学生端路由
   {
     path: '/student',
