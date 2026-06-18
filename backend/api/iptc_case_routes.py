@@ -20,6 +20,7 @@ def get_cases(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     knowledge_point_id: Optional[str] = Query(None, description="知识点ID过滤"),
     search: Optional[str] = Query(None, description="搜索关键词"),
+    primary_region: Optional[str] = Query(None, description="地域过滤：上海/全国"),
     db: Session = Depends(get_db_session)
 ):
     """
@@ -36,7 +37,8 @@ def get_cases(
             page=page,
             page_size=page_size,
             knowledge_point_id=knowledge_point_id,
-            search_keyword=search
+            search_keyword=search,
+            primary_region=primary_region
         )
         # 返回符合前端ApiResponse格式
         return {

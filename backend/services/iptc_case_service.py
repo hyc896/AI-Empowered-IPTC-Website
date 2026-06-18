@@ -128,7 +128,8 @@ class IPTCCaseService:
         page: int = 1,
         page_size: int = 10,
         knowledge_point_id: Optional[str] = None,
-        search_keyword: Optional[str] = None
+        search_keyword: Optional[str] = None,
+        primary_region: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         获取案例列表（分页）
@@ -151,6 +152,10 @@ class IPTCCaseService:
                 query = query.filter(
                     IPTCCase.related_knowledge_points.contains([{"id": knowledge_point_id}])
                 )
+
+            # 地域筛选
+            if primary_region:
+                query = query.filter(IPTCCase.primary_region == primary_region)
 
             # 查询所有匹配的案例
             all_cases = query.order_by(desc(IPTCCase.created_at)).all()

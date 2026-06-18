@@ -95,6 +95,13 @@ async def startup():
         import os
         skip_validation = os.getenv('SKIP_VALIDATION', '0') == '1'
 
+        # ORM模型注册（必须执行，不受SKIP_VALIDATION影响）
+        try:
+            from backend.database.orm_registry import auto_register_all_models
+            auto_register_all_models()
+        except Exception as e:
+            logger.warning(f"ORM模型注册异常: {e}")
+
         if not skip_validation:
             try:
                 from backend.database.startup_validator import startup_validation
@@ -418,6 +425,13 @@ try:
 except Exception as e:
     import logging as _logging
     _logging.getLogger(__name__).error(f"IPTC路由注册失败: {e}")
+
+try:
+    from backend.api.knowledge_graph_routes import router as _kg_router
+    app.include_router(_kg_router)
+except Exception as e:
+    import logging as _logging
+    _logging.getLogger(__name__).error(f"知识图谱路由注册失败: {e}")
 
 
 # 健康检查端点
