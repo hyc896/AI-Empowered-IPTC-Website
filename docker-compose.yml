@@ -114,6 +114,7 @@ services:
       - frontend_dist:/usr/share/nginx/html:ro
     depends_on:
       - practice-backend
+      - collector-backend
     deploy:
       resources:
         limits:
