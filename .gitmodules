@@ -1,0 +1,4 @@
+[submodule "一期"]
+	path = 一期
+	url = https://github.com/hyc896/AI-Empowered-IPTC-Website.git
+	branch = main
