@@ -36,7 +36,7 @@ WORKDIR /app
 
 # 复制依赖文件（利用 Docker 层缓存）
 COPY requirements.docker.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
 # 安装 Playwright Chromium 浏览器（仅安装 chromium，不安装 firefox/webkit）
 RUN python -m playwright install chromium --with-deps
