@@ -3,13 +3,19 @@
     <h2 class="page-title">消息采集</h2>
 
     <div class="section-title">消息源状态</div>
+    <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <el-button size="small" :type="!categoryFilter ? 'primary' : ''" @click="categoryFilter=null">全部</el-button>
+      <el-button size="small" :type="categoryFilter==='国内' ? 'primary' : ''" @click="categoryFilter='国内'">国内</el-button>
+      <el-button size="small" :type="categoryFilter==='国际' ? 'primary' : ''" @click="categoryFilter='国际'">国际</el-button>
+    </div>
     <div v-if="sourcesLoading" class="tip">加载中...</div>
-    <div v-else-if="sources.length" class="table-wrap">
+    <div v-else-if="filteredSources.length" class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>消息源</th><th>消息数</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>消息源</th><th>类别</th><th>消息数</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
-          <tr v-for="s in sources" :key="s.source_id || s.name">
+          <tr v-for="s in filteredSources" :key="s.source_id || s.name">
             <td>{{ s.display_name || s.name }}</td>
+            <td>{{ s.is_chinese ? '国内' : '国际' }}</td>
             <td>{{ s.message_count || 0 }}</td>
             <td><span :class="['badge', s.is_active ? 'active' : 'inactive']">{{ s.is_active ? '启用' : '停用' }}</span></td>
             <td>
@@ -39,7 +45,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { adminAPI } from '@/api/index'
 
 const sources = ref([])
@@ -49,6 +55,12 @@ const triggerResult = ref('')
 const matchData = ref(null)
 const triggeringMatch = ref(false)
 const triggeringGen = ref(false)
+const categoryFilter = ref(null)
+
+const filteredSources = computed(() => {
+  if (!categoryFilter.value) return sources.value
+  return sources.value.filter(s => categoryFilter.value === '国内' ? s.is_chinese : !s.is_chinese)
+})
 
 onMounted(async () => {
   try {

@@ -36,10 +36,7 @@
 
       <!-- 元信息 -->
       <div class="meta">
-        <span>发布于 {{ formatDate(caseData.publishDate) }}</span>
-        <span v-if="caseData.sourceUrl" style="margin-left:16px">
-          <a :href="caseData.sourceUrl" target="_blank" rel="noopener noreferrer" class="source-link">查看原文</a>
-        </span>
+        <span>发布于 {{ formatDate(caseData.publishDate || caseData.createdAt) }}</span>
       </div>
 
       <!-- 摘要 -->
