@@ -98,7 +98,7 @@ onMounted(async () => {
 <style scoped>
 .platform-home {
   min-height: 100vh;
-  background: linear-gradient(160deg, #2d0505 0%, #1a0a0a 40%, #0d0505 100%);
+  background: url('@/assets/bg-main.webp') center/cover no-repeat fixed;
   color: #fff;
 }
 
