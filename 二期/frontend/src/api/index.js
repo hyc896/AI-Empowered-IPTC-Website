@@ -210,6 +210,9 @@ export const caseAPI = {
   getKnowledgePoints() {
     return collectorRequest.get('/iptc/knowledge-points')
   },
+  getKnowledgeTree() {
+    return collectorRequest.get('/iptc/knowledge-tree')
+  },
   getStatistics() {
     return collectorRequest.get('/iptc/statistics')
   }
@@ -226,5 +229,36 @@ export const graphAPI = {
   },
   getKnowledgePointDetail(kpId) {
     return collectorRequest.get(`/knowledge-graph/knowledge-point/${kpId}`)
+  }
+}
+
+// 管理员API
+export const adminAPI = {
+  getOverview() {
+    return request.get('/admin/overview')
+  },
+  getMessageSources() {
+    return request.get('/admin/message-sources')
+  },
+  getMatchingStatus() {
+    return request.get('/admin/matching-status')
+  },
+  getCollectors() {
+    return request.get('/admin/collectors')
+  },
+  triggerCollector(name) {
+    return request.post(`/admin/collectors/${name}/trigger`)
+  },
+  getUsers(params) {
+    return request.get('/admin/users', { params })
+  },
+  updateUserRole(userId, role) {
+    return request.put(`/admin/users/${userId}/role`, null, { params: { role } })
+  },
+  getPractices(params) {
+    return request.get('/admin/practices', { params })
+  },
+  getVenues() {
+    return request.get('/admin/venues')
   }
 }

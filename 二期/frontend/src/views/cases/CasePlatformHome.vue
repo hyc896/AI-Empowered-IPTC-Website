@@ -48,20 +48,12 @@
           <p>浏览 AI 自动生成的思政教学案例，支持按知识点筛选、关键词搜索，上海 / 全国双维度</p>
           <span class="entry-arrow">进入 →</span>
         </div>
-        <div class="entry-card" @click="router.push('/case-platform/graph')">
+        <div class="entry-card" @click="router.push('/case-platform/books')">
           <div class="entry-icon">
             <el-icon :size="40"><Share /></el-icon>
           </div>
           <h3>知识图谱</h3>
           <p>可视化展示三本教材 259 个知识点的层级关系，点击节点查看关联案例</p>
-          <span class="entry-arrow">进入 →</span>
-        </div>
-        <div class="entry-card" @click="router.push('/case-platform/mindmap')">
-          <div class="entry-icon">
-            <el-icon :size="40"><Compass /></el-icon>
-          </div>
-          <h3>思维导图</h3>
-          <p>以思维导图形式探索知识点关联网络，从中心节点放射展开，帮助构建系统认知</p>
           <span class="entry-arrow">进入 →</span>
         </div>
       </div>
@@ -72,7 +64,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Reading, Share, Compass } from '@element-plus/icons-vue'
+import { Reading, Share } from '@element-plus/icons-vue'
 import { caseAPI } from '@/api/index'
 
 const router = useRouter()

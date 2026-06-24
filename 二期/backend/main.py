@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 # 导入路由
-from api import auth_routes, knowledge_routes, practice_routes, submission_routes, review_routes, venue_routes, annotation_routes
+from api import auth_routes, knowledge_routes, practice_routes, submission_routes, review_routes, venue_routes, annotation_routes, admin_routes
 
 # 导入数据库初始化
 from database.connection import init_database
@@ -63,6 +63,7 @@ app.include_router(submission_routes.router, prefix="/api/v1/submissions", tags=
 app.include_router(review_routes.router, prefix="/api/v1/reviews", tags=["审核管理"])
 app.include_router(venue_routes.router, prefix="/api/v1/venues", tags=["场馆"])
 app.include_router(annotation_routes.router, prefix="/api/v1/annotations", tags=["批注"])
+app.include_router(admin_routes.router, prefix="/api/v1/admin", tags=["管理员"])
 
 
 @app.get("/")

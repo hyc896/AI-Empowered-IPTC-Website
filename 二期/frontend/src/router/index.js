@@ -34,6 +34,12 @@ const routes = [
     meta: { requiresAuth: false }
   },
   {
+    path: '/case-platform/books',
+    name: 'BooksView',
+    component: () => import('@/views/cases/BooksView.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
     path: '/cases',
     name: 'CaseLibrary',
     component: () => import('@/views/cases/CasesView.vue'),
@@ -51,11 +57,17 @@ const routes = [
     component: () => import('@/views/cases/GraphView.vue'),
     meta: { requiresAuth: false }
   },
+  // 管理员路由
   {
-    path: '/case-platform/mindmap',
-    name: 'MindMapView',
-    component: () => import('@/views/cases/MindMapView.vue'),
-    meta: { requiresAuth: false }
+    path: '/admin',
+    component: () => import('@/views/admin/AdminLayout.vue'),
+    meta: { requiresAuth: true, role: 'admin' },
+    children: [
+      { path: '', name: 'AdminOverview', component: () => import('@/views/admin/AdminOverview.vue') },
+      { path: 'sources', name: 'AdminSources', component: () => import('@/views/admin/AdminSources.vue') },
+      { path: 'users', name: 'AdminUsers', component: () => import('@/views/admin/AdminUsers.vue') },
+      { path: 'practices', name: 'AdminPractices', component: () => import('@/views/admin/AdminPractices.vue') },
+    ]
   },
   // 学生端路由
   {
