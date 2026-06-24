@@ -10,6 +10,7 @@ from typing import Optional
 
 from backend.database.connection import get_db_session
 from backend.services.iptc_case_service import IPTCCaseService
+from backend.api.knowledge_graph_routes import load_knowledge_points
 
 router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
 
@@ -121,21 +122,63 @@ def delete_case(
     case_id: str,
     db: Session = Depends(get_db_session)
 ):
-    """
-    删除案例
-
-    - **case_id**: 案例ID
-
-    成功返回HTTP 204 No Content
-    案例不存在返回HTTP 404 Not Found
-    """
     try:
         success = IPTCCaseService.delete_case(db, case_id)
         if not success:
             raise HTTPException(status_code=404, detail="案例不存在")
-        # DELETE成功返回204 No Content，无响应体
         return None
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除案例失败: {str(e)}")
+
+
+@router.get("/knowledge-tree")
+def get_knowledge_tree(db: Session = Depends(get_db_session)):
+    """按书→章→节→知识点层级返回，附带每个知识点的真实案例数"""
+    try:
+        kps = load_knowledge_points()
+        stats = IPTCCaseService.get_knowledge_points_with_stats(db)
+        # 名称 → case_count 映射
+        name_to_count = {s['name']: s.get('case_count', 0) for s in stats}
+
+        # 合并马克思两个book_id为一个
+        MARX_IDS = {'marx_principles_2023', 'marx_basic_principles_2023'}
+        books = {}
+        chapters = {}
+        sections = {}
+
+        for idx, kp in enumerate(kps):
+            raw_book_id = kp.get('book_id', '')
+            book_id = 'marx_basic_principles_2023' if raw_book_id in MARX_IDS else raw_book_id
+            book_name = '马克思主义基本原理（2023年版）' if raw_book_id in MARX_IDS else kp.get('book_name', '')
+
+            if book_id not in books:
+                books[book_id] = {'book_id': book_id, 'book_name': book_name, 'chapters': {}}
+
+            chap_id = kp.get('chapter_id', '')
+            if chap_id and chap_id not in books[book_id]['chapters']:
+                books[book_id]['chapters'][chap_id] = {'id': chap_id, 'label': kp.get('chapter', ''), 'sections': {}}
+
+            sec_id = kp.get('section_id', '')
+            if chap_id and sec_id and sec_id not in books[book_id]['chapters'].get(chap_id, {}).get('sections', {}):
+                books[book_id]['chapters'][chap_id]['sections'][sec_id] = {
+                    'id': sec_id, 'label': kp.get('section', ''), 'knowledge_points': []
+                }
+
+            kp_name = kp.get('name', '')
+            kp_entry = {'id': f'kp_{idx}', 'name': kp_name, 'case_count': name_to_count.get(kp_name, 0)}
+            if chap_id and sec_id:
+                books[book_id]['chapters'][chap_id]['sections'][sec_id]['knowledge_points'].append(kp_entry)
+
+        result = []
+        for b in books.values():
+            chapters_list = []
+            for ch in b['chapters'].values():
+                sections_list = [s for s in ch['sections'].values()]
+                chapters_list.append({'id': ch['id'], 'label': ch['label'], 'sections': sections_list})
+            result.append({'book_id': b['book_id'], 'book_name': b['book_name'], 'chapters': chapters_list})
+
+        return {'code': 200, 'message': 'success', 'data': result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取知识点树失败: {str(e)}")
