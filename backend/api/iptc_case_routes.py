@@ -164,9 +164,17 @@ def get_knowledge_tree(db: Session = Depends(get_db_session)):
     """按书→章→节→知识点层级返回，附带每个知识点的真实案例数"""
     try:
         kps = load_knowledge_points()
-        stats = IPTCCaseService.get_knowledge_points_with_stats(db)
-        # 名称 → case_count 映射
-        name_to_count = {s['name']: s.get('case_count', 0) for s in stats}
+        # 直接从 iptc_cases 按名称统计
+        from sqlalchemy import func, text
+        cases_all = db.query(IPTCCase.related_knowledge_points).all()
+        name_to_count = {}
+        for (kps,) in cases_all:
+            if not kps:
+                continue
+            for kp in kps:
+                name = kp.get('name', '') if isinstance(kp, dict) else str(kp)
+                if name:
+                    name_to_count[name] = name_to_count.get(name, 0) + 1
 
         # 合并马克思两个book_id为一个
         MARX_IDS = {'marx_principles_2023', 'marx_basic_principles_2023'}
