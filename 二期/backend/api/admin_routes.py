@@ -59,7 +59,16 @@ async def trigger_collector(source_name: str, _=Depends(require_admin)):
             raise HTTPException(status_code=502, detail=f"触发采集失败: {e}")
 
 
-@router.get("/users")
+@router.get("/matching-status")
+async def get_matching_status(_=Depends(require_admin)):
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            r = await client.get(f"{COLLECTOR_URL}/api/v1/collection/matching-status")
+            return r.json()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"无法连接采集服务: {e}")
+
+
 def get_users(page: int = 1, page_size: int = 20, db: Session = Depends(get_db), _=Depends(require_admin)):
     offset = (page - 1) * page_size
     total = db.query(func.count(User.id)).scalar()
