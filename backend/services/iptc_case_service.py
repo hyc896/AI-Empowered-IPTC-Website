@@ -128,27 +128,19 @@ class IPTCCaseService:
         page: int = 1,
         page_size: int = 10,
         knowledge_point_id: Optional[str] = None,
+        knowledge_point_name: Optional[str] = None,
         search_keyword: Optional[str] = None,
         primary_region: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        获取案例列表（分页）
-
-        Args:
-            db: 数据库会话
-            page: 页码（从1开始）
-            page_size: 每页数量
-            knowledge_point_id: 知识点ID过滤（可选）
-            search_keyword: 搜索关键词（标题或内容）
-
-        Returns:
-            包含cases列表、total总数、page、page_size的字典
-        """
         try:
             query = db.query(IPTCCase)
 
-            # 知识点筛选
-            if knowledge_point_id:
+            # 知识点筛选（优先用名称匹配）
+            if knowledge_point_name:
+                query = query.filter(
+                    IPTCCase.related_knowledge_points.contains([{"name": knowledge_point_name}])
+                )
+            elif knowledge_point_id:
                 query = query.filter(
                     IPTCCase.related_knowledge_points.contains([{"id": knowledge_point_id}])
                 )

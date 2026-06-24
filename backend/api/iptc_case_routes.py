@@ -17,11 +17,12 @@ router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
 
 @router.get("/cases")
 def get_cases(
-    page: int = Query(1, ge=1, description="页码（从1开始）"),
-    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    knowledge_point_id: Optional[str] = Query(None, description="知识点ID过滤"),
-    search: Optional[str] = Query(None, description="搜索关键词"),
-    primary_region: Optional[str] = Query(None, description="地域过滤：上海/全国"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    knowledge_point_name: Optional[str] = Query(None, description="知识点名称过滤"),
+    knowledge_point_id: Optional[str] = Query(None, description="知识点ID过滤（已废弃，请用name）"),
+    search: Optional[str] = Query(None),
+    primary_region: Optional[str] = Query(None),
     db: Session = Depends(get_db_session)
 ):
     """
@@ -33,11 +34,13 @@ def get_cases(
     - **search**: 搜索关键词（标题、内容、摘要）
     """
     try:
+        # 支持按名称或ID过滤（兼容旧版ID格式）
+        kp_name = knowledge_point_name
         result = IPTCCaseService.get_cases(
             db=db,
             page=page,
             page_size=page_size,
-            knowledge_point_id=knowledge_point_id,
+            knowledge_point_name=kp_name,
             search_keyword=search,
             primary_region=primary_region
         )
