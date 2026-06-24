@@ -198,9 +198,9 @@ onMounted(async () => {
   gap: 28px;
 }
 .entry-card {
-  background: rgba(255,255,255,0.05);
+  background: rgba(0,0,0,0.6);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(192,57,43,0.2);
+  border: 1px solid rgba(255,215,0,0.15);
   border-radius: 16px;
   padding: 40px 32px;
   cursor: pointer;
@@ -210,34 +210,33 @@ onMounted(async () => {
   align-items: flex-start;
 }
 .entry-card:hover {
-  background: rgba(192,57,43,0.1);
-  border-color: rgba(255,215,0,0.3);
-  transform: translateY(-6px);
-  box-shadow: 0 16px 48px rgba(192,57,43,0.2), 0 0 0 1px rgba(255,215,0,0.1);
+  background: rgba(0,0,0,0.75);
+  border-color: rgba(255,215,0,0.45);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
 }
 .entry-icon {
   color: #ffd700;
   margin-bottom: 20px;
 }
 .entry-card h3 {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: #fff;
   margin-bottom: 12px;
 }
 .entry-card p {
   font-size: 14px;
-  color: rgba(255,255,255,0.5);
-  line-height: 1.7;
+  color: rgba(255,255,255,0.75);
+  line-height: 1.8;
   flex: 1;
   margin-bottom: 24px;
 }
 .entry-arrow {
-  color: rgba(255,215,0,0.6);
-  font-size: 14px;
-  transition: color 0.2s;
+  color: #ffd700;
+  font-size: 15px;
+  font-weight: 600;
 }
-.entry-card:hover .entry-arrow { color: #ffd700; }
 
 @media (max-width: 900px) {
   .entry-grid { grid-template-columns: 1fr; }

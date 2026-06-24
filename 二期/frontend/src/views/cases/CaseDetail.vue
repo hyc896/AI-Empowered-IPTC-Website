@@ -112,8 +112,8 @@ onMounted(async () => {
 <style scoped>
 .case-detail-page {
   min-height: 100vh;
-  background: #1a0a0a;
-  color: #e8d5d5;
+  background: url('@/assets/bg-main.webp') center/cover no-repeat fixed;
+  color: #e8e0d0;
 }
 
 .header {

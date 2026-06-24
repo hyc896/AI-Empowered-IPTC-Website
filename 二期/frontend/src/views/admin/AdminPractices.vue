@@ -15,7 +15,7 @@
       </table>
       <div class="pagination">
         <el-pagination v-model:current-page="page" :page-size="20" :total="total"
-          layout="prev, pager, next" @current-change="load" background small />
+          layout="prev, pager, next" @current-change="load" background size="small" />
       </div>
     </div>
   </div>

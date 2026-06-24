@@ -38,8 +38,8 @@ onMounted(async () => {
 .overview { max-width: 900px; }
 .page-title { color: #ffd700; margin-bottom: 24px; font-size: 20px; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
-.stat-card { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 24px 16px; text-align: center; }
-.stat-num { font-size: 32px; font-weight: 700; color: #ffd700; }
-.stat-label { font-size: 13px; color: rgba(255,255,255,0.5); margin-top: 8px; }
+.stat-card { background: rgba(0,0,0,0.65); border: 1px solid rgba(255,215,0,0.15); border-radius: 10px; padding: 28px 16px; text-align: center; }
+.stat-num { font-size: 36px; font-weight: 700; color: #ffd700; }
+.stat-label { font-size: 13px; color: rgba(255,255,255,0.75); margin-top: 10px; font-weight: 500; }
 .tip { color: rgba(255,255,255,0.4); padding: 32px; }
 </style>
