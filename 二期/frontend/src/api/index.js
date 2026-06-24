@@ -249,6 +249,12 @@ export const adminAPI = {
   triggerCollector(name) {
     return request.post(`/admin/collectors/${name}/trigger`)
   },
+  triggerMatching() {
+    return request.post('/admin/trigger-matching')
+  },
+  triggerCaseGeneration() {
+    return request.post('/admin/trigger-case-generation')
+  },
   getUsers(params) {
     return request.get('/admin/users', { params })
   },

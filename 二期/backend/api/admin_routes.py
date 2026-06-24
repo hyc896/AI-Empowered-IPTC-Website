@@ -59,6 +59,26 @@ async def trigger_collector(source_name: str, _=Depends(require_admin)):
             raise HTTPException(status_code=502, detail=f"触发采集失败: {e}")
 
 
+@router.post("/trigger-matching")
+async def trigger_matching(_=Depends(require_admin)):
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            r = await client.post(f"{COLLECTOR_URL}/api/v1/iptc/trigger-matching")
+            return r.json()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"触发失败: {e}")
+
+
+@router.post("/trigger-case-generation")
+async def trigger_case_generation(_=Depends(require_admin)):
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            r = await client.post(f"{COLLECTOR_URL}/api/v1/iptc/trigger-case-generation")
+            return r.json()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"触发失败: {e}")
+
+
 @router.get("/matching-status")
 async def get_matching_status(_=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=10) as client:

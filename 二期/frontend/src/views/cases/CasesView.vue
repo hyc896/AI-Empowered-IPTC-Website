@@ -3,6 +3,11 @@
     <div class="header">
       <el-button text style="color:rgba(255,255,255,0.6)" @click="router.push('/case-platform')">← 返回</el-button>
       <span class="title">教学案例库</span>
+      <div class="region-tabs">
+        <span :class="['rtab', !region && 'active']" @click="setRegion(null)">全部</span>
+        <span :class="['rtab', region === '全国' && 'active']" @click="setRegion('全国')">全国</span>
+        <span :class="['rtab', region === '上海' && 'active']" @click="setRegion('上海')">上海</span>
+      </div>
       <el-input v-model="search" placeholder="搜索案例..." clearable class="search-input" @keyup.enter="doSearch" @clear="doSearch">
         <template #suffix><el-icon style="cursor:pointer" @click="doSearch"><Search /></el-icon></template>
       </el-input>
@@ -64,6 +69,7 @@ const treeLoading = ref(true)
 const treeData = ref([])
 const selectedKpId = ref(null)
 const selectedKpName = ref(null)
+const region = ref(null)
 
 async function loadTree() {
   try {
@@ -96,7 +102,8 @@ async function loadCases() {
   try {
     const params = { page: page.value, page_size: pageSize }
     if (search.value) params.search = search.value
-    if (selectedKpId.value) params.knowledge_point_name = selectedKpName.value
+    if (selectedKpName.value) params.knowledge_point_name = selectedKpName.value
+    if (region.value) params.primary_region = region.value
     const res = await caseAPI.getList(params)
     const d = res.code === 200 ? res.data : res
     cases.value = d.items || d.cases || []
@@ -106,6 +113,7 @@ async function loadCases() {
   }
 }
 
+function setRegion(r) { region.value = r; page.value = 1; loadCases() }
 function doSearch() { page.value = 1; loadCases() }
 
 function onNodeClick(data) {
@@ -145,7 +153,11 @@ onMounted(() => { loadTree(); loadCases() })
   border-bottom: 1px solid rgba(192,57,43,0.2);
 }
 .title { font-size: 16px; font-weight: 700; color: #ffd700; }
-.search-input { width: 260px; margin-left: auto; }
+.region-tabs { display: flex; gap: 4px; }
+.rtab { padding: 4px 14px; border-radius: 16px; font-size: 13px; color: rgba(255,255,255,0.5); cursor: pointer; transition: all 0.15s; }
+.rtab:hover { color: #fff; }
+.rtab.active { background: rgba(192,57,43,0.4); color: #fff; }
+.search-input { width: 220px; margin-left: auto; }
 .search-input :deep(.el-input__wrapper) { background: rgba(255,255,255,0.08); box-shadow: none; border: 1px solid rgba(255,255,255,0.15); }
 .search-input :deep(.el-input__inner) { color: #fff; }
 .search-input :deep(.el-input__inner::placeholder) { color: rgba(255,255,255,0.35); }

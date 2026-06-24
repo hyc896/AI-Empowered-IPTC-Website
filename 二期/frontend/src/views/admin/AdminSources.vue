@@ -25,6 +25,10 @@
     <div v-if="triggerResult" class="result-box">{{ triggerResult }}</div>
 
     <div class="section-title" style="margin-top:32px">撞库匹配情况</div>
+    <div style="margin-bottom:12px;display:flex;gap:12px">
+      <el-button size="small" :loading="triggeringMatch" @click="doTriggerMatch">立即执行撞库匹配</el-button>
+      <el-button size="small" :loading="triggeringGen" @click="doTriggerGen">立即执行案例生成</el-button>
+    </div>
     <div v-if="matchData" class="match-grid">
       <div class="stat-card"><div class="num">{{ matchData.total_knowledge_points || 0 }}</div><div class="lbl">总知识点</div></div>
       <div class="stat-card"><div class="num">{{ matchData.matched_knowledge_points || 0 }}</div><div class="lbl">已匹配</div></div>
@@ -43,6 +47,8 @@ const sourcesLoading = ref(true)
 const triggering = ref(null)
 const triggerResult = ref('')
 const matchData = ref(null)
+const triggeringMatch = ref(false)
+const triggeringGen = ref(false)
 
 onMounted(async () => {
   try {
@@ -69,6 +75,32 @@ async function trigger(name) {
     triggerResult.value = `✗ 触发失败: ${e.message}`
   } finally {
     triggering.value = null
+  }
+}
+
+async function doTriggerMatch() {
+  triggeringMatch.value = true
+  triggerResult.value = ''
+  try {
+    const r = await adminAPI.triggerMatching()
+    triggerResult.value = `✓ 撞库匹配已触发：${r.task_id || r.message || JSON.stringify(r)}`
+  } catch (e) {
+    triggerResult.value = `✗ 触发失败: ${e.message}`
+  } finally {
+    triggeringMatch.value = false
+  }
+}
+
+async function doTriggerGen() {
+  triggeringGen.value = true
+  triggerResult.value = ''
+  try {
+    const r = await adminAPI.triggerCaseGeneration()
+    triggerResult.value = `✓ 案例生成已触发：${r.task_id || r.message || JSON.stringify(r)}`
+  } catch (e) {
+    triggerResult.value = `✗ 触发失败: ${e.message}`
+  } finally {
+    triggeringGen.value = false
   }
 }
 </script>
