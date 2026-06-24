@@ -12,7 +12,7 @@ WORKDIR /app
 
 # 先复制依赖文件，利用 Docker 缓存
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
 # 复制后端代码
 COPY backend/ ./backend/
