@@ -89,7 +89,10 @@ onMounted(async () => {
 
 <style scoped>
 .platform-home {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: url('@/assets/bg-main.webp') center/cover no-repeat fixed;
   color: #fff;
 }
@@ -119,14 +122,14 @@ onMounted(async () => {
 
 /* 英雄区 */
 .hero {
-  min-height: 60vh;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   background:
     radial-gradient(ellipse 80% 60% at 50% 40%, rgba(192,57,43,0.18) 0%, transparent 70%),
     radial-gradient(ellipse 40% 40% at 30% 60%, rgba(255,215,0,0.06) 0%, transparent 60%);
-  padding: 80px 40px;
+  padding: 40px 40px;
   text-align: center;
 }
 .hero-title {
@@ -159,22 +162,22 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 0;
-  background: rgba(255,255,255,0.06);
+  background: rgba(0,0,0,0.65);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255,215,0,0.15);
+  border: 1px solid rgba(255,215,0,0.25);
   border-radius: 16px;
-  padding: 24px 40px;
+  padding: 28px 48px;
 }
-.stat-item { text-align: center; padding: 0 28px; }
+.stat-item { text-align: center; padding: 0 32px; }
 .stat-num {
   display: block;
-  font-size: 36px;
+  font-size: 44px;
   font-weight: 700;
   color: #ffd700;
   line-height: 1;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
-.stat-label { font-size: 13px; color: rgba(255,255,255,0.5); }
+.stat-label { font-size: 15px; color: rgba(255,255,255,0.75); font-weight: 500; }
 .stat-divider {
   width: 1px;
   height: 40px;
@@ -183,14 +186,16 @@ onMounted(async () => {
 
 /* 入口区 */
 .entry-section {
-  padding: 60px 48px 80px;
+  padding: 32px 48px 48px;
+  display: flex;
+  justify-content: center;
 }
 .entry-grid {
-  max-width: 1080px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 800px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 28px;
 }
 .entry-card {
   background: rgba(255,255,255,0.05);

@@ -80,6 +80,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
+import { marked } from 'marked'
 import { caseAPI } from '@/api/index'
 
 const route = useRoute()
@@ -90,19 +91,13 @@ const loading = ref(true)
 
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+  const d = new Date(dateStr)
+  return isNaN(d) ? '' : d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
 const formattedContent = computed(() => {
   if (!caseData.value?.content) return ''
-  return caseData.value.content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n{2,}/g, '</p><p>')
-    .replace(/\n/g, '<br>')
-    .replace(/^/, '<p>')
-    .replace(/$/, '</p>')
+  return marked.parse(caseData.value.content)
 })
 
 onMounted(async () => {

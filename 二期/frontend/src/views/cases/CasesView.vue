@@ -34,12 +34,12 @@
             </div>
             <h4 class="card-title">{{ c.title }}</h4>
             <p class="card-summary">{{ (c.summary || c.content || '').slice(0, 80) }}...</p>
-            <div class="card-date">{{ new Date(c.created_at).toLocaleDateString('zh-CN') }}</div>
+            <div class="card-date">{{ c.created_at ? new Date(c.created_at).toLocaleDateString('zh-CN') : '' }}</div>
           </div>
         </div>
         <div class="pagination">
           <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total"
-            layout="prev, pager, next" @current-change="loadCases" background small />
+            layout="prev, pager, next" @current-change="loadCases" background size="small" />
         </div>
       </div>
     </div>
@@ -63,6 +63,7 @@ const loading = ref(false)
 const treeLoading = ref(true)
 const treeData = ref([])
 const selectedKpId = ref(null)
+const selectedKpName = ref(null)
 
 async function loadTree() {
   try {
@@ -95,7 +96,7 @@ async function loadCases() {
   try {
     const params = { page: page.value, page_size: pageSize }
     if (search.value) params.search = search.value
-    if (selectedKpId.value) params.knowledge_point_id = selectedKpId.value
+    if (selectedKpId.value) params.knowledge_point_name = selectedKpName.value
     const res = await caseAPI.getList(params)
     const d = res.code === 200 ? res.data : res
     cases.value = d.items || d.cases || []
@@ -109,7 +110,13 @@ function doSearch() { page.value = 1; loadCases() }
 
 function onNodeClick(data) {
   if (!data.isKp) return
-  selectedKpId.value = selectedKpId.value === data.id ? null : data.id
+  if (selectedKpId.value === data.id) {
+    selectedKpId.value = null
+    selectedKpName.value = null
+  } else {
+    selectedKpId.value = data.id
+    selectedKpName.value = data.label
+  }
   page.value = 1
   loadCases()
 }
@@ -144,7 +151,7 @@ onMounted(() => { loadTree(); loadCases() })
 .search-input :deep(.el-input__inner::placeholder) { color: rgba(255,255,255,0.35); }
 .main { flex: 1; display: flex; overflow: hidden; }
 .sidebar {
-  width: 260px;
+  width: 280px;
   flex-shrink: 0;
   overflow-y: auto;
   background: rgba(0,0,0,0.45);
@@ -153,12 +160,13 @@ onMounted(() => { loadTree(); loadCases() })
 }
 .sidebar-title { padding: 8px 16px 12px; font-size: 11px; color: rgba(255,215,0,0.7); text-transform: uppercase; letter-spacing: 1px; }
 .kp-tree { background: transparent; }
-.kp-tree :deep(.el-tree-node__content) { color: rgba(255,255,255,0.7); height: 28px; }
+.kp-tree :deep(.el-tree-node__content) { color: rgba(255,255,255,0.7); height: auto; min-height: 28px; padding: 4px 0; white-space: normal; }
 .kp-tree :deep(.el-tree-node__content:hover) { background: rgba(255,255,255,0.06); }
 .kp-tree :deep(.el-tree-node.is-current > .el-tree-node__content) { background: rgba(192,57,43,0.3); color: #fff; }
-.kp-tree :deep(.el-tree-node__expand-icon) { color: rgba(255,255,255,0.4); }
-.tree-node { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 12px; padding-right: 8px; }
-.kp-count { font-size: 11px; color: rgba(255,215,0,0.7); background: rgba(255,215,0,0.1); padding: 1px 6px; border-radius: 8px; flex-shrink: 0; }
+.kp-tree :deep(.el-tree-node__expand-icon) { color: rgba(255,255,255,0.4); flex-shrink: 0; }
+.tree-node { display: flex; justify-content: space-between; align-items: flex-start; width: 100%; font-size: 12px; padding-right: 8px; gap: 4px; }
+.tree-node > span:first-child { flex: 1; word-break: break-all; line-height: 1.4; }
+.kp-count { font-size: 11px; color: rgba(255,215,0,0.7); background: rgba(255,215,0,0.1); padding: 1px 6px; border-radius: 8px; flex-shrink: 0; margin-top: 2px; }
 .content { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; }
 .case-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .case-card {

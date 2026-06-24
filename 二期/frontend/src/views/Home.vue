@@ -93,7 +93,9 @@ const goToCases = () => {
 }
 
 const goToPractice = () => {
-  if (userStore.isStudent) {
+  if (userStore.isAdmin) {
+    router.push('/admin')
+  } else if (userStore.isStudent) {
     router.push('/student/knowledge')
   } else {
     router.push('/teacher/review')
