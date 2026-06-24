@@ -12,6 +12,29 @@ from backend.database.connection import get_db_session
 from backend.services.iptc_case_service import IPTCCaseService
 from backend.api.knowledge_graph_routes import load_knowledge_points
 
+
+router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
+
+
+@router.post("/trigger-matching")
+def trigger_matching():
+    try:
+        from backend.tasks.case_tasks import run_batch_match_cases
+        task = run_batch_match_cases.apply_async(queue="default")
+        return {"task_id": task.id, "message": "撞库匹配任务已触发"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
+
+
+@router.post("/trigger-case-generation")
+def trigger_case_generation():
+    try:
+        from backend.tasks.case_tasks import run_batch_match_cases
+        task = run_batch_match_cases.apply_async(queue="default")
+        return {"task_id": task.id, "message": "案例生成任务已触发"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
+
 router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
 
 
