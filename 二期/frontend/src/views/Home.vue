@@ -42,27 +42,31 @@
           </div>
         </div>
 
-        <!-- 实践活动板块 -->
+        <!-- 实践活动 / 管理后台 板块 -->
         <div class="module-card" @click="goToPractice">
           <div class="module-badge">板块二</div>
           <div class="module-icon-wrap">
             <el-icon :size="36"><Compass /></el-icon>
           </div>
-          <h3>实践活动</h3>
+          <h3>{{ userStore.isAdmin ? '管理后台' : '实践活动' }}</h3>
           <p>
-            <span v-if="userStore.isStudent">选择知识点，AI生成个性化实践方案，完成实践并提交</span>
+            <span v-if="userStore.isAdmin">数据概览、消息采集监控、用户管理、实践项目统计</span>
+            <span v-else-if="userStore.isStudent">选择知识点，AI生成个性化实践方案，完成实践并提交</span>
             <span v-else>审核学生实践作业，管理场馆资源，查看统计数据</span>
           </p>
           <ul class="feature-list">
+            <li v-if="userStore.isAdmin">采集状态监控</li>
+            <li v-if="userStore.isAdmin">用户权限管理</li>
+            <li v-if="userStore.isAdmin">实践项目数据</li>
             <li v-if="userStore.isStudent">AI个性化方案生成</li>
             <li v-if="userStore.isStudent">7种实践类型可选</li>
             <li v-if="userStore.isStudent">在线提交实践成果</li>
-            <li v-if="!userStore.isStudent">审核工作台</li>
-            <li v-if="!userStore.isStudent">场馆资源管理</li>
-            <li v-if="!userStore.isStudent">统计分析报表</li>
+            <li v-if="!userStore.isStudent && !userStore.isAdmin">审核工作台</li>
+            <li v-if="!userStore.isStudent && !userStore.isAdmin">场馆资源管理</li>
+            <li v-if="!userStore.isStudent && !userStore.isAdmin">统计分析报表</li>
           </ul>
           <div class="module-footer">
-            <span class="role-tag">{{ userStore.isStudent ? '学生端' : '教师端' }}</span>
+            <span class="role-tag">{{ userStore.isAdmin ? '管理员端' : userStore.isStudent ? '学生端' : '教师端' }}</span>
             <span class="arrow">进入 →</span>
           </div>
         </div>
