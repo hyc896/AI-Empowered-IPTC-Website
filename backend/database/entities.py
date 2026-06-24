@@ -146,6 +146,10 @@ class MessageSource(Base):
     stdaily_messages = relationship("StdailyMessage", back_populates="source", cascade="all, delete-orphan")
     cas_news_messages = relationship("CasNewsMessage", back_populates="source", cascade="all, delete-orphan")
     chinanews_minsheng_messages = relationship("ChinanewsMinshengMessage", back_populates="source", cascade="all, delete-orphan")
+    shanghai_observer_messages = relationship("ShanghaiObserverMessage", back_populates="source", cascade="all, delete-orphan")
+    thepaper_shanghai_messages = relationship("ThepaperShanghaiMessage", back_populates="source", cascade="all, delete-orphan")
+    eastday_messages = relationship("EastdayMessage", back_populates="source", cascade="all, delete-orphan")
+    people_sh_red_messages = relationship("PeopleShRedMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
@@ -2228,12 +2232,15 @@ class IPTCCase(Base):
     related_knowledge_points = Column(JSON, comment="关联的知识点列表")
     source_message_ids = Column(JSON, comment="来源消息ID列表")
     published_at = Column(DateTime, comment="原始新闻发布时间")
+    primary_region = Column(String(50), default='全国', comment="案例主要地域标签（全国/上海等）")
+    mentioned_locations = Column(JSON, comment="案例中提及的实践地点列表")
     created_at = Column(DateTime, default=datetime.now, nullable=False, comment="案例创建时间")
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False, comment="案例更新时间")
 
     __table_args__ = (
         Index("idx_published_at", "published_at"),
         Index("idx_created_at", "created_at"),
+        Index("idx_primary_region", "primary_region"),
     )
 
 
@@ -2614,6 +2621,138 @@ class ChinanewsMinshengMessage(Base):
         Index("idx_crawled_at", "crawled_at"),
         Index("idx_source_published", "source_id", "published_at"),
         Index("idx_external_id", "external_id"),
+    )
+
+
+class ShanghaiObserverMessage(Base):
+    """上观新闻消息表（上海本地新闻）"""
+    __tablename__ = "mp_shanghai_observer_messages"
+
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取的文章ID）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要（取content前200字）")
+    provider = Column(String(500), default="上观新闻", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+    region = Column(String(200), default="中国/上海", comment="地区")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言")
+
+    source = relationship("MessageSource", back_populates="shanghai_observer_messages")
+
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_region", "region"),
+    )
+
+
+class ThepaperShanghaiMessage(Base):
+    """澎湃新闻上海频道消息表"""
+    __tablename__ = "mp_thepaper_shanghai_messages"
+
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（contId）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要（取content前200字）")
+    provider = Column(String(500), default="澎湃新闻", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+    region = Column(String(200), default="中国/上海", comment="地区")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言")
+
+    source = relationship("MessageSource", back_populates="thepaper_shanghai_messages")
+
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_region", "region"),
+    )
+
+
+class EastdayMessage(Base):
+    """东方网消息表（上海本地新闻）"""
+    __tablename__ = "mp_eastday_messages"
+
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要（取content前200字）")
+    provider = Column(String(500), default="东方网", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接（用于去重）")
+    region = Column(String(200), default="中国/上海", comment="地区")
+    industry_tags = Column(Text, comment="行业标签（逗号分隔）")
+    ai_tag = Column(String(50), comment="AI分类标签")
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言")
+
+    source = relationship("MessageSource", back_populates="eastday_messages")
+
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_region", "region"),
+    )
+
+
+class PeopleShRedMessage(Base):
+    """人民网上海红色教育频道消息表"""
+    __tablename__ = "mp_people_sh_red_messages"
+
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), default="人民网上海", comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接")
+    region = Column(String(200), default="中国/上海", comment="地区")
+    industry_tags = Column(Text, comment="行业标签")
+    ai_tag = Column(String(50), comment="AI分类标签")
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言")
+
+    source = relationship("MessageSource", back_populates="people_sh_red_messages")
+
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_region", "region"),
     )
 
 
