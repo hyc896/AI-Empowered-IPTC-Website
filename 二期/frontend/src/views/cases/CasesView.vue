@@ -182,7 +182,7 @@ onMounted(() => { loadTree(); loadCases() })
 .content { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; }
 .case-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .case-card {
-  background: rgba(0,0,0,0.5);
+  background: rgba(0,0,0,0.72);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 8px;
   padding: 16px;
@@ -192,11 +192,11 @@ onMounted(() => { loadTree(); loadCases() })
   flex-direction: column;
   gap: 8px;
 }
-.case-card:hover { border-color: rgba(255,215,0,0.4); background: rgba(255,255,255,0.05); }
+.case-card:hover { border-color: rgba(255,215,0,0.4); background: rgba(0,0,0,0.82); }
 .card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .card-title { font-size: 14px; font-weight: 600; color: #fff; line-height: 1.5; margin: 0; }
-.card-summary { font-size: 12px; color: rgba(255,255,255,0.5); line-height: 1.6; margin: 0; }
-.card-date { font-size: 11px; color: rgba(255,255,255,0.3); }
+.card-summary { font-size: 12px; color: rgba(255,255,255,0.72); line-height: 1.6; margin: 0; }
+.card-date { font-size: 11px; color: rgba(255,255,255,0.45); }
 .tip { color: rgba(255,255,255,0.4); padding: 48px; text-align: center; }
 .pagination { padding: 16px 0; display: flex; justify-content: center; }
 </style>

@@ -89,6 +89,7 @@ async def get_matching_status(_=Depends(require_admin)):
             raise HTTPException(status_code=502, detail=f"无法连接采集服务: {e}")
 
 
+@router.get("/users")
 def get_users(page: int = 1, page_size: int = 20, db: Session = Depends(get_db), _=Depends(require_admin)):
     offset = (page - 1) * page_size
     total = db.query(func.count(User.id)).scalar()

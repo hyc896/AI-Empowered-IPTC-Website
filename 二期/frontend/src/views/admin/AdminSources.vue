@@ -120,7 +120,7 @@ async function doTriggerGen() {
 </script>
 
 <style scoped>
-.admin-sources { max-width: 960px; }
+.admin-sources { width: 100%; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
 .page-header h2 { font-size: 22px; font-weight: 700; color: #fff; margin: 0; }
 .header-actions { display: flex; gap: 10px; }

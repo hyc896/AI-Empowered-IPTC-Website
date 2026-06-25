@@ -94,5 +94,6 @@ const router = useRouter()
   flex: 1;
   overflow-y: auto;
   padding: 32px;
+  min-width: 0;
 }
 </style>

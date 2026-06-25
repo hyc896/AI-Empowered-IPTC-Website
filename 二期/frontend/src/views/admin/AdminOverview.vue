@@ -41,12 +41,12 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.overview { max-width: 960px; }
+.overview { width: 100%; }
 .page-header { margin-bottom: 32px; }
 .page-header h2 { font-size: 24px; font-weight: 700; color: #fff; margin: 0 0 4px; }
 .subtitle { font-size: 13px; color: rgba(255,255,255,0.4); }
 .loading { color: rgba(255,255,255,0.4); padding: 32px 0; }
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
 .stat-card {
   background: rgba(0,0,0,0.6);
   border: 1px solid rgba(255,215,0,0.12);
