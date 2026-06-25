@@ -118,15 +118,15 @@ def get_collection_status(db: Session = Depends(get_db_session)):
     - 中国来源消息总数
     """
     try:
-        # 获取所有消息源
-        sources = db.query(MessageSource).all()
-        total_sources = len(sources)
-        active_sources = sum(1 for s in sources if s.is_active)
+        # 只获取激活的消息源
+        sources = db.query(MessageSource).filter(
+            MessageSource.is_active == True
+        ).all()
 
         # 获取ORM Registry
         orm_registry = get_orm_registry()
 
-        # 统计各消息源的消息数量
+        # 统计各消息源的消息数量（只显示有数据的）
         source_stats = []
         total_messages = 0
         chinese_messages = 0
@@ -144,6 +144,11 @@ def get_collection_status(db: Session = Depends(get_db_session)):
 
             # 查询消息数量
             count = db.query(func.count(model.id)).scalar() or 0
+
+            # 跳过没有数据的消息源
+            if count == 0:
+                continue
+
             total_messages += count
 
             # 查询最近采集时间
@@ -156,7 +161,8 @@ def get_collection_status(db: Session = Depends(get_db_session)):
                 chinese_messages += count
 
             source_stats.append({
-                "name": source.name,
+                "name": source.display_name or source.name,
+                "source_name": source.name,
                 "table": table_name,
                 "is_active": source.is_active,
                 "is_chinese": is_chinese,
@@ -164,9 +170,12 @@ def get_collection_status(db: Session = Depends(get_db_session)):
                 "latest_crawled_at": latest_time
             })
 
+        # 按消息数量降序排列
+        source_stats.sort(key=lambda x: x["message_count"], reverse=True)
+
         return {
-            "total_sources": total_sources,
-            "active_sources": active_sources,
+            "total_sources": len(source_stats),
+            "active_sources": len(source_stats),
             "total_messages": total_messages,
             "chinese_messages": chinese_messages,
             "sources": source_stats,
@@ -255,12 +264,13 @@ def get_matching_status(db: Session = Depends(get_db_session)):
 
 def _is_chinese_source(source: MessageSource) -> bool:
     """判断是否为中国来源"""
-    known_chinese_sources = {
+    known_chinese_names = {
         'people_theory', 'gmw_theory', 'cssn', 'qstheory',
-        'tonghuashun', 'securities_times', 'kr36'
+        'tonghuashun', 'securities_times', 'kr36',
+        '同花顺快讯', '证券时报',
     }
 
-    if source.name in known_chinese_sources:
+    if source.name in known_chinese_names:
         return True
 
     config = source.config or {}
