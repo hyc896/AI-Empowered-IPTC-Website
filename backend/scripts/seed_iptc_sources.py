@@ -60,6 +60,9 @@ SHANGHAI_SOURCE_NAMES = [
     "thepaper_shanghai",
     "eastday",
     "people_sh_red",
+    "shanghai_zhdj",
+    "shanghai_party_history",
+    "xinhua_shanghai",
 ]
 
 
@@ -97,9 +100,111 @@ def _display_name(name: str) -> str:
     return name.replace("_", " ").title()
 
 
+SPECIAL_SOURCE_CONFIGS = {
+    "shanghai_observer": {
+        "auto_collect_enabled": True,
+        "config": {
+            "url": "https://www.shobserver.com/",
+            "provider": "上观新闻",
+            "category": "上海新闻",
+        },
+    },
+    "thepaper_shanghai": {
+        # 澎湃上海在服务器上偶发详情页超时，保留手动触发，暂不进入自动调度。
+        "auto_collect_enabled": False,
+        "config": {
+            "url": "https://www.thepaper.cn/list_25488",
+            "provider": "澎湃新闻上海频道",
+            "category": "上海新闻",
+        },
+    },
+    "eastday": {
+        # 东方网内容面太广且历史上容易超时，先作为全国候选池外的手动源保留。
+        "auto_collect_enabled": False,
+        "config": {
+            "url": "https://news.eastday.com/",
+            "provider": "东方网",
+            "category": "上海新闻",
+        },
+    },
+    "people_sh_red": {
+        "auto_collect_enabled": True,
+        "config": {
+            "urls": ["http://sh.people.com.cn/GB/138654/index.html"],
+            "base_url": "http://sh.people.com.cn",
+            "provider": "人民网上海党建频道",
+            "category": "红色教育",
+        },
+    },
+    "shanghai_zhdj": {
+        "display_name": "上海智慧党建",
+        "mysql_table": "mp_shanghai_local_messages",
+        "collector_module": "backend.sources.shanghai_local.collector",
+        "chroma_collection": "mp_shanghai_local_messages",
+        "source_type": "news",
+        "auto_collect_enabled": True,
+        "interval": 1800,
+        "config": {
+            "urls": [
+                "https://www.shzhdj.sh.cn/djWeb/djweb/web/djweb/webindex/index.action",
+                "https://www.shzhdj.sh.cn/djWeb/djweb/web/djweb/newestindex/newestindex.action",
+            ],
+            "base_url": "https://www.shzhdj.sh.cn",
+            "provider": "上海智慧党建",
+            "category": "党建实践",
+            "region": "中国/上海",
+            "language": "zh",
+            "max_articles": 20,
+            "request_timeout": 15,
+            "include_url_patterns": ["newinfo.action?articleid="],
+        },
+    },
+    "shanghai_party_history": {
+        "display_name": "上海党史网",
+        "mysql_table": "mp_shanghai_local_messages",
+        "collector_module": "backend.sources.shanghai_local.collector",
+        "chroma_collection": "mp_shanghai_local_messages",
+        "source_type": "news",
+        "auto_collect_enabled": True,
+        "interval": 3600,
+        "config": {
+            "urls": ["https://www.ccphistory.org.cn/"],
+            "base_url": "https://www.ccphistory.org.cn",
+            "provider": "上海党史网",
+            "category": "党史红色文化",
+            "region": "中国/上海",
+            "language": "zh",
+            "max_articles": 20,
+            "request_timeout": 15,
+            "include_url_patterns": ["/content/"],
+        },
+    },
+    "xinhua_shanghai": {
+        "display_name": "新华网上海频道",
+        "mysql_table": "mp_shanghai_local_messages",
+        "collector_module": "backend.sources.shanghai_local.collector",
+        "chroma_collection": "mp_shanghai_local_messages",
+        "source_type": "news",
+        "auto_collect_enabled": True,
+        "interval": 3600,
+        "config": {
+            "urls": ["http://sh.news.cn/main/index.htm"],
+            "base_url": "http://sh.news.cn",
+            "provider": "新华网上海频道",
+            "category": "上海新闻",
+            "region": "中国/上海",
+            "language": "zh",
+            "max_articles": 20,
+            "request_timeout": 20,
+            "include_url_patterns": ["sh.news.cn/", "/c.html"],
+        },
+    },
+}
+
+
 def _seed_config(name: str) -> dict:
     region = "\u4e2d\u56fd"
-    return {
+    seed = {
         "region": region,
         "language": "zh",
         "interval": 3600,
@@ -107,12 +212,18 @@ def _seed_config(name: str) -> dict:
         "collector_module": f"backend.sources.{name}.collector",
         "chroma_collection": f"mp_{name}_messages",
         "source_type": "iptc_national",
+        "auto_collect_enabled": True,
         "config": {
             "region": region,
             "language": "zh",
             "max_articles": 20,
         },
     }
+    special = SPECIAL_SOURCE_CONFIGS.get(name)
+    if special:
+        seed = {**seed, **special}
+        seed["config"] = {**seed.get("config", {}), **special.get("config", {})}
+    return seed
 
 
 def _merge_config(seed: dict, existing: dict | None) -> dict:
@@ -151,7 +262,7 @@ def seed_sources(
                     name=name,
                     adapter_name=name,
                     category=seed["source_type"],
-                    display_name=_display_name(name),
+                    display_name=seed.get("display_name") or _display_name(name),
                     config=seed,
                     schedule=None,
                     is_active=True,
@@ -172,7 +283,7 @@ def seed_sources(
                 source.category = seed["source_type"]
                 changed = True
             if not source.display_name:
-                source.display_name = _display_name(name)
+                source.display_name = merged_config.get("display_name") or _display_name(name)
                 changed = True
             if activate_existing and not source.is_active:
                 source.is_active = True

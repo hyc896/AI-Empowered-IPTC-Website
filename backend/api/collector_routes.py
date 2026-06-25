@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 SHANGHAI_SOURCE_TABLES = {
     "mp_people_sh_red_messages",
+    "mp_shanghai_local_messages",
     "mp_shanghai_observer_messages",
     "mp_thepaper_shanghai_messages",
 }
@@ -58,6 +59,7 @@ async def get_collector_list() -> List[Dict[str, Any]]:
                     "category": source.category,
                     "mysql_table": mysql_table,
                     "source_scope": "shanghai" if mysql_table in SHANGHAI_SOURCE_TABLES else "national",
+                    "auto_collect_enabled": config.get("auto_collect_enabled", True),
                     "interval": config.get("interval", 300),
                     "last_crawled_at": source.last_crawled_at.isoformat() if source.last_crawled_at else None
                 })

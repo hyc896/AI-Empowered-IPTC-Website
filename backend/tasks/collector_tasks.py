@@ -300,6 +300,7 @@ def _load_source_config(source_name: str) -> Optional[Dict[str, Any]]:
                 "chroma_collection": config.get("chroma_collection", f"{source.name}_messages"),
                 "collector_module": config.get("collector_module", ""),
                 "interval": config.get("interval", 60),
+                "auto_collect_enabled": config.get("auto_collect_enabled", True),
                 "enabled": True,
                 "config": config.get("config", {}),  # 传递嵌套的config对象，而不是整个source.config
                 "last_crawled_at": source.last_crawled_at,
@@ -398,6 +399,13 @@ def trigger_all_collectors(self) -> Dict[str, Any]:
 
             for source in active_sources:
                 try:
+                    config = source.config or {}
+                    if not config.get("auto_collect_enabled", True):
+                        logger.info(
+                            f"【启动触发】跳过手动保留源: {source.display_name or source.name}"
+                        )
+                        continue
+
                     run_collector.apply_async(
                         args=(source.name,),
                         queue='collector'

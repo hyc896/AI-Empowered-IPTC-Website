@@ -44,6 +44,10 @@ def _get_collector_tasks() -> dict:
 
             for source in active_sources:
                 source_config = source.config or {}
+                if not source_config.get('auto_collect_enabled', True):
+                    logger.info(f"【Beat调度】跳过自动采集源: {source.display_name or source.name}")
+                    continue
+
                 interval_seconds = source_config.get('interval', 300)
 
                 task_name = f"collector_{source.name}"

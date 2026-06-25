@@ -150,6 +150,7 @@ class MessageSource(Base):
     thepaper_shanghai_messages = relationship("ThepaperShanghaiMessage", back_populates="source", cascade="all, delete-orphan")
     eastday_messages = relationship("EastdayMessage", back_populates="source", cascade="all, delete-orphan")
     people_sh_red_messages = relationship("PeopleShRedMessage", back_populates="source", cascade="all, delete-orphan")
+    shanghai_local_messages = relationship("ShanghaiLocalMessage", back_populates="source", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_is_active", "is_active"),
@@ -2753,6 +2754,42 @@ class PeopleShRedMessage(Base):
         Index("idx_url", "url"),
         Index("idx_external_id", "external_id"),
         Index("idx_region", "region"),
+    )
+
+
+class ShanghaiLocalMessage(Base):
+    """上海本地通用消息表（用于党史、党建、新华网上海等纯上海源）"""
+    __tablename__ = "mp_shanghai_local_messages"
+
+    id = Column(String(36), primary_key=True, comment="消息ID（UUID）")
+    source_id = Column(String(36), ForeignKey("mp_message_sources.id", ondelete="CASCADE"), nullable=False, comment="来源ID")
+    external_id = Column(String(200), comment="外部唯一标识（从URL提取）")
+    title = Column(String(500), nullable=False, comment="标题")
+    content = Column(Text, nullable=False, comment="正文内容")
+    summary = Column(Text, comment="摘要")
+    provider = Column(String(500), comment="信息提供方")
+    published_at = Column(DateTime, comment="发布时间")
+    crawled_at = Column(DateTime, default=datetime.now, nullable=False, comment="抓取时间")
+    url = Column(String(500), unique=True, nullable=False, comment="原文链接")
+    region = Column(String(200), default="中国/上海", comment="地区")
+    industry_tags = Column(Text, comment="行业标签")
+    ai_tag = Column(String(50), comment="AI分类标签")
+    category = Column(String(500), comment="文章分类")
+    language = Column(String(10), default="zh", comment="语言")
+    tags = Column(JSON, comment="标签列表")
+    extra_metadata = Column("metadata", JSON, comment="其他元数据")
+
+    source = relationship("MessageSource", back_populates="shanghai_local_messages")
+
+    __table_args__ = (
+        Index("idx_source_id", "source_id"),
+        Index("idx_published_at", "published_at"),
+        Index("idx_crawled_at", "crawled_at"),
+        Index("idx_source_published", "source_id", "published_at"),
+        Index("idx_url", "url"),
+        Index("idx_external_id", "external_id"),
+        Index("idx_region", "region"),
+        Index("idx_provider", "provider"),
     )
 
 

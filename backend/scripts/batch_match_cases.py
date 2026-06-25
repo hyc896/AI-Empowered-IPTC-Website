@@ -46,6 +46,7 @@ class BatchMatchCasesService:
     # 上海地区消息源的 source_table 名称（前缀 mp_ + 源名 + _messages）
     SHANGHAI_SOURCE_TABLES = {
         'mp_people_sh_red_messages',
+        'mp_shanghai_local_messages',
         'mp_shanghai_observer_messages',
         'mp_thepaper_shanghai_messages',
     }
@@ -87,7 +88,6 @@ class BatchMatchCasesService:
         primary_parts = [
             getattr(row, 'title', '') or '',
             getattr(row, 'summary', '') or '',
-            getattr(row, 'region', '') or '',
         ]
         return {
             "primary": '\n'.join(str(part) for part in primary_parts if part),
@@ -108,7 +108,7 @@ class BatchMatchCasesService:
             }
         return {
             "is_local": False,
-            "reason": "来自上海源，但标题/摘要/地区字段未命中上海本地关键词"
+            "reason": "来自上海源，但标题/摘要字段未命中上海本地关键词"
         }
 
     def _row_allowed_for_scope(self, row: Any, table_name: str, scope: str) -> bool:
