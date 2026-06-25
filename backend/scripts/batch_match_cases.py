@@ -47,7 +47,6 @@ class BatchMatchCasesService:
         'mp_people_sh_red_messages',
         'mp_shanghai_observer_messages',
         'mp_thepaper_shanghai_messages',
-        'mp_eastday_messages',
     }
     VALID_SCOPES = {'all', 'national', 'shanghai'}
 

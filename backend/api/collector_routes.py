@@ -26,7 +26,6 @@ SHANGHAI_SOURCE_TABLES = {
     "mp_people_sh_red_messages",
     "mp_shanghai_observer_messages",
     "mp_thepaper_shanghai_messages",
-    "mp_eastday_messages",
 }
 
 # 创建路由器
