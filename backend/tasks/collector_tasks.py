@@ -193,12 +193,29 @@ def run_collector(self, source_name: str) -> Dict[str, Any]:
                 except Exception as release_err:
                     logger.warning(f"【Celery采集器】释放浏览器失败: {source_name}, {release_err}")
 
+        duration_seconds = (datetime.now() - start_time).total_seconds()
+        collected_count = result.get('collected', 0) if isinstance(result, dict) else 0
+        result_success = result.get('success', True) if isinstance(result, dict) else True
+        result_error = result.get('error') if isinstance(result, dict) else None
+
+        if not result_success:
+            logger.warning(
+                f"【Celery采集器】✗ 采集未完成: {source_name} "
+                f"(采集: {collected_count}, 耗时: {duration_seconds:.2f}s, 错误: {result_error})"
+            )
+            _record_collector_stats(source_name, success=False, error=result_error)
+            return {
+                'success': False,
+                'source_name': source_name,
+                'collected_count': collected_count,
+                'duration_seconds': duration_seconds,
+                'error': result_error
+            }
+
         # 7. 更新last_crawled_at时间戳
         _update_last_crawled_at(source_name)
 
         # 8. 返回结果
-        duration_seconds = (datetime.now() - start_time).total_seconds()
-        collected_count = result.get('collected', 0) if isinstance(result, dict) else 0
 
         logger.info(
             f"【Celery采集器】✓ 采集成功: {source_name} "

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # 采集器全局超时（秒）- 单次采集最大执行时间
 # 防止单个采集器卡死阻塞整个Worker（Windows Solo Pool是串行执行）
-COLLECTOR_TIMEOUT_SECONDS = 600  # 10分钟
+COLLECTOR_TIMEOUT_SECONDS = int(os.getenv("COLLECTOR_TIMEOUT_SECONDS", "600"))  # 默认10分钟
 
 
 class PlaywrightCollectorBase(ABC):

@@ -16,6 +16,7 @@
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import Optional, List, Dict
 
@@ -691,7 +692,7 @@ class FieldEnricherService:
 def get_field_enricher(
     max_concurrent: int = 2,
     max_retries: int = 3
-) -> FieldEnricherService:
+) -> Optional[FieldEnricherService]:
     """
     创建字段增强服务实例
 
@@ -706,6 +707,11 @@ def get_field_enricher(
     Returns:
         字段增强服务实例（每次调用都是新实例）
     """
+    enabled = os.getenv("COLLECTOR_FIELD_ENRICHER_ENABLED", "1").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        logger.info("FieldEnricher disabled by COLLECTOR_FIELD_ENRICHER_ENABLED")
+        return None
+
     # 每次调用创建新实例，避免solo pool模式下的Semaphore冲突
     instance = FieldEnricherService(
         max_concurrent=max_concurrent,

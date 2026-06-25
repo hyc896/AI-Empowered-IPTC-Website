@@ -11,10 +11,15 @@ Celery Beat Schedule
 """
 
 import logging
+import os
 from datetime import timedelta
 from celery.schedules import crontab
 
 logger = logging.getLogger(__name__)
+
+
+def _env_enabled(name: str, default: str = "1") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _get_collector_tasks() -> dict:
@@ -83,8 +88,12 @@ def get_beat_schedule() -> dict:
     }
 
     # 3. 采集器任务（动态加载，可能失败，不影响上面两个任务）
-    collector_tasks = _get_collector_tasks()
-    beat_schedule.update(collector_tasks)
+    if _env_enabled("COLLECTOR_SCHEDULE_ENABLED", "1"):
+        collector_tasks = _get_collector_tasks()
+        beat_schedule.update(collector_tasks)
+    else:
+        collector_tasks = {}
+        logger.info("[Beat] Collector schedules disabled by COLLECTOR_SCHEDULE_ENABLED")
 
     logger.info(f"【Beat调度】配置完成 — 固定任务: 2, 采集器任务: {len(collector_tasks)}")
 
@@ -97,6 +106,10 @@ _startup_triggered = False
 def trigger_startup_collectors():
     """Beat 启动时触发所有采集器（仅调用一次）"""
     global _startup_triggered
+    if not _env_enabled("COLLECTOR_TRIGGER_ON_STARTUP", "0"):
+        logger.info("[Beat] Startup collector trigger disabled by COLLECTOR_TRIGGER_ON_STARTUP")
+        return
+
     if _startup_triggered:
         return
 
