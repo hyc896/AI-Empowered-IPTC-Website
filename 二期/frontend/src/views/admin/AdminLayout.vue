@@ -6,16 +6,16 @@
         <span>逐光管理后台</span>
       </div>
       <nav class="nav">
-        <router-link to="/admin" exact class="nav-item">
+        <router-link to="/admin" :class="['nav-item', $route.path === '/admin' && 'active']">
           <span class="nav-icon">▣</span>系统概览
         </router-link>
-        <router-link to="/admin/sources" class="nav-item">
+        <router-link to="/admin/sources" :class="['nav-item', $route.path === '/admin/sources' && 'active']">
           <span class="nav-icon">◈</span>消息采集
         </router-link>
-        <router-link to="/admin/users" class="nav-item">
+        <router-link to="/admin/users" :class="['nav-item', $route.path === '/admin/users' && 'active']">
           <span class="nav-icon">◎</span>用户管理
         </router-link>
-        <router-link to="/admin/practices" class="nav-item">
+        <router-link to="/admin/practices" :class="['nav-item', $route.path === '/admin/practices' && 'active']">
           <span class="nav-icon">◆</span>实践项目
         </router-link>
       </nav>
@@ -28,8 +28,9 @@
 </template>
 
 <script setup>
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 const router = useRouter()
+const route = useRoute()
 </script>
 
 <style scoped>
@@ -72,7 +73,7 @@ const router = useRouter()
   border-left: 3px solid transparent;
 }
 .nav-item:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.04); }
-.nav-item.router-link-active {
+.nav-item.active {
   color: #ffd700;
   background: rgba(255,215,0,0.08);
   border-left-color: #ffd700;

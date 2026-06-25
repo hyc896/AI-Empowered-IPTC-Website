@@ -48,7 +48,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-.admin-practices { max-width: 960px; }
+.admin-practices { width: 100%; }
 .page-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 24px; }
 .page-header h2 { font-size: 22px; font-weight: 700; color: #fff; margin: 0; }
 .subtitle { font-size: 13px; color: rgba(255,255,255,0.4); }

@@ -19,24 +19,25 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { adminAPI } from '@/api/index'
+import { adminAPI, caseAPI } from '@/api/index'
 
 const loading = ref(true)
 const stats = ref([])
 
 onMounted(async () => {
   try {
-    const d = await adminAPI.getOverview()
+    const [d, cs] = await Promise.allSettled([adminAPI.getOverview(), caseAPI.getStatistics()])
+    const ov = d.status === 'fulfilled' ? d.value : {}
+    const ca = cs.status === 'fulfilled' ? cs.value : {}
     stats.value = [
-      { label: '实践提交', value: d.submission_count, icon: '📋' },
-      { label: '注册用户', value: d.user_count, icon: '👥' },
-      { label: '实践方案', value: d.plan_count, icon: '📝' },
-      { label: '场馆资源', value: d.venue_count, icon: '🏛' },
-      { label: '知识点', value: d.knowledge_point_count, icon: '🎯' },
+      { label: '教学案例', value: ca.total_cases ?? ov.submission_count, icon: '📚' },
+      { label: '注册用户', value: ov.user_count, icon: '👥' },
+      { label: '实践方案', value: ov.plan_count, icon: '📝' },
+      { label: '场馆资源', value: ov.venue_count, icon: '🏛' },
+      { label: '知识点覆盖', value: ca.total_knowledge_points || ov.knowledge_point_count, icon: '🎯' },
+      { label: '实践提交', value: ov.submission_count, icon: '📋' },
     ]
-  } finally {
-    loading.value = false
-  }
+  } finally { loading.value = false }
 })
 </script>
 
