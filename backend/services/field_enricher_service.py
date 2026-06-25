@@ -17,6 +17,7 @@
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Optional, List, Dict
 
@@ -149,6 +150,58 @@ class FieldEnricherService:
         if self._network_error_logged:
             logger.info("【FieldEnricher】网络已恢复")
             self._network_error_logged = False
+
+    def _strip_scalar_response(self, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        value = value.strip().strip('`').strip().strip('"“”\'')
+        value = re.sub(r'^(地区|区域|region|标签|分类)\s*[:：]\s*', '', value, flags=re.I)
+        return value.strip().strip('"“”\'') or None
+
+    def _contains_explanation(self, value: str) -> bool:
+        explanation_markers = (
+            '\n', '根据', '分析', '因此', '所以', '标题：', '内容：', '格式：',
+            '规则', '您提供', '我将', '可以标注', '返回', '输出'
+        )
+        return any(marker in value for marker in explanation_markers)
+
+    def _clean_region(self, value: Optional[str]) -> Optional[str]:
+        value = self._strip_scalar_response(value)
+        if not value or self._contains_explanation(value) or len(value) > 40:
+            return None
+        value = value.replace(' / ', '/').replace('／', '/').replace('\\', '/')
+        value = re.sub(r'\s+', '/', value)
+        if self._is_invalid_region(value):
+            return None
+        return value
+
+    def _clean_industry_tags(self, value: Optional[str]) -> Optional[str]:
+        value = self._strip_scalar_response(value)
+        if not value or self._contains_explanation(value) or len(value) > 80:
+            return None
+        value = value.replace('，', ',').replace('、', ',').replace('；', ',')
+        aliases = {
+            '半导体芯片': '半导体/芯片',
+            '航空制造': '航空航天',
+            'aerospace': '航空航天',
+            '其他其他行业': '其他行业',
+        }
+        normalized = []
+        for tag in [tag.strip().strip('"“”\'') for tag in value.split(',') if tag.strip()]:
+            tag = aliases.get(tag, tag)
+            if len(tag) <= 12 and tag not in normalized:
+                normalized.append(tag)
+        return ','.join(normalized[:3]) if normalized else None
+
+    def _clean_ai_tag(self, value: Optional[str]) -> Optional[str]:
+        value = self._strip_scalar_response(value)
+        if not value or self._contains_explanation(value):
+            return None
+        valid_tags = ["AI科研信息", "AI产业信息", "AI治理信息"]
+        for tag in valid_tags:
+            if tag in value:
+                return tag
+        return None
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """
@@ -335,15 +388,16 @@ class FieldEnricherService:
                         timeout=self.timeout
                     )
 
-                    region = response.choices[0].message.content.strip()
+                    raw_region = response.choices[0].message.content.strip()
+                    region = self._clean_region(raw_region)
 
-                    # 验证格式：不超过200字符，不包含非法字符
-                    if region and len(region) < 200 and not self._is_invalid_region(region):
+                    # 验证格式：短地区值，不包含解释性文本
+                    if region:
                         logger.debug(f"【FieldEnricher】地区分类成功: {region}")
                         self._reset_rate_limit_counter()  # 成功则重置429计数
                         return region
                     else:
-                        logger.warning(f"【FieldEnricher】地区分类结果格式异常: {region}")
+                        logger.warning(f"【FieldEnricher】地区分类结果格式异常: {raw_region}")
                         return None
 
                 except Exception as e:
@@ -419,26 +473,16 @@ class FieldEnricherService:
                         timeout=self.timeout
                     )
 
-                    tags = response.choices[0].message.content.strip()
+                    raw_tags = response.choices[0].message.content.strip()
+                    tags = self._clean_industry_tags(raw_tags)
 
-                    # 验证格式：逗号分隔，最多3个标签
+                    # 验证格式：逗号分隔，最多3个短标签
                     if tags:
-                        tag_list = [t.strip() for t in tags.split(',')]
-                        if len(tag_list) <= 3 and all(tag_list):
-                            logger.debug(f"【FieldEnricher】行业分类成功: {tags}")
-                            self._reset_rate_limit_counter()  # 成功则重置429计数
-                            return tags
-                        elif len(tag_list) > 3:
-                            # 只保留前3个
-                            tags = ','.join(tag_list[:3])
-                            logger.warning(f"【FieldEnricher】行业标签超过3个，截取前3个: {tags}")
-                            self._reset_rate_limit_counter()  # 成功则重置429计数
-                            return tags
-                        else:
-                            logger.warning(f"【FieldEnricher】行业分类结果格式异常: {tags}")
-                            return None
+                        logger.debug(f"【FieldEnricher】行业分类成功: {tags}")
+                        self._reset_rate_limit_counter()  # 成功则重置429计数
+                        return tags
                     else:
-                        logger.warning("【FieldEnricher】行业分类返回空结果")
+                        logger.warning(f"【FieldEnricher】行业分类结果格式异常: {raw_tags}")
                         return None
 
                 except Exception as e:
@@ -587,16 +631,16 @@ class FieldEnricherService:
                         timeout=self.timeout
                     )
 
-                    tag = response.choices[0].message.content.strip()
+                    raw_tag = response.choices[0].message.content.strip()
+                    tag = self._clean_ai_tag(raw_tag)
 
                     # 验证格式：必须是三个标签之一
-                    valid_tags = ["AI科研信息", "AI产业信息", "AI治理信息"]
-                    if tag in valid_tags:
+                    if tag:
                         logger.debug(f"【FieldEnricher】AI标签分类成功: {tag}")
                         self._reset_rate_limit_counter()
                         return tag
                     else:
-                        logger.warning(f"【FieldEnricher】AI标签分类结果异常: {tag}")
+                        logger.warning(f"【FieldEnricher】AI标签分类结果异常: {raw_tag}")
                         return None
 
                 except Exception as e:

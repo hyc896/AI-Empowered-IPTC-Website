@@ -8,6 +8,7 @@ import json
 import sys
 import os
 import logging
+import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Set
 from collections import defaultdict
@@ -48,6 +49,13 @@ class BatchMatchCasesService:
         'mp_shanghai_observer_messages',
         'mp_thepaper_shanghai_messages',
     }
+    SHANGHAI_LOCAL_KEYWORDS = {
+        '上海', '沪上', '申城', '浦东', '浦东新区', '黄浦', '徐汇', '长宁', '静安', '普陀',
+        '虹口', '杨浦', '闵行', '宝山', '嘉定', '金山', '松江', '青浦', '奉贤', '崇明',
+        '人民广场', '外滩', '豫园', '张园', '前滩', '陆家嘴', '虹桥', '临港', '五角场',
+        '老成都北路', '辅德里', '中共一大', '中共二大', '一大会址', '二大会址',
+        '龙华烈士陵园', '四行仓库', '上海航空', '上海高考', '上海市委', '上海市'
+    }
     VALID_SCOPES = {'all', 'national', 'shanghai'}
 
     # 配置参数
@@ -73,6 +81,36 @@ class BatchMatchCasesService:
 
     def _source_scope_for_table(self, table_name: str) -> str:
         return 'shanghai' if table_name in self.SHANGHAI_SOURCE_TABLES else 'national'
+
+    def _message_text_for_scope(self, row: Any) -> str:
+        parts = [
+            getattr(row, 'title', '') or '',
+            getattr(row, 'summary', '') or '',
+            getattr(row, 'content', '') or '',
+            getattr(row, 'region', '') or '',
+        ]
+        return '\n'.join(str(part) for part in parts if part)
+
+    def _shanghai_local_relevance(self, row: Any) -> Dict[str, Any]:
+        text = self._message_text_for_scope(row)
+        compact_text = re.sub(r'\s+', '', text)
+        hits = [keyword for keyword in self.SHANGHAI_LOCAL_KEYWORDS if keyword in compact_text]
+        if hits:
+            return {
+                "is_local": True,
+                "reason": f"命中上海本地关键词: {', '.join(hits[:5])}"
+            }
+        return {
+            "is_local": False,
+            "reason": "来自上海源，但正文/标题/地区字段未命中上海本地关键词"
+        }
+
+    def _row_allowed_for_scope(self, row: Any, table_name: str, scope: str) -> bool:
+        if self._normalize_scope(scope) != 'shanghai':
+            return True
+        if table_name not in self.SHANGHAI_SOURCE_TABLES:
+            return False
+        return bool(self._shanghai_local_relevance(row)["is_local"])
 
     def _scoped_tables(self, scope: str = 'all') -> Dict[str, Any]:
         return {
@@ -406,6 +444,8 @@ class BatchMatchCasesService:
 
                         results = query.all()
                         for row in results:
+                            if not self._row_allowed_for_scope(row, table_name, scope):
+                                continue
                             url = getattr(row, 'url', None) or getattr(row, 'source_url', '')
                             messages.append({
                                 "id": row.id,
@@ -442,6 +482,8 @@ class BatchMatchCasesService:
                     results = query.all()
 
                     for row in results:
+                        if not self._row_allowed_for_scope(row, table_name, scope):
+                            continue
                         # 兼容新旧表的url字段（旧表：source_url，新表：url）
                         url = getattr(row, 'url', None) or getattr(row, 'source_url', '')
 
@@ -470,11 +512,14 @@ class BatchMatchCasesService:
         scope: str = 'all',
         limit: int = 100,
         source_table: Optional[str] = None,
-        unprocessed_only: bool = False
+        unprocessed_only: bool = False,
+        local_only: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
         """List recently collected messages for review before matching."""
         messages = []
         scope = self._normalize_scope(scope)
+        if local_only is None:
+            local_only = scope == 'shanghai'
 
         try:
             with create_session() as db:
@@ -493,6 +538,12 @@ class BatchMatchCasesService:
 
                     rows = query.order_by(orm_class.published_at.desc()).limit(limit).all()
                     for row in rows:
+                        local_relevance = self._shanghai_local_relevance(row) if table_name in self.SHANGHAI_SOURCE_TABLES else {
+                            "is_local": False,
+                            "reason": "非上海源"
+                        }
+                        if scope == 'shanghai' and local_only and not local_relevance["is_local"]:
+                            continue
                         messages.append({
                             "id": row.id,
                             "title": row.title,
@@ -505,6 +556,8 @@ class BatchMatchCasesService:
                             "region": getattr(row, 'region', None),
                             "industry_tags": getattr(row, 'industry_tags', None),
                             "ai_tag": getattr(row, 'ai_tag', None),
+                            "local_relevance": local_relevance["is_local"],
+                            "local_relevance_reason": local_relevance["reason"],
                         })
 
             messages.sort(key=lambda x: x.get("published_at") or "", reverse=True)
@@ -533,6 +586,12 @@ class BatchMatchCasesService:
                 for rel in relations:
                     orm_class = self.message_tables.get(rel.source_table)
                     msg = db.query(orm_class).filter_by(id=rel.message_id).first() if orm_class else None
+                    if scope == 'shanghai' and msg and not self._row_allowed_for_scope(msg, rel.source_table, scope):
+                        continue
+                    local_relevance = self._shanghai_local_relevance(msg) if msg and rel.source_table in self.SHANGHAI_SOURCE_TABLES else {
+                        "is_local": False,
+                        "reason": "非上海源"
+                    }
                     rows_out.append({
                         "relation_id": rel.id,
                         "message_id": rel.message_id,
@@ -544,6 +603,8 @@ class BatchMatchCasesService:
                         "knowledge_point_name": rel.knowledge_point_name,
                         "similarity_score": rel.similarity_score,
                         "created_at": rel.created_at.isoformat() if rel.created_at else None,
+                        "local_relevance": local_relevance["is_local"],
+                        "local_relevance_reason": local_relevance["reason"],
                     })
 
             return rows_out
@@ -558,11 +619,15 @@ class BatchMatchCasesService:
         candidates = []
 
         for kp_id, stat in stats.items():
-            messages = self._get_related_messages(kp_id, scope=scope)[:3]
+            related_messages = self._get_related_messages(kp_id, scope=scope)
+            if len(related_messages) < self.CASE_GENERATION_THRESHOLD:
+                continue
+            messages = related_messages[:3]
             candidates.append({
                 "knowledge_point_id": kp_id,
                 "knowledge_point_name": stat["name"],
-                "message_count": stat["count"],
+                "message_count": len(related_messages),
+                "raw_relation_count": stat["count"],
                 "scope": scope,
                 "sample_messages": [
                     {
@@ -747,6 +812,12 @@ class BatchMatchCasesService:
             try:
                 # 获取该知识点的所有关联消息
                 messages = self._get_related_messages(kp_id, scope=scope)
+                if len(messages) < self.CASE_GENERATION_THRESHOLD:
+                    self.logger.info(
+                        f"  跳过案例生成: 过滤后可用消息 {len(messages)} 条，"
+                        f"低于阈值 {self.CASE_GENERATION_THRESHOLD}"
+                    )
+                    continue
 
                 # 调用LLM生成案例
                 case = self._generate_case_for_knowledge_point(
@@ -845,6 +916,8 @@ class BatchMatchCasesService:
                     # 查询消息
                     msg = db.query(orm_class).filter_by(id=rel.message_id).first()
                     if msg:
+                        if not self._row_allowed_for_scope(msg, rel.source_table, scope):
+                            continue
                         messages.append({
                             "id": msg.id,
                             "title": msg.title,

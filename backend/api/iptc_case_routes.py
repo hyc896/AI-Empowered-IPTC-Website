@@ -97,6 +97,7 @@ def list_message_candidates(
     limit: int = Query(100, ge=1, le=500),
     source_table: Optional[str] = Query(None),
     unprocessed_only: bool = Query(False),
+    local_only: Optional[bool] = Query(None),
 ):
     try:
         from backend.scripts.batch_match_cases import BatchMatchCasesService
@@ -109,6 +110,7 @@ def list_message_candidates(
                 limit=limit,
                 source_table=source_table,
                 unprocessed_only=unprocessed_only,
+                local_only=local_only,
             )
         }
     except Exception as e:
