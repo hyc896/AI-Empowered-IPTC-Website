@@ -326,10 +326,13 @@ class FieldEnricherService:
 
                     # 调用Fast LLM
                     llm_client = self._get_llm_client()
-                    response = await llm_client.generate_with_messages_async(
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=20000,
-                        source="FieldEnricher:region"
+                    response = await asyncio.wait_for(
+                        llm_client.generate_with_messages_async(
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=80,
+                            source="FieldEnricher:region"
+                        ),
+                        timeout=self.timeout
                     )
 
                     region = response.choices[0].message.content.strip()
@@ -407,10 +410,13 @@ class FieldEnricherService:
 
                     # 调用Fast LLM
                     llm_client = self._get_llm_client()
-                    response = await llm_client.generate_with_messages_async(
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=20000,
-                        source="FieldEnricher:industry"
+                    response = await asyncio.wait_for(
+                        llm_client.generate_with_messages_async(
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=80,
+                            source="FieldEnricher:industry"
+                        ),
+                        timeout=self.timeout
                     )
 
                     tags = response.choices[0].message.content.strip()
@@ -572,10 +578,13 @@ class FieldEnricherService:
 
                     # 调用Fast LLM
                     llm_client = self._get_llm_client()
-                    response = await llm_client.generate_with_messages_async(
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=20000,
-                        source="FieldEnricher:ai_tag"
+                    response = await asyncio.wait_for(
+                        llm_client.generate_with_messages_async(
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=40,
+                            source="FieldEnricher:ai_tag"
+                        ),
+                        timeout=self.timeout
                     )
 
                     tag = response.choices[0].message.content.strip()
@@ -712,10 +721,14 @@ def get_field_enricher(
         logger.info("FieldEnricher disabled by COLLECTOR_FIELD_ENRICHER_ENABLED")
         return None
 
+    max_retries = int(os.getenv("COLLECTOR_FIELD_ENRICHER_RETRIES", str(max_retries)))
+    timeout = int(os.getenv("COLLECTOR_FIELD_ENRICHER_TIMEOUT", "12"))
+
     # 每次调用创建新实例，避免solo pool模式下的Semaphore冲突
     instance = FieldEnricherService(
         max_concurrent=max_concurrent,
-        max_retries=max_retries
+        max_retries=max_retries,
+        timeout=timeout
     )
-    logger.debug(f"【FieldEnricher】创建新实例: 并发={max_concurrent}, 重试={max_retries}")
+    logger.debug(f"【FieldEnricher】创建新实例: 并发={max_concurrent}, 重试={max_retries}, 超时={timeout}s")
     return instance

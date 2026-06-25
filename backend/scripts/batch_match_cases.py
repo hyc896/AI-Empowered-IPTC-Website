@@ -9,7 +9,7 @@ import sys
 import os
 import logging
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Set
 from collections import defaultdict
 from pathlib import Path
 
@@ -49,6 +49,7 @@ class BatchMatchCasesService:
         'mp_thepaper_shanghai_messages',
         'mp_eastday_messages',
     }
+    VALID_SCOPES = {'all', 'national', 'shanghai'}
 
     # 配置参数
     BATCH_SIZE = None                   # 批量处理消息数（None表示处理所有未处理消息）
@@ -56,6 +57,30 @@ class BatchMatchCasesService:
     CASE_GENERATION_THRESHOLD = 4       # 案例生成阈值（提高到4条以确保案例质量）
     MAX_MESSAGES_PER_CASE = 6           # 每个案例最多使用的消息数量
     MAX_MESSAGE_USAGE = 3               # 每条消息最多使用次数（增加以充分利用有限消息）
+
+    def _normalize_scope(self, scope: str = 'all') -> str:
+        scope = (scope or 'all').lower()
+        if scope not in self.VALID_SCOPES:
+            raise ValueError(f"Unsupported scope: {scope}; expected one of {sorted(self.VALID_SCOPES)}")
+        return scope
+
+    def _table_in_scope(self, table_name: str, scope: str = 'all') -> bool:
+        scope = self._normalize_scope(scope)
+        if scope == 'shanghai':
+            return table_name in self.SHANGHAI_SOURCE_TABLES
+        if scope == 'national':
+            return table_name not in self.SHANGHAI_SOURCE_TABLES
+        return True
+
+    def _source_scope_for_table(self, table_name: str) -> str:
+        return 'shanghai' if table_name in self.SHANGHAI_SOURCE_TABLES else 'national'
+
+    def _scoped_tables(self, scope: str = 'all') -> Dict[str, Any]:
+        return {
+            table_name: orm_class
+            for table_name, orm_class in self.message_tables.items()
+            if self._table_in_scope(table_name, scope)
+        }
 
     def __init__(self):
         """初始化服务"""
@@ -207,7 +232,15 @@ class BatchMatchCasesService:
             self.logger.error(f"[初始化] 失败: {e}")
             raise
 
-    def run_batch_match(self, limit: int = None, dry_run: bool = False, generate_cases: bool = True):
+    def run_batch_match(
+        self,
+        limit: int = None,
+        dry_run: bool = False,
+        generate_cases: bool = True,
+        scope: str = 'all',
+        message_ids: Optional[List[str]] = None,
+        knowledge_point_ids: Optional[List[str]] = None
+    ):
         """
         执行批量撞库任务
 
@@ -225,7 +258,8 @@ class BatchMatchCasesService:
             # Step 1: 获取待处理消息
             # 如果指定了limit，使用limit；否则使用BATCH_SIZE（可能为None表示处理所有）
             batch_size = limit if limit else self.BATCH_SIZE
-            messages = self._get_unprocessed_messages(batch_size)
+            scope = self._normalize_scope(scope)
+            messages = self._get_unprocessed_messages(batch_size, scope=scope, message_ids=message_ids)
 
             # 只有在设置了batch_size且未指定limit时才检查阈值
             if batch_size is not None and len(messages) < batch_size and not limit:
@@ -255,11 +289,11 @@ class BatchMatchCasesService:
 
                 if generate_cases:
                     # Step 4: 统计知识点关联数
-                    kp_stats = self._calculate_kp_statistics()
+                    kp_stats = self._calculate_kp_statistics(scope=scope, knowledge_point_ids=knowledge_point_ids)
                     self.logger.info(f"统计到 {len(kp_stats)} 个知识点有关联消息")
 
                     # Step 5: 触发案例生成
-                    generated_cases = self._generate_cases(kp_stats)
+                    generated_cases = self._generate_cases(kp_stats, scope=scope)
                 else:
                     self.logger.info("[模式] 仅执行撞库匹配，跳过案例生成")
             else:
@@ -275,6 +309,7 @@ class BatchMatchCasesService:
             return {
                 "status": "success",
                 "mode": "full_pipeline" if generate_cases else "matching_only",
+                "scope": scope,
                 "total_messages": len(messages),
                 "matched_pairs": len(matches),
                 "generated_cases": len(generated_cases)
@@ -287,7 +322,12 @@ class BatchMatchCasesService:
                 "error": str(e)
             }
 
-    def run_case_generation(self, dry_run: bool = False):
+    def run_case_generation(
+        self,
+        dry_run: bool = False,
+        scope: str = 'all',
+        knowledge_point_ids: Optional[List[str]] = None
+    ):
         """
         仅基于已保存的消息-知识点关联生成案例。
         不重新采集、不重新做向量撞库，适合在修复提示词或模型配置后单独重跑。
@@ -299,14 +339,15 @@ class BatchMatchCasesService:
         self.logger.info("="*60)
 
         try:
-            kp_stats = self._calculate_kp_statistics()
+            scope = self._normalize_scope(scope)
+            kp_stats = self._calculate_kp_statistics(scope=scope, knowledge_point_ids=knowledge_point_ids)
             self.logger.info(f"统计到 {len(kp_stats)} 个知识点有关联消息")
 
             if dry_run:
                 generated_cases = []
                 self.logger.info("[试运行] 跳过案例保存")
             else:
-                generated_cases = self._generate_cases(kp_stats)
+                generated_cases = self._generate_cases(kp_stats, scope=scope)
 
             self.logger.info("="*60)
             self.logger.info("案例生成任务完成")
@@ -317,6 +358,7 @@ class BatchMatchCasesService:
             return {
                 "status": "success",
                 "mode": "case_generation_only",
+                "scope": scope,
                 "candidate_knowledge_points": len(kp_stats),
                 "generated_cases": len(generated_cases)
             }
@@ -329,7 +371,12 @@ class BatchMatchCasesService:
                 "error": str(e)
             }
 
-    def _get_unprocessed_messages(self, limit: int = None) -> List[Dict[str, Any]]:
+    def _get_unprocessed_messages(
+        self,
+        limit: int = None,
+        scope: str = 'all',
+        message_ids: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
         """
         获取未处理的消息
 
@@ -346,7 +393,35 @@ class BatchMatchCasesService:
                 # 如果limit为None，则获取所有未处理消息；否则每个表固定查询100条
                 per_table_limit = None if limit is None else 100
 
-                for table_name, orm_class in self.message_tables.items():
+                selected_ids: Optional[Set[str]] = set(message_ids or []) or None
+
+                for table_name, orm_class in self._scoped_tables(scope).items():
+                    if selected_ids:
+                        query = db.query(orm_class).filter(
+                            orm_class.id.in_(selected_ids)
+                        ).order_by(
+                            orm_class.published_at.desc()
+                        )
+                        if per_table_limit is not None:
+                            query = query.limit(per_table_limit)
+
+                        results = query.all()
+                        for row in results:
+                            url = getattr(row, 'url', None) or getattr(row, 'source_url', '')
+                            messages.append({
+                                "id": row.id,
+                                "title": row.title,
+                                "content": row.content,
+                                "summary": row.summary,
+                                "published_at": row.published_at,
+                                "url": url,
+                                "provider": getattr(row, 'provider', '未知'),
+                                "source_table": table_name,
+                                "source_scope": self._source_scope_for_table(table_name)
+                            })
+                        self.logger.debug(f"[{table_name}] 获取 {len(results)} 条指定消息")
+                        continue
+
                     # 子查询：已处理的消息ID
                     processed_ids_subquery = db.query(
                         IPTCMessageKnowledgeRelation.message_id
@@ -379,7 +454,8 @@ class BatchMatchCasesService:
                             "published_at": row.published_at,
                             "url": url,
                             "provider": getattr(row, 'provider', '未知'),
-                            "source_table": table_name
+                            "source_table": table_name,
+                            "source_scope": self._source_scope_for_table(table_name)
                         })
 
                     self.logger.debug(f"[{table_name}] 获取 {len(results)} 条未处理消息")
@@ -389,6 +465,119 @@ class BatchMatchCasesService:
             return []
 
         return messages[:limit]
+
+    def list_collected_messages(
+        self,
+        scope: str = 'all',
+        limit: int = 100,
+        source_table: Optional[str] = None,
+        unprocessed_only: bool = False
+    ) -> List[Dict[str, Any]]:
+        """List recently collected messages for review before matching."""
+        messages = []
+        scope = self._normalize_scope(scope)
+
+        try:
+            with create_session() as db:
+                for table_name, orm_class in self._scoped_tables(scope).items():
+                    if source_table and table_name != source_table:
+                        continue
+
+                    query = db.query(orm_class)
+                    if unprocessed_only:
+                        processed_ids_subquery = db.query(
+                            IPTCMessageKnowledgeRelation.message_id
+                        ).filter(
+                            IPTCMessageKnowledgeRelation.source_table == table_name
+                        ).subquery()
+                        query = query.filter(~orm_class.id.in_(processed_ids_subquery))
+
+                    rows = query.order_by(orm_class.published_at.desc()).limit(limit).all()
+                    for row in rows:
+                        messages.append({
+                            "id": row.id,
+                            "title": row.title,
+                            "summary": row.summary,
+                            "published_at": row.published_at.isoformat() if row.published_at else None,
+                            "url": getattr(row, 'url', None) or getattr(row, 'source_url', ''),
+                            "provider": getattr(row, 'provider', '未知'),
+                            "source_table": table_name,
+                            "source_scope": self._source_scope_for_table(table_name),
+                            "region": getattr(row, 'region', None),
+                            "industry_tags": getattr(row, 'industry_tags', None),
+                            "ai_tag": getattr(row, 'ai_tag', None),
+                        })
+
+            messages.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+            return messages[:limit]
+        except Exception as e:
+            self.logger.error(f"[错误] 获取采集消息列表失败: {e}", exc_info=True)
+            return []
+
+    def list_match_results(self, scope: str = 'all', limit: int = 200) -> List[Dict[str, Any]]:
+        """List saved message-knowledge matches for review."""
+        rows_out = []
+        scope = self._normalize_scope(scope)
+
+        try:
+            with create_session() as db:
+                query = db.query(IPTCMessageKnowledgeRelation)
+                scoped_tables = list(self._scoped_tables(scope).keys())
+                if scope != 'all':
+                    query = query.filter(IPTCMessageKnowledgeRelation.source_table.in_(scoped_tables))
+
+                relations = query.order_by(
+                    IPTCMessageKnowledgeRelation.created_at.desc(),
+                    IPTCMessageKnowledgeRelation.similarity_score.desc()
+                ).limit(limit).all()
+
+                for rel in relations:
+                    orm_class = self.message_tables.get(rel.source_table)
+                    msg = db.query(orm_class).filter_by(id=rel.message_id).first() if orm_class else None
+                    rows_out.append({
+                        "relation_id": rel.id,
+                        "message_id": rel.message_id,
+                        "source_table": rel.source_table,
+                        "source_scope": self._source_scope_for_table(rel.source_table),
+                        "message_title": msg.title if msg else None,
+                        "message_url": (getattr(msg, 'url', None) or getattr(msg, 'source_url', '')) if msg else None,
+                        "knowledge_point_id": rel.knowledge_point_id,
+                        "knowledge_point_name": rel.knowledge_point_name,
+                        "similarity_score": rel.similarity_score,
+                        "created_at": rel.created_at.isoformat() if rel.created_at else None,
+                    })
+
+            return rows_out
+        except Exception as e:
+            self.logger.error(f"[错误] 获取匹配列表失败: {e}", exc_info=True)
+            return []
+
+    def list_case_candidates(self, scope: str = 'all', limit: int = 100) -> List[Dict[str, Any]]:
+        """List knowledge-point candidates that have enough matched messages to generate cases."""
+        scope = self._normalize_scope(scope)
+        stats = self._calculate_kp_statistics(scope=scope)
+        candidates = []
+
+        for kp_id, stat in stats.items():
+            messages = self._get_related_messages(kp_id, scope=scope)[:3]
+            candidates.append({
+                "knowledge_point_id": kp_id,
+                "knowledge_point_name": stat["name"],
+                "message_count": stat["count"],
+                "scope": scope,
+                "sample_messages": [
+                    {
+                        "id": msg["id"],
+                        "title": msg["title"],
+                        "source_table": msg["source_table"],
+                        "similarity": msg.get("similarity"),
+                    }
+                    for msg in messages
+                ],
+            })
+
+        candidates.sort(key=lambda x: x["message_count"], reverse=True)
+        return candidates[:limit]
 
     def _match_knowledge_points(self, messages: List[Dict]) -> List[Dict]:
         """
@@ -491,7 +680,11 @@ class BatchMatchCasesService:
             self.logger.error(f"[错误] 保存关联关系失败: {e}")
             raise
 
-    def _calculate_kp_statistics(self) -> Dict[str, Dict]:
+    def _calculate_kp_statistics(
+        self,
+        scope: str = 'all',
+        knowledge_point_ids: Optional[List[str]] = None
+    ) -> Dict[str, Dict]:
         """
         统计每个知识点的关联消息数
 
@@ -506,11 +699,19 @@ class BatchMatchCasesService:
             with create_session() as db:
                 # 统计每个知识点的消息数（不排除已生成案例的知识点）
                 from sqlalchemy import func
-                results = db.query(
+                query = db.query(
                     IPTCMessageKnowledgeRelation.knowledge_point_id,
                     IPTCMessageKnowledgeRelation.knowledge_point_name,
                     func.count(IPTCMessageKnowledgeRelation.message_id).label('count')
-                ).group_by(
+                )
+
+                scoped_tables = list(self._scoped_tables(scope).keys())
+                if scope != 'all':
+                    query = query.filter(IPTCMessageKnowledgeRelation.source_table.in_(scoped_tables))
+                if knowledge_point_ids:
+                    query = query.filter(IPTCMessageKnowledgeRelation.knowledge_point_id.in_(knowledge_point_ids))
+
+                results = query.group_by(
                     IPTCMessageKnowledgeRelation.knowledge_point_id,
                     IPTCMessageKnowledgeRelation.knowledge_point_name
                 ).having(
@@ -520,7 +721,8 @@ class BatchMatchCasesService:
                 for row in results:
                     kp_stats[row[0]] = {
                         "name": row[1],
-                        "count": row[2]
+                        "count": row[2],
+                        "scope": scope
                     }
 
         except Exception as e:
@@ -528,7 +730,7 @@ class BatchMatchCasesService:
 
         return kp_stats
 
-    def _generate_cases(self, kp_stats: Dict[str, Dict]) -> List[Dict]:
+    def _generate_cases(self, kp_stats: Dict[str, Dict], scope: str = 'all') -> List[Dict]:
         """
         生成案例
 
@@ -545,7 +747,7 @@ class BatchMatchCasesService:
 
             try:
                 # 获取该知识点的所有关联消息
-                messages = self._get_related_messages(kp_id)
+                messages = self._get_related_messages(kp_id, scope=scope)
 
                 # 调用LLM生成案例
                 case = self._generate_case_for_knowledge_point(
@@ -599,7 +801,7 @@ class BatchMatchCasesService:
 
         return dict(usage_count)
 
-    def _get_related_messages(self, kp_id: str) -> List[Dict]:
+    def _get_related_messages(self, kp_id: str, scope: str = 'all') -> List[Dict]:
         """
         获取知识点关联的消息（最多MAX_MESSAGES_PER_CASE条，且每条消息使用次数<MAX_MESSAGE_USAGE）
 
@@ -617,9 +819,14 @@ class BatchMatchCasesService:
                 message_usage_count = self._count_message_usage(db)
 
                 # 2. 查询知识点关联的所有消息（不限制数量，因为需要过滤）
-                relations = db.query(IPTCMessageKnowledgeRelation).filter_by(
+                query = db.query(IPTCMessageKnowledgeRelation).filter_by(
                     knowledge_point_id=kp_id
-                ).order_by(
+                )
+                scoped_tables = list(self._scoped_tables(scope).keys())
+                if scope != 'all':
+                    query = query.filter(IPTCMessageKnowledgeRelation.source_table.in_(scoped_tables))
+
+                relations = query.order_by(
                     IPTCMessageKnowledgeRelation.similarity_score.desc()
                 ).all()
 
@@ -648,6 +855,7 @@ class BatchMatchCasesService:
                             "published_at": msg.published_at,
                             "url": getattr(msg, 'url', None) or getattr(msg, 'source_url', ''),
                             "source_table": rel.source_table,
+                            "source_scope": self._source_scope_for_table(rel.source_table),
                             "similarity": rel.similarity_score
                         })
 

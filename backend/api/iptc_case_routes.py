@@ -5,8 +5,9 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import List, Optional
 
 from backend.database.connection import get_db_session
 from backend.services.iptc_case_service import IPTCCaseService
@@ -17,34 +18,135 @@ from backend.database.entities import IPTCCase
 router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
 
 
+class PipelineTriggerRequest(BaseModel):
+    scope: str = Field("all", description="all/national/shanghai")
+    message_ids: Optional[List[str]] = None
+    knowledge_point_ids: Optional[List[str]] = None
+    case_ids: Optional[List[str]] = None
+    limit: Optional[int] = None
+
+
 @router.post("/trigger-matching")
-def trigger_matching():
+def trigger_matching(request: Optional[PipelineTriggerRequest] = None):
     try:
         from backend.tasks.case_tasks import run_matching_only
-        task = run_matching_only.apply_async(queue="default")
+        request = request or PipelineTriggerRequest()
+        task = run_matching_only.apply_async(
+            kwargs={
+                "scope": request.scope,
+                "message_ids": request.message_ids,
+            },
+            queue="default"
+        )
         return {"task_id": task.id, "message": "撞库匹配任务已触发"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
 
 
 @router.post("/trigger-case-generation")
-def trigger_case_generation():
+def trigger_case_generation(request: Optional[PipelineTriggerRequest] = None):
     try:
         from backend.tasks.case_tasks import run_case_generation_only
-        task = run_case_generation_only.apply_async(queue="default")
+        request = request or PipelineTriggerRequest()
+        task = run_case_generation_only.apply_async(
+            kwargs={
+                "scope": request.scope,
+                "knowledge_point_ids": request.knowledge_point_ids,
+            },
+            queue="default"
+        )
         return {"task_id": task.id, "message": "案例生成任务已触发"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
 
 
 @router.post("/trigger-full-pipeline")
-def trigger_full_pipeline():
+def trigger_full_pipeline(request: Optional[PipelineTriggerRequest] = None):
     try:
         from backend.tasks.case_tasks import run_batch_match_cases
-        task = run_batch_match_cases.apply_async(queue="default")
+        request = request or PipelineTriggerRequest()
+        task = run_batch_match_cases.apply_async(
+            kwargs={
+                "scope": request.scope,
+                "message_ids": request.message_ids,
+            },
+            queue="default"
+        )
         return {"task_id": task.id, "message": "全流程撞库与案例生成任务已触发"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
+
+
+@router.post("/trigger-venue-sync")
+def trigger_venue_sync(request: Optional[PipelineTriggerRequest] = None):
+    try:
+        from backend.tasks.case_tasks import run_venue_sync_from_cases
+        request = request or PipelineTriggerRequest(scope="shanghai")
+        task = run_venue_sync_from_cases.apply_async(
+            kwargs={"case_ids": request.case_ids},
+            queue="default"
+        )
+        return {"task_id": task.id, "message": "上海案例实践地点提取任务已触发"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
+
+
+@router.get("/candidates/messages")
+def list_message_candidates(
+    scope: str = Query("all", pattern="^(all|national|shanghai)$"),
+    limit: int = Query(100, ge=1, le=500),
+    source_table: Optional[str] = Query(None),
+    unprocessed_only: bool = Query(False),
+):
+    try:
+        from backend.scripts.batch_match_cases import BatchMatchCasesService
+        service = BatchMatchCasesService()
+        return {
+            "code": 200,
+            "message": "success",
+            "data": service.list_collected_messages(
+                scope=scope,
+                limit=limit,
+                source_table=source_table,
+                unprocessed_only=unprocessed_only,
+            )
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取消息候选列表失败: {str(e)}")
+
+
+@router.get("/candidates/matches")
+def list_match_candidates(
+    scope: str = Query("all", pattern="^(all|national|shanghai)$"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    try:
+        from backend.scripts.batch_match_cases import BatchMatchCasesService
+        service = BatchMatchCasesService()
+        return {
+            "code": 200,
+            "message": "success",
+            "data": service.list_match_results(scope=scope, limit=limit)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取匹配列表失败: {str(e)}")
+
+
+@router.get("/candidates/cases")
+def list_case_candidates(
+    scope: str = Query("all", pattern="^(all|national|shanghai)$"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    try:
+        from backend.scripts.batch_match_cases import BatchMatchCasesService
+        service = BatchMatchCasesService()
+        return {
+            "code": 200,
+            "message": "success",
+            "data": service.list_case_candidates(scope=scope, limit=limit)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取案例候选列表失败: {str(e)}")
 
 @router.get("/cases")
 def get_cases(

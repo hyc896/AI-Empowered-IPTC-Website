@@ -54,7 +54,7 @@ class LLMClient:
         self.model = config.get("model")
         self.api_key = config.get("api_key")
         self.base_url = config.get("base_url")
-        self.timeout = config.get("timeout", 60)
+        self.timeout = float(config.get("timeout", 60))
 
         if not self.api_key or not self.base_url or not self.model:
             raise ValueError("API key, base URL, and model must be provided")

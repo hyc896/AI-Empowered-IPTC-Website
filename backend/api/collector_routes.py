@@ -22,6 +22,13 @@ from ..api.schemas import CollectorActionResponse
 
 logger = logging.getLogger(__name__)
 
+SHANGHAI_SOURCE_TABLES = {
+    "mp_people_sh_red_messages",
+    "mp_shanghai_observer_messages",
+    "mp_thepaper_shanghai_messages",
+    "mp_eastday_messages",
+}
+
 # 创建路由器
 router = APIRouter(
     prefix="/collectors",
@@ -45,10 +52,13 @@ async def get_collector_list() -> List[Dict[str, Any]]:
             collector_list = []
             for source in sources:
                 config = source.config or {}
+                mysql_table = config.get("mysql_table")
                 collector_list.append({
                     "name": source.name,
                     "display_name": source.display_name or source.name,
                     "category": source.category,
+                    "mysql_table": mysql_table,
+                    "source_scope": "shanghai" if mysql_table in SHANGHAI_SOURCE_TABLES else "national",
                     "interval": config.get("interval", 300),
                     "last_crawled_at": source.last_crawled_at.isoformat() if source.last_crawled_at else None
                 })

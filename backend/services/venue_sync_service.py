@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ class VenueSyncService:
         self._main_session = sessionmaker(bind=self._main_engine, autocommit=False, autoflush=False)
         self._practice_session = sessionmaker(bind=self._practice_engine, autocommit=False, autoflush=False)
 
-    async def sync_venues_from_cases(self) -> dict:
+    async def sync_venues_from_cases(self, case_ids: Optional[List[str]] = None) -> dict:
         """
         主入口：扫描上海案例并提取场馆
 
@@ -95,7 +95,7 @@ class VenueSyncService:
         if client is None:
             raise RuntimeError("Fast LLM 客户端未初始化")
 
-        cases = self._fetch_pending_cases()
+        cases = self._fetch_pending_cases(case_ids=case_ids)
         logger.info(f"【场馆同步】找到 {len(cases)} 条待处理上海案例")
 
         synced = 0
@@ -118,18 +118,25 @@ class VenueSyncService:
         logger.info(f"【场馆同步】完成 — 已处理 {synced}，跳过 {skipped}，新增场馆 {venues_added}")
         return {'synced': synced, 'skipped': skipped, 'venues_added': venues_added}
 
-    def _fetch_pending_cases(self) -> List[dict]:
+    def _fetch_pending_cases(self, case_ids: Optional[List[str]] = None) -> List[dict]:
         """查询待处理的上海案例（mentioned_locations IS NULL）"""
         sql = text("""
             SELECT id, title, content
             FROM iptc_cases
             WHERE primary_region = '上海'
               AND mentioned_locations IS NULL
+              AND (:case_ids_empty = 1 OR id IN :case_ids)
             ORDER BY created_at DESC
             LIMIT 200
-        """)
+        """).bindparams(bindparam("case_ids", expanding=True))
         with self._main_engine.connect() as conn:
-            rows = conn.execute(sql).fetchall()
+            rows = conn.execute(
+                sql,
+                {
+                    "case_ids_empty": 0 if case_ids else 1,
+                    "case_ids": case_ids or ["__none__"],
+                }
+            ).fetchall()
         return [{'id': str(r[0]), 'title': r[1], 'content': r[2]} for r in rows]
 
     async def _extract_venues(self, client, case: dict) -> List[dict]:

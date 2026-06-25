@@ -6,7 +6,7 @@
 
 import logging
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 from backend.tasks import app, run_async_task
 
@@ -41,11 +41,17 @@ def _run_case_service_task(task_label: str, service_method: str, **kwargs) -> Di
     time_limit=10800,
     soft_time_limit=10200,
 )
-def run_batch_match_cases(self) -> Dict[str, Any]:
+def run_batch_match_cases(self, scope: str = 'all', message_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     批量撞库案例生成任务（每周一 03:00 执行）
     """
-    result = _run_case_service_task("full_pipeline", "run_batch_match", generate_cases=True)
+    result = _run_case_service_task(
+        "full_pipeline",
+        "run_batch_match",
+        generate_cases=True,
+        scope=scope,
+        message_ids=message_ids,
+    )
     if result.get('status') == 'error' and self.request.retries < self.max_retries:
         raise self.retry(exc=Exception(result.get('error')))
     return result
@@ -59,9 +65,15 @@ def run_batch_match_cases(self) -> Dict[str, Any]:
     time_limit=10800,
     soft_time_limit=10200,
 )
-def run_matching_only(self) -> Dict[str, Any]:
+def run_matching_only(self, scope: str = 'all', message_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """Run message-to-knowledge matching only; do not generate cases."""
-    result = _run_case_service_task("matching_only", "run_batch_match", generate_cases=False)
+    result = _run_case_service_task(
+        "matching_only",
+        "run_batch_match",
+        generate_cases=False,
+        scope=scope,
+        message_ids=message_ids,
+    )
     if result.get('status') == 'error' and self.request.retries < self.max_retries:
         raise self.retry(exc=Exception(result.get('error')))
     return result
@@ -75,9 +87,18 @@ def run_matching_only(self) -> Dict[str, Any]:
     time_limit=10800,
     soft_time_limit=10200,
 )
-def run_case_generation_only(self) -> Dict[str, Any]:
+def run_case_generation_only(
+    self,
+    scope: str = 'all',
+    knowledge_point_ids: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """Generate cases from existing relations only; do not rerun matching."""
-    result = _run_case_service_task("case_generation_only", "run_case_generation")
+    result = _run_case_service_task(
+        "case_generation_only",
+        "run_case_generation",
+        scope=scope,
+        knowledge_point_ids=knowledge_point_ids,
+    )
     if result.get('status') == 'error' and self.request.retries < self.max_retries:
         raise self.retry(exc=Exception(result.get('error')))
     return result
@@ -90,7 +111,7 @@ def run_case_generation_only(self) -> Dict[str, Any]:
     time_limit=3600,
     soft_time_limit=3300,
 )
-def run_venue_sync_from_cases(self) -> Dict[str, Any]:
+def run_venue_sync_from_cases(self, case_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     从案例中提取场馆信息并同步到 iptc_practice.venues（每周一 04:00 执行）
     """
@@ -102,7 +123,7 @@ def run_venue_sync_from_cases(self) -> Dict[str, Any]:
 
         async def _run():
             service = VenueSyncService()
-            return await service.sync_venues_from_cases()
+            return await service.sync_venues_from_cases(case_ids=case_ids)
 
         result = run_async_task(_run())
 
