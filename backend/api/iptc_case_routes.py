@@ -7,12 +7,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from backend.database.connection import get_db_session
 from backend.services.iptc_case_service import IPTCCaseService
 from backend.api.knowledge_graph_routes import load_knowledge_points
 from backend.database.entities import IPTCCase
+from backend.tasks import app as celery_app
 
 
 router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
@@ -24,6 +25,16 @@ class PipelineTriggerRequest(BaseModel):
     knowledge_point_ids: Optional[List[str]] = None
     case_ids: Optional[List[str]] = None
     limit: Optional[int] = None
+
+
+def _safe_task_payload(value: Any):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [_safe_task_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _safe_task_payload(item) for key, item in value.items()}
+    return str(value)
 
 
 @router.post("/trigger-matching")
@@ -89,6 +100,38 @@ def trigger_venue_sync(request: Optional[PipelineTriggerRequest] = None):
         return {"task_id": task.id, "message": "上海案例实践地点提取任务已触发"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
+
+
+@router.get("/tasks/{task_id}")
+def get_pipeline_task_status(task_id: str):
+    """查询撞库、案例生成、全流程和场馆同步任务状态。"""
+    try:
+        from celery.result import AsyncResult
+
+        task_result = AsyncResult(task_id, app=celery_app)
+        payload = {
+            "task_id": task_id,
+            "state": task_result.state,
+            "ready": task_result.ready(),
+            "successful": task_result.successful() if task_result.ready() else False,
+            "result": None,
+            "info": None,
+        }
+
+        if task_result.state == "SUCCESS":
+            payload["result"] = _safe_task_payload(task_result.result)
+        elif task_result.state == "FAILURE":
+            payload["info"] = str(task_result.info)
+        elif task_result.state == "RETRY":
+            payload["info"] = _safe_task_payload(task_result.info)
+        elif task_result.state == "STARTED":
+            payload["info"] = "任务执行中"
+        elif task_result.state == "PENDING":
+            payload["info"] = "任务等待执行"
+
+        return payload
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询任务状态失败: {str(e)}")
 
 
 @router.get("/candidates/messages")

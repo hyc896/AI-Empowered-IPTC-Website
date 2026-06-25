@@ -9,6 +9,7 @@ import sys
 import os
 import logging
 import re
+import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Set
 from collections import defaultdict
@@ -66,6 +67,15 @@ class BatchMatchCasesService:
     CASE_GENERATION_THRESHOLD = 4       # 案例生成阈值（提高到4条以确保案例质量）
     MAX_MESSAGES_PER_CASE = 6           # 每个案例最多使用的消息数量
     MAX_MESSAGE_USAGE = 3               # 每条消息最多使用次数（增加以充分利用有限消息）
+    CASE_GENERATION_REQUEST_DELAY_SECONDS = float(os.getenv("CASE_GENERATION_REQUEST_DELAY_SECONDS", "8"))
+    CASE_GENERATION_BUSY_BACKOFF_SECONDS = [
+        int(item.strip())
+        for item in os.getenv("CASE_GENERATION_BUSY_BACKOFF_SECONDS", "30,90,180").split(",")
+        if item.strip()
+    ] or [30, 90, 180]
+    CASE_GENERATION_MAX_CONSECUTIVE_BUSY_ERRORS = int(
+        os.getenv("CASE_GENERATION_MAX_CONSECUTIVE_BUSY_ERRORS", "3")
+    )
 
     def _normalize_scope(self, scope: str = 'all') -> str:
         scope = (scope or 'all').lower()
@@ -811,6 +821,7 @@ class BatchMatchCasesService:
             生成的案例列表
         """
         generated_cases = []
+        consecutive_busy_errors = 0
 
         for kp_id, stat in kp_stats.items():
             self.logger.info(f"\n[案例生成] {stat['name']} (关联消息: {stat['count']}条)")
@@ -839,14 +850,58 @@ class BatchMatchCasesService:
                 self._mark_case_generated(kp_id, stat['name'])
 
                 generated_cases.append(case)
+                consecutive_busy_errors = 0
 
                 self.logger.info(f"  ✅ 案例生成成功: {case['title']}")
+                if self.CASE_GENERATION_REQUEST_DELAY_SECONDS > 0:
+                    self.logger.info(
+                        "  等待 %.1f 秒后继续生成，避免模型服务限流",
+                        self.CASE_GENERATION_REQUEST_DELAY_SECONDS
+                    )
+                    time.sleep(self.CASE_GENERATION_REQUEST_DELAY_SECONDS)
 
             except Exception as e:
                 self.logger.error(f"  ❌ 案例生成失败: {e}", exc_info=True)
+                if self._is_llm_busy_error(e):
+                    consecutive_busy_errors += 1
+                    if consecutive_busy_errors >= self.CASE_GENERATION_MAX_CONSECUTIVE_BUSY_ERRORS:
+                        self.logger.warning(
+                            "  模型服务连续 %s 次超时或繁忙，暂停本轮案例生成，稍后可从管理端重新触发",
+                            consecutive_busy_errors
+                        )
+                        break
+
+                    backoff_index = min(
+                        consecutive_busy_errors - 1,
+                        len(self.CASE_GENERATION_BUSY_BACKOFF_SECONDS) - 1
+                    )
+                    wait_seconds = self.CASE_GENERATION_BUSY_BACKOFF_SECONDS[backoff_index]
+                    self.logger.warning(
+                        "  模型服务繁忙，等待 %s 秒后继续尝试下一个知识点",
+                        wait_seconds
+                    )
+                    time.sleep(wait_seconds)
+                else:
+                    consecutive_busy_errors = 0
                 continue
 
         return generated_cases
+
+    @staticmethod
+    def _is_llm_busy_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        busy_markers = [
+            "request timed out",
+            "timed out",
+            "timeout",
+            "503",
+            "50508",
+            "too busy",
+            "system is too busy",
+            "rate limit",
+            "429",
+        ]
+        return any(marker in message for marker in busy_markers)
 
     def _count_message_usage(self, db) -> Dict[str, int]:
         """

@@ -49,6 +49,7 @@ enable_utc = False
 # ========================
 task_acks_late = celery_config.get('task', {}).get('acks_late', True)
 task_reject_on_worker_lost = celery_config.get('task', {}).get('reject_on_worker_lost', True)
+task_track_started = True
 
 # ========================
 # Worker Configuration
