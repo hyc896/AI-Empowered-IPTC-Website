@@ -681,20 +681,21 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .tag {
-  max-width: min(100%, 240px);
+  max-width: 100%;
   min-width: 0;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   padding: 3px 8px;
   border-radius: 999px;
   font-size: 11px;
-  line-height: 1.3;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .region-tag {
@@ -704,7 +705,7 @@ onMounted(async () => {
 }
 
 .knowledge-tag {
-  flex: 0 1 auto;
+  flex: 0 1 100%;
   background: rgba(226, 191, 116, 0.12);
   color: #e8c476;
   border: 1px solid rgba(226, 191, 116, 0.18);
@@ -712,7 +713,7 @@ onMounted(async () => {
 
 .more-tag {
   flex: 0 0 auto;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(247, 242, 232, 0.08);
   color: rgba(247, 242, 232, 0.62);
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
