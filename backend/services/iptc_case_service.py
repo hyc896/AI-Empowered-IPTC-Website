@@ -187,7 +187,7 @@ class IPTCCaseService:
                 ]
 
             # 关键词搜索（使用BM25算法）
-            if search_keyword:
+            if search_keyword and all_cases:
                 logger.info(f"使用BM25算法搜索关键词: {search_keyword}")
 
                 # 构建语料库和分词
