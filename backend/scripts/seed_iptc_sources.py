@@ -56,14 +56,19 @@ NATIONAL_SOURCE_NAMES = [
 
 
 SHANGHAI_SOURCE_NAMES = [
-    "shanghai_observer",
-    "thepaper_shanghai",
-    "eastday",
-    "people_sh_red",
+    "上观新闻",
+    "澎湃上海",
+    "人民网上海红色教育",
     "shanghai_zhdj",
     "shanghai_party_history",
     "xinhua_shanghai",
 ]
+
+DUPLICATE_SHANGHAI_SOURCE_NAMES = {
+    "shanghai_observer",
+    "thepaper_shanghai",
+    "people_sh_red",
+}
 
 
 LEGACY_SOURCE_NAMES = {
@@ -101,7 +106,12 @@ def _display_name(name: str) -> str:
 
 
 SPECIAL_SOURCE_CONFIGS = {
-    "shanghai_observer": {
+    "上观新闻": {
+        "display_name": "上观新闻",
+        "mysql_table": "mp_shanghai_observer_messages",
+        "collector_module": "backend.sources.shanghai_observer.collector",
+        "chroma_collection": "mp_shanghai_observer_messages",
+        "source_type": "news",
         "auto_collect_enabled": True,
         "config": {
             "url": "https://www.shobserver.com/",
@@ -109,8 +119,13 @@ SPECIAL_SOURCE_CONFIGS = {
             "category": "上海新闻",
         },
     },
-    "thepaper_shanghai": {
+    "澎湃上海": {
         # 澎湃上海在服务器上偶发详情页超时，保留手动触发，暂不进入自动调度。
+        "display_name": "澎湃新闻上海频道",
+        "mysql_table": "mp_thepaper_shanghai_messages",
+        "collector_module": "backend.sources.thepaper_shanghai.collector",
+        "chroma_collection": "mp_thepaper_shanghai_messages",
+        "source_type": "news",
         "auto_collect_enabled": False,
         "config": {
             "url": "https://www.thepaper.cn/list_25488",
@@ -127,7 +142,12 @@ SPECIAL_SOURCE_CONFIGS = {
             "category": "上海新闻",
         },
     },
-    "people_sh_red": {
+    "人民网上海红色教育": {
+        "display_name": "人民网上海党建频道",
+        "mysql_table": "mp_people_sh_red_messages",
+        "collector_module": "backend.sources.people_sh_red.collector",
+        "chroma_collection": "mp_people_sh_red_messages",
+        "source_type": "news",
         "auto_collect_enabled": True,
         "config": {
             "urls": ["http://sh.people.com.cn/GB/138654/index.html"],
@@ -311,6 +331,15 @@ def seed_sources(
                         source.is_active = False
                         source.updated_at = now
                         disabled += 1
+
+            duplicate_shanghai_sources = db.query(MessageSource).filter(
+                MessageSource.name.in_(DUPLICATE_SHANGHAI_SOURCE_NAMES)
+            ).all()
+            for source in duplicate_shanghai_sources:
+                if source.is_active:
+                    source.is_active = False
+                    source.updated_at = now
+                    disabled += 1
 
     print(
         "IPTC sources seeded: "
