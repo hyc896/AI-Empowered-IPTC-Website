@@ -33,7 +33,7 @@
       </div>
     </aside>
 
-    <main class="graph-main">
+    <main :class="['graph-main', graphTransitioning && 'is-transitioning']">
       <header class="graph-header">
         <div>
           <span class="eyebrow">Current Book</span>
@@ -45,7 +45,13 @@
         </div>
       </header>
 
-      <section class="graph-stage">
+      <section :class="['graph-stage', selectedNode && 'has-selection']">
+        <div class="graph-orbit" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="transition-wash" aria-hidden="true"></div>
         <div v-if="loading" class="state-layer">
           <el-icon class="spinning" :size="34"><Loading /></el-icon>
           <p>正在加载知识图谱...</p>
@@ -64,47 +70,47 @@
     </main>
 
     <aside class="detail-panel">
-      <template v-if="selectedNode">
-        <div class="detail-head">
-          <span :class="['type-pill', selectedNode.type]">{{ typeLabel(selectedNode.type) }}</span>
-          <button class="close-button" @click="clearSelection">关闭</button>
-        </div>
-        <h3>{{ selectedNode.label }}</h3>
-        <p v-if="selectedNode.type !== 'knowledge_point'" class="node-path">
-          {{ nodeHint(selectedNode.type) }}
-        </p>
-
-        <template v-if="selectedNode.type === 'knowledge_point'">
-          <div class="meta-line">
-            <span>{{ kpDetail?.book_name || selectedNode.data?.book_name }}</span>
-            <span>{{ kpDetail?.chapter || selectedNode.data?.chapter }}</span>
-            <span>{{ kpDetail?.section || selectedNode.data?.section }}</span>
+      <Transition name="detail-swap" mode="out-in">
+        <div v-if="selectedNode" :key="selectedNode.id" class="detail-content">
+          <div class="detail-head">
+            <span :class="['type-pill', selectedNode.type]">{{ typeLabel(selectedNode.type) }}</span>
+            <button class="close-button" @click="clearSelection">关闭</button>
           </div>
+          <h3>{{ selectedNode.label }}</h3>
+          <p v-if="selectedNode.type !== 'knowledge_point'" class="node-path">
+            {{ nodeHint(selectedNode.type) }}
+          </p>
 
-          <section v-if="kpDetail?.theory_description" class="detail-section">
-            <span>理论描述</span>
-            <p>{{ kpDetail.theory_description }}</p>
-          </section>
-          <section v-if="kpDetail?.application_scenarios" class="detail-section">
-            <span>应用场景</span>
-            <p>{{ kpDetail.application_scenarios }}</p>
-          </section>
-          <section v-if="kpDetail?.typical_keywords" class="detail-section">
-            <span>典型关键词</span>
-            <p>{{ kpDetail.typical_keywords }}</p>
-          </section>
+          <template v-if="selectedNode.type === 'knowledge_point'">
+            <div class="meta-line">
+              <span>{{ kpDetail?.book_name || selectedNode.data?.book_name }}</span>
+              <span>{{ kpDetail?.chapter || selectedNode.data?.chapter }}</span>
+              <span>{{ kpDetail?.section || selectedNode.data?.section }}</span>
+            </div>
 
-          <button class="primary-action" @click="viewCasesForKP">查看相关案例</button>
-        </template>
-      </template>
+            <section v-if="kpDetail?.theory_description" class="detail-section">
+              <span>理论描述</span>
+              <p>{{ kpDetail.theory_description }}</p>
+            </section>
+            <section v-if="kpDetail?.application_scenarios" class="detail-section">
+              <span>应用场景</span>
+              <p>{{ kpDetail.application_scenarios }}</p>
+            </section>
+            <section v-if="kpDetail?.typical_keywords" class="detail-section">
+              <span>典型关键词</span>
+              <p>{{ kpDetail.typical_keywords }}</p>
+            </section>
 
-      <template v-else>
-        <div class="empty-detail">
+            <button class="primary-action" @click="viewCasesForKP">查看相关案例</button>
+          </template>
+        </div>
+
+        <div v-else key="empty" class="empty-detail">
           <span class="eyebrow">Node Detail</span>
           <h3>选择一个节点</h3>
           <p>点击教材、章节、节或知识点查看结构说明。点击知识点后，可以继续进入案例库检索相关教学案例。</p>
         </div>
-      </template>
+      </Transition>
 
       <div class="legend">
         <div v-for="item in legendItems" :key="item.type" class="legend-item">
@@ -136,6 +142,9 @@ const graphData = ref({ nodes: [], edges: [] })
 const selectedNode = ref(null)
 const kpDetail = ref(null)
 const showKnowledgeLabels = ref(false)
+const graphTransitioning = ref(false)
+const selectedNodeId = ref('')
+const activeNeighborIds = ref(new Set())
 
 const NODE_COLORS = {
   book: '#c85b4a',
@@ -177,17 +186,43 @@ function nodeCategory(type) {
   return { book: 0, chapter: 1, section: 2, knowledge_point: 3 }[type] ?? 3
 }
 
+function pause(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function isActiveNode(id) {
+  return selectedNodeId.value === id || activeNeighborIds.value.has(id)
+}
+
+function updateActivePath(nodeId = '') {
+  selectedNodeId.value = nodeId
+  if (!nodeId) {
+    activeNeighborIds.value = new Set()
+    return
+  }
+
+  const related = new Set()
+  graphData.value.edges.forEach(edge => {
+    if (edge.source === nodeId) related.add(edge.target)
+    if (edge.target === nodeId) related.add(edge.source)
+  })
+  activeNeighborIds.value = related
+}
+
 function buildOption() {
   const nodes = graphData.value.nodes.map(node => ({
     id: node.id,
     name: node.label,
     value: node.label,
     category: nodeCategory(node.type),
-    symbolSize: node.size,
+    symbolSize: selectedNodeId.value === node.id ? node.size + 9 : isActiveNode(node.id) ? node.size + 4 : node.size,
     itemStyle: {
       color: NODE_COLORS[node.type] || '#8b929b',
-      borderColor: 'rgba(255,255,255,0.34)',
-      borderWidth: node.type === 'knowledge_point' ? 0 : 1,
+      borderColor: selectedNodeId.value === node.id ? '#fff4c7' : 'rgba(255,255,255,0.34)',
+      borderWidth: selectedNodeId.value === node.id ? 3 : node.type === 'knowledge_point' ? 0 : 1,
+      shadowBlur: selectedNodeId.value === node.id ? 30 : isActiveNode(node.id) ? 18 : 0,
+      shadowColor: selectedNodeId.value === node.id ? 'rgba(255,228,150,0.72)' : 'rgba(214,177,95,0.28)',
+      opacity: selectedNodeId.value && !isActiveNode(node.id) ? 0.34 : 1,
     },
     label: {
       show: node.type !== 'knowledge_point' || showKnowledgeLabels.value,
@@ -201,16 +236,29 @@ function buildOption() {
   const links = graphData.value.edges.map(edge => ({
     source: edge.source,
     target: edge.target,
+    symbol: selectedNodeId.value && (edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ? ['none', 'arrow'] : 'none',
+    symbolSize: 8,
     lineStyle: {
-      color: 'rgba(214,177,95,0.18)',
-      width: 1,
-      curveness: 0.08,
+      color: selectedNodeId.value && (edge.source === selectedNodeId.value || edge.target === selectedNodeId.value)
+        ? 'rgba(246,215,142,0.82)'
+        : 'rgba(214,177,95,0.18)',
+      width: selectedNodeId.value && (edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ? 2.4 : 1,
+      opacity: selectedNodeId.value && edge.source !== selectedNodeId.value && edge.target !== selectedNodeId.value ? 0.1 : 0.72,
+      curveness: selectedNodeId.value && (edge.source === selectedNodeId.value || edge.target === selectedNodeId.value) ? 0.18 : 0.08,
     },
   }))
 
   return {
     backgroundColor: 'transparent',
-    animationDurationUpdate: 650,
+    animation: true,
+    animationDuration: 1100,
+    animationEasing: 'cubicOut',
+    animationDurationUpdate: 980,
+    animationEasingUpdate: 'quinticInOut',
+    stateAnimation: {
+      duration: 420,
+      easing: 'cubicOut',
+    },
     tooltip: {
       trigger: 'item',
       borderWidth: 0,
@@ -231,10 +279,13 @@ function buildOption() {
       roam: true,
       draggable: true,
       focusNodeAdjacency: true,
+      edgeSymbol: ['none', 'arrow'],
+      edgeSymbolSize: [0, 7],
+      universalTransition: true,
       force: {
-        repulsion: graphData.value.nodes.length > 180 ? 460 : 320,
-        gravity: 0.045,
-        edgeLength: [72, 170],
+        repulsion: graphData.value.nodes.length > 180 ? 520 : 360,
+        gravity: selectedNodeId.value ? 0.032 : 0.045,
+        edgeLength: selectedNodeId.value ? [88, 190] : [72, 170],
         layoutAnimation: true,
       },
       lineStyle: {
@@ -250,9 +301,13 @@ function buildOption() {
   }
 }
 
-function renderGraph() {
+function renderGraph(mode = 'replace') {
   if (!chartInstance) return
-  chartInstance.setOption(buildOption(), true)
+  chartInstance.setOption(buildOption(), {
+    notMerge: mode === 'replace',
+    replaceMerge: ['series'],
+    lazyUpdate: false,
+  })
   requestAnimationFrame(() => chartInstance?.resize())
 }
 
@@ -271,6 +326,16 @@ async function loadGraph(bookId) {
   errorMessage.value = ''
   selectedNode.value = null
   kpDetail.value = null
+  updateActivePath('')
+  graphTransitioning.value = true
+  chartInstance.setOption({
+    series: [{
+      type: 'graph',
+      data: [],
+      links: [],
+    }],
+  }, { replaceMerge: ['series'] })
+  await pause(180)
   try {
     const res = await graphAPI.getGraphData(bookId)
     const data = res.code === 200 ? res.data : (res.data || { nodes: [], edges: [] })
@@ -279,11 +344,13 @@ async function loadGraph(bookId) {
       edges: Array.isArray(data.edges) ? data.edges : [],
     }
     renderGraph()
+    await pause(720)
   } catch (error) {
     graphData.value = { nodes: [], edges: [] }
     errorMessage.value = error?.response?.data?.detail || error.message || '图谱接口请求失败'
   } finally {
     loading.value = false
+    graphTransitioning.value = false
   }
 }
 
@@ -306,6 +373,13 @@ async function onNodeClick(params) {
   const raw = params.data._raw
   selectedNode.value = raw
   kpDetail.value = raw.data || null
+  updateActivePath(raw.id)
+  renderGraph('focus')
+  const dataIndex = graphData.value.nodes.findIndex(node => node.id === raw.id)
+  if (dataIndex >= 0) {
+    chartInstance?.dispatchAction({ type: 'downplay', seriesIndex: 0 })
+    chartInstance?.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex })
+  }
 
   if (raw.type === 'knowledge_point') {
     try {
@@ -320,6 +394,9 @@ async function onNodeClick(params) {
 function clearSelection() {
   selectedNode.value = null
   kpDetail.value = null
+  updateActivePath('')
+  chartInstance?.dispatchAction({ type: 'downplay', seriesIndex: 0 })
+  renderGraph('focus')
 }
 
 function viewCasesForKP() {
@@ -453,11 +530,15 @@ onUnmounted(() => {
   min-height: 94px;
   padding: 14px;
   text-align: left;
+  position: relative;
+  overflow: hidden;
 }
 
 .book-card strong,
 .book-card span {
   display: block;
+  position: relative;
+  z-index: 1;
 }
 
 .book-card strong {
@@ -476,6 +557,21 @@ onUnmounted(() => {
   background: rgba(214, 177, 95, 0.16);
   border-color: rgba(214, 177, 95, 0.56);
   box-shadow: inset 3px 0 0 #d6b15f;
+}
+
+.book-card::before {
+  content: "";
+  position: absolute;
+  inset: -40% auto -40% -70%;
+  width: 64%;
+  background: linear-gradient(90deg, transparent, rgba(255, 238, 186, 0.16), transparent);
+  transform: skewX(-18deg);
+  transition: left 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.book-card:hover::before,
+.book-card.active::before {
+  left: 108%;
 }
 
 .toolbar-card {
@@ -553,6 +649,72 @@ onUnmounted(() => {
 .chart {
   width: 100%;
   height: 100%;
+  position: relative;
+  z-index: 1;
+  transition:
+    opacity 0.28s ease,
+    filter 0.58s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.58s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.graph-main.is-transitioning .chart {
+  opacity: 0.38;
+  filter: blur(2px) saturate(0.72);
+  transform: scale(0.985);
+}
+
+.graph-orbit {
+  position: absolute;
+  inset: 34px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.72;
+  transition: opacity 0.36s ease;
+}
+
+.graph-orbit span {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(214, 177, 95, 0.13);
+  box-shadow: 0 0 48px rgba(95, 143, 214, 0.09);
+  animation: orbit-drift 16s linear infinite;
+}
+
+.graph-orbit span:nth-child(1) {
+  inset: 8% 18%;
+}
+
+.graph-orbit span:nth-child(2) {
+  inset: 18% 8%;
+  animation-duration: 22s;
+  animation-direction: reverse;
+  border-color: rgba(90, 168, 137, 0.12);
+}
+
+.graph-orbit span:nth-child(3) {
+  inset: 28% 28%;
+  animation-duration: 12s;
+  border-color: rgba(95, 143, 214, 0.12);
+}
+
+.graph-stage.has-selection .graph-orbit {
+  opacity: 0.92;
+}
+
+.transition-wash {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(214, 177, 95, 0.22), transparent 34%),
+    linear-gradient(105deg, transparent 10%, rgba(255, 238, 186, 0.12) 46%, transparent 70%);
+  transform: translateX(-32%) scaleX(0.72);
+}
+
+.graph-main.is-transitioning .transition-wash {
+  animation: graph-wash 0.92s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .state-layer {
@@ -587,6 +749,26 @@ onUnmounted(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes graph-wash {
+  0% {
+    opacity: 0;
+    transform: translateX(-36%) scaleX(0.72);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(42%) scaleX(1.1);
+  }
+}
+
+@keyframes orbit-drift {
+  from { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.035); }
+  to { transform: rotate(360deg) scale(1); }
 }
 
 .detail-head {
@@ -667,6 +849,31 @@ onUnmounted(() => {
   padding: 16px 0 22px;
 }
 
+.detail-content,
+.empty-detail {
+  transform-origin: 50% 16px;
+}
+
+.detail-swap-enter-active,
+.detail-swap-leave-active {
+  transition:
+    opacity 0.28s ease,
+    transform 0.36s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.36s ease;
+}
+
+.detail-swap-enter-from {
+  opacity: 0;
+  filter: blur(8px);
+  transform: translateY(18px) scale(0.98);
+}
+
+.detail-swap-leave-to {
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateY(-12px) scale(0.99);
+}
+
 .legend {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -719,6 +926,21 @@ onUnmounted(() => {
 
   .graph-main {
     min-height: 58vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart,
+  .book-card,
+  .detail-swap-enter-active,
+  .detail-swap-leave-active {
+    transition: none;
+  }
+
+  .graph-orbit span,
+  .graph-main.is-transitioning .transition-wash,
+  .spinning {
+    animation: none;
   }
 }
 </style>
