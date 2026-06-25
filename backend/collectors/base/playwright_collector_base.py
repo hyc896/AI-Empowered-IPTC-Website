@@ -22,6 +22,7 @@ from typing import Optional, Dict, Any, List
 from playwright.async_api import async_playwright, Playwright, Browser
 import asyncio
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +74,8 @@ class PlaywrightCollectorBase(ABC):
             '--no-sandbox',
             '--disable-dev-shm-usage'
         ]
-        # 临时修改：Windows环境headless_shell未安装，使用非headless模式
-        self.headless: bool = False
+        # Docker/服务器环境没有图形界面，默认使用 headless；本地调试可设 PLAYWRIGHT_HEADLESS=0。
+        self.headless: bool = os.getenv("PLAYWRIGHT_HEADLESS", "1").lower() not in {"0", "false", "no"}
 
     async def initialize(self) -> bool:
         """

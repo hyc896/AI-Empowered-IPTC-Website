@@ -42,6 +42,14 @@ logger = logging.getLogger(__name__)
 class BatchMatchCasesService:
     """批量撞库案例生成服务"""
 
+    # 上海地区消息源的 source_table 名称（前缀 mp_ + 源名 + _messages）
+    SHANGHAI_SOURCE_TABLES = {
+        'mp_people_sh_red_messages',
+        'mp_shanghai_observer_messages',
+        'mp_thepaper_shanghai_messages',
+        'mp_eastday_messages',
+    }
+
     # 配置参数
     BATCH_SIZE = None                   # 批量处理消息数（None表示处理所有未处理消息）
     SIMILARITY_THRESHOLD = 0.55         # 相似度阈值（提高到0.55以确保更高的匹配质量）
@@ -107,7 +115,13 @@ class BatchMatchCasesService:
         """
         # 已知的中国来源名称列表
         known_chinese_sources = {
-            'people_theory', 'gmw_theory', 'cssn', 'qstheory',
+            'people', 'people_theory', 'people_sh_red',
+            'xinhua', 'gmw', 'gmw_theory', 'qstheory', 'cssn', 'cssn_phil',
+            'studytimes', 'cctv_news', 'china_mil', 'chinanews_minsheng',
+            'cnr_local', 'ctnews', 'dazhong_daily', 'eastday', 'eol',
+            'guancha', 'huanqiu', 'huanqiu_mil', 'jyb', 'rednet',
+            'shanghai_observer', 'sichuan_online', 'stdaily', 'thepaper',
+            'thepaper_shanghai', 'wenlv_china', 'wenming', 'zhejiang_online',
             'tonghuashun', 'securities_times', 'kr36'
         }
 
@@ -117,15 +131,15 @@ class BatchMatchCasesService:
 
         # 检查config
         config = source.config or {}
-        inner_config = config.get('config', {})
+        inner_config = config.get('config', {}) if isinstance(config.get('config', {}), dict) else {}
 
-        # 检查region字段
-        region = inner_config.get('region', '')
+        # 检查region字段（兼容 top-level config 与嵌套 config）
+        region = inner_config.get('region') or config.get('region') or config.get('region_tag') or ''
         if region and ('中国' in region or 'CN' in region.upper()):
             return True
 
-        # 检查language字段
-        language = inner_config.get('language', '')
+        # 检查language字段（兼容 top-level config 与嵌套 config）
+        language = inner_config.get('language') or config.get('language') or ''
         if language and language.lower() == 'zh':
             return True
 
@@ -151,6 +165,8 @@ class BatchMatchCasesService:
             # 动态加载所有中国来源的消息表
             self._load_chinese_sources()
             self.logger.info(f"[初始化] 加载了 {len(self.message_tables)} 个中国来源的消息表")
+            if not self.message_tables:
+                raise RuntimeError("未加载到任何中国/思政消息源，请检查 mp_message_sources 是否已灌种子数据且 is_active=1")
             for table_name in self.message_tables:
                 self.logger.info(f"  - {table_name}")
 
@@ -173,7 +189,10 @@ class BatchMatchCasesService:
             self.logger.info(f"[初始化] ChromaDB路径: {chroma_path}")
             self.chroma_client = chromadb.PersistentClient(path=chroma_path)
             self.kp_collection = self.chroma_client.get_collection(name="iptc_knowledge_points")
-            self.logger.info(f"[初始化] ChromaDB初始化成功，知识点数: {self.kp_collection.count()}")
+            kp_count = self.kp_collection.count()
+            if kp_count == 0:
+                raise RuntimeError("ChromaDB collection 'iptc_knowledge_points' 为空，请先迁移 chromadb_new 或重建知识点向量")
+            self.logger.info(f"[初始化] ChromaDB初始化成功，知识点数: {kp_count}")
 
             # 加载知识点完整信息
             kp_json_path = project_root / "backend" / "data" / "knowledge_points.json"
@@ -218,6 +237,12 @@ class BatchMatchCasesService:
                 }
 
             self.logger.info(f"获取到 {len(messages)} 条待处理消息，开始撞库...")
+            if not messages:
+                return {
+                    "status": "pending",
+                    "total_messages": 0,
+                    "reason": "未找到待处理消息，请先确认采集任务是否已成功入库"
+                }
 
             # Step 2: 向量撞库匹配知识点
             matches = self._match_knowledge_points(messages)
@@ -576,6 +601,7 @@ class BatchMatchCasesService:
                             "provider": getattr(msg, 'provider', '未知'),
                             "published_at": msg.published_at,
                             "url": getattr(msg, 'url', None) or getattr(msg, 'source_url', ''),
+                            "source_table": rel.source_table,
                             "similarity": rel.similarity_score
                         })
 
@@ -623,7 +649,7 @@ class BatchMatchCasesService:
             teaching_application = ''
 
         # 2. 读取新闻转案例提示词模板
-        template_path = r"D:\AI-Empowered IPTC Website\新闻转案例提示词.md"
+        template_path = Path(__file__).parent.parent / "data" / "prompts" / "news_to_case.md"
         try:
             with open(template_path, 'r', encoding='utf-8') as f:
                 prompt_template = f.read()
@@ -692,7 +718,11 @@ class BatchMatchCasesService:
             # 备用：取前500字
             summary = case_content[:500]
 
-        # 6. 构造案例对象
+        # 6. 判断地域标签
+        source_tables = {msg.get('source_table', '') for msg in related_messages}
+        primary_region = '上海' if source_tables & self.SHANGHAI_SOURCE_TABLES else '全国'
+
+        # 7. 构造案例对象
         case = {
             "id": str(uuid.uuid4()),
             "title": title,
@@ -706,6 +736,7 @@ class BatchMatchCasesService:
             }],
             "source_message_ids": [msg['id'] for msg in related_messages],
             "published_at": related_messages[0]['published_at'],
+            "primary_region": primary_region,
             "created_at": datetime.now()
         }
 
@@ -840,6 +871,7 @@ class BatchMatchCasesService:
                     related_knowledge_points=case['related_knowledge_points'],
                     source_message_ids=case['source_message_ids'],
                     published_at=case['published_at'],
+                    primary_region=case.get('primary_region', '全国'),
                     created_at=case['created_at']
                 )
 

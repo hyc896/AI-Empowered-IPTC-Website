@@ -36,9 +36,6 @@ def trigger_case_generation():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
 
-router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
-
-
 @router.get("/cases")
 def get_cases(
     page: int = Query(1, ge=1),
