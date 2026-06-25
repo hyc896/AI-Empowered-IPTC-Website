@@ -33,11 +33,11 @@
         <p>当前范围：{{ currentScopeLabel }}。上海范围只处理上海源消息，全国范围只处理非上海源消息。</p>
       </div>
       <div class="action-buttons">
-        <button class="solid-button" :disabled="triggeringMatch" @click="doTriggerMatch">
-          {{ triggeringMatch ? '撞库任务提交中' : '立即撞库匹配' }}
+        <button class="solid-button" :disabled="pipelineBusy || triggeringMatch" @click="doTriggerMatch">
+          {{ pipelineBusy ? activePipelineLabel : (triggeringMatch ? '撞库任务提交中' : '立即撞库匹配') }}
         </button>
-        <button class="outline-button" :disabled="triggeringGen" @click="doTriggerGen">
-          {{ triggeringGen ? '生成任务提交中' : '立即生成案例' }}
+        <button class="outline-button" :disabled="pipelineBusy || triggeringGen" @click="doTriggerGen">
+          {{ pipelineBusy ? activePipelineLabel : (triggeringGen ? '生成任务提交中' : '立即生成案例') }}
         </button>
       </div>
     </section>
@@ -45,6 +45,17 @@
     <div v-if="triggerResult" :class="['result-bar', triggerResult.type]">
       <strong>{{ triggerResult.title }}</strong>
       <span>{{ triggerResult.message }}</span>
+    </div>
+
+    <div v-if="activePipelineTask" class="task-status-card">
+      <div>
+        <span class="eyebrow">Active Task</span>
+        <strong>{{ activePipelineTitle }}</strong>
+        <p>{{ activePipelineDetail }}</p>
+      </div>
+      <span :class="['task-state', activePipelineTask.state?.toLowerCase()]">
+        {{ activePipelineTask.state || 'PENDING' }}
+      </span>
     </div>
 
     <section class="dashboard-grid">
@@ -132,7 +143,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { adminAPI, caseAPI } from '@/api/index'
 
 const scopeOptions = [
@@ -154,6 +165,9 @@ const candidateTabs = [
   { label: '案例候选', value: 'cases' },
 ]
 
+const PIPELINE_TASK_STORAGE_KEY = 'iptc_active_pipeline_task'
+const PIPELINE_TASK_MAX_AGE_MS = 12 * 60 * 60 * 1000
+
 const sources = ref([])
 const sourcesLoading = ref(true)
 const triggering = ref(null)
@@ -161,6 +175,8 @@ const triggerResult = ref(null)
 const matchData = ref({})
 const triggeringMatch = ref(false)
 const triggeringGen = ref(false)
+const activePipelineTask = ref(null)
+const taskPoller = ref(null)
 const workflowScope = ref('all')
 const sourceFilter = ref('all')
 const candidateTab = ref('messages')
@@ -168,6 +184,36 @@ const candidatesLoading = ref(false)
 const candidates = ref({ messages: [], matches: [], cases: [] })
 
 const currentScopeLabel = computed(() => scopeOptions.find(item => item.value === workflowScope.value)?.label || '全部')
+const terminalTaskStates = new Set(['SUCCESS', 'FAILURE', 'REVOKED'])
+
+const pipelineBusy = computed(() => {
+  const task = activePipelineTask.value
+  return Boolean(task?.task_id && !terminalTaskStates.has(task.state))
+})
+
+const activePipelineLabel = computed(() => {
+  const task = activePipelineTask.value
+  if (!task) return ''
+  const name = task.kind === 'matching' ? '撞库匹配' : '案例生成'
+  if (task.state === 'STARTED') return `${name}运行中`
+  if (task.state === 'RETRY') return `${name}等待重试`
+  return `${name}处理中`
+})
+
+const activePipelineTitle = computed(() => {
+  const task = activePipelineTask.value
+  if (!task) return ''
+  const name = task.kind === 'matching' ? '撞库匹配' : '案例生成'
+  const scopeLabel = scopeOptions.find(item => item.value === task.scope)?.label || '全部'
+  return `${name} · ${scopeLabel}`
+})
+
+const activePipelineDetail = computed(() => {
+  const task = activePipelineTask.value
+  if (!task) return ''
+  const info = task.info || (pipelineBusy.value ? '任务正在后台执行，完成前不能再次提交撞库或生成。' : '任务已结束。')
+  return `${info} 任务ID：${task.task_id}`
+})
 
 const filteredSources = computed(() => {
   return sources.value.filter(source => {
@@ -292,6 +338,91 @@ function showResult(type, title, message) {
   triggerResult.value = { type, title, message }
 }
 
+function clearTaskPoller() {
+  if (taskPoller.value) {
+    clearInterval(taskPoller.value)
+    taskPoller.value = null
+  }
+}
+
+function persistPipelineTask(task) {
+  if (!task?.task_id) return
+  localStorage.setItem(PIPELINE_TASK_STORAGE_KEY, JSON.stringify(task))
+}
+
+function clearPersistedPipelineTask() {
+  localStorage.removeItem(PIPELINE_TASK_STORAGE_KEY)
+}
+
+function restorePipelineTask() {
+  const raw = localStorage.getItem(PIPELINE_TASK_STORAGE_KEY)
+  if (!raw) return
+  try {
+    const task = JSON.parse(raw)
+    const startedAt = Date.parse(task.started_at || '')
+    if (!task.task_id || (startedAt && Date.now() - startedAt > PIPELINE_TASK_MAX_AGE_MS)) {
+      clearPersistedPipelineTask()
+      return
+    }
+    activePipelineTask.value = task
+    pollPipelineTask()
+    taskPoller.value = setInterval(pollPipelineTask, 5000)
+  } catch {
+    clearPersistedPipelineTask()
+  }
+}
+
+function taskKindLabel(kind) {
+  return kind === 'matching' ? '撞库匹配' : '案例生成'
+}
+
+function rememberPipelineTask(kind, scope, response = {}) {
+  const taskId = response.task_id || response.data?.task_id
+  if (!taskId) return
+  clearTaskPoller()
+  activePipelineTask.value = {
+    kind,
+    scope,
+    task_id: taskId,
+    state: 'PENDING',
+    ready: false,
+    successful: false,
+    info: '任务已提交，等待后台执行',
+    started_at: new Date().toISOString(),
+  }
+  persistPipelineTask(activePipelineTask.value)
+  pollPipelineTask()
+  taskPoller.value = setInterval(pollPipelineTask, 5000)
+}
+
+async function pollPipelineTask() {
+  const currentTask = activePipelineTask.value
+  if (!currentTask?.task_id) return
+  try {
+    const response = await caseAPI.getTaskStatus(currentTask.task_id)
+    const payload = response.data || response
+    activePipelineTask.value = { ...currentTask, ...payload }
+    persistPipelineTask(activePipelineTask.value)
+
+    if (payload.ready || terminalTaskStates.has(payload.state)) {
+      clearTaskPoller()
+      clearPersistedPipelineTask()
+      const ok = payload.successful || payload.state === 'SUCCESS'
+      showResult(
+        ok ? 'ok' : 'error',
+        `${taskKindLabel(currentTask.kind)}任务${ok ? '已完成' : '已结束'}`,
+        payload.info || payload.result?.message || currentTask.task_id
+      )
+      await Promise.allSettled([loadSources(), loadCandidates()])
+    }
+  } catch (e) {
+    activePipelineTask.value = {
+      ...currentTask,
+      info: `任务状态查询失败：${e.message || String(e)}。系统会继续保持锁定并重试。`,
+    }
+  }
+}
+
 async function trigger(name) {
   triggering.value = name
   try {
@@ -306,9 +437,11 @@ async function trigger(name) {
 }
 
 async function doTriggerMatch() {
+  if (pipelineBusy.value) return
   triggeringMatch.value = true
   try {
     const r = await adminAPI.triggerMatching({ scope: workflowScope.value })
+    rememberPipelineTask('matching', workflowScope.value, r)
     showResult('ok', '撞库匹配任务已提交', r.task_id || r.message || currentScopeLabel.value)
   } catch (e) {
     showResult('error', '撞库匹配触发失败', e.message || String(e))
@@ -318,9 +451,11 @@ async function doTriggerMatch() {
 }
 
 async function doTriggerGen() {
+  if (pipelineBusy.value) return
   triggeringGen.value = true
   try {
     const r = await adminAPI.triggerCaseGeneration({ scope: workflowScope.value })
+    rememberPipelineTask('generation', workflowScope.value, r)
     showResult('ok', '案例生成任务已提交', r.task_id || r.message || currentScopeLabel.value)
   } catch (e) {
     showResult('error', '案例生成触发失败', e.message || String(e))
@@ -353,7 +488,12 @@ function candidateReason(item) {
 }
 
 onMounted(async () => {
+  restorePipelineTask()
   await Promise.all([loadSources(), loadCandidates()])
+})
+
+onBeforeUnmount(() => {
+  clearTaskPoller()
 })
 </script>
 
@@ -523,6 +663,50 @@ button:disabled {
 
 .result-bar span {
   color: rgba(245, 239, 228, 0.65);
+}
+
+.task-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 177, 95, 0.22);
+  background: linear-gradient(135deg, rgba(214, 177, 95, 0.14), rgba(255, 255, 255, 0.035));
+}
+
+.task-status-card strong {
+  display: block;
+  margin-top: 3px;
+  color: #fff;
+}
+
+.task-status-card p {
+  margin: 6px 0 0;
+  color: rgba(245, 239, 228, 0.62);
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.task-state {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: #151515;
+  background: #d6b15f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.task-state.success {
+  background: #78b892;
+}
+
+.task-state.failure,
+.task-state.revoked {
+  background: #c45b57;
+  color: #fff;
 }
 
 .dashboard-grid {

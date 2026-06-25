@@ -227,6 +227,9 @@ export const caseAPI = {
   },
   getCaseCandidates(params) {
     return collectorRequest.get('/iptc/candidates/cases', { params })
+  },
+  getTaskStatus(taskId) {
+    return collectorRequest.get(`/iptc/tasks/${taskId}`)
   }
 }
 
