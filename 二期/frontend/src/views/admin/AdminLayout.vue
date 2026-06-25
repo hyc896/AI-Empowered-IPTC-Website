@@ -74,9 +74,10 @@ const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '
 
 <style scoped>
 .admin-layout {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
+  overflow: hidden;
   background:
     linear-gradient(135deg, rgba(15, 19, 25, 0.94), rgba(26, 30, 36, 0.9)),
     url('@/assets/bg-main.webp') center/cover no-repeat fixed;
@@ -84,9 +85,13 @@ const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '
 }
 
 .admin-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   padding: 22px 18px;
   border-right: 1px solid rgba(231, 196, 125, 0.18);
   background: rgba(9, 12, 16, 0.84);
@@ -198,12 +203,15 @@ const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '
 
 .admin-main {
   min-width: 0;
-  min-height: 100vh;
+  min-height: 0;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .admin-topbar {
+  flex: 0 0 auto;
   min-height: 86px;
   display: flex;
   align-items: center;
@@ -246,19 +254,33 @@ const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '
 .admin-content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 28px 32px 36px;
 }
 
 @media (max-width: 860px) {
   .admin-layout {
+    height: auto;
+    min-height: 100vh;
     grid-template-columns: 1fr;
+    overflow: visible;
   }
 
   .admin-sidebar {
+    position: relative;
+    height: auto;
     min-height: auto;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid rgba(231, 196, 125, 0.18);
+  }
+
+  .admin-main {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 
   .admin-nav {
@@ -275,6 +297,7 @@ const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '
   }
 
   .admin-content {
+    overflow: visible;
     padding: 20px;
   }
 }

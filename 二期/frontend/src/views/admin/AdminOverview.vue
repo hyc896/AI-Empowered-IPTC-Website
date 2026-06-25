@@ -1,5 +1,10 @@
 <template>
   <div class="admin-overview">
+    <div v-if="loadWarnings.length" class="warning-strip">
+      <strong>数据加载提示</strong>
+      <span>{{ loadWarnings.join('；') }}</span>
+    </div>
+
     <section class="metric-grid">
       <article v-for="item in metrics" :key="item.label" class="metric-card">
         <span class="metric-kicker">{{ item.kicker }}</span>
@@ -77,6 +82,7 @@ const router = useRouter()
 const loading = ref(true)
 const overview = ref({})
 const caseStats = ref({})
+const loadWarnings = ref([])
 
 const metrics = computed(() => [
   { kicker: 'Cases', label: '教学案例', value: formatNumber(caseStats.value.total_cases ?? 0) },
@@ -105,6 +111,19 @@ const pipeline = computed(() => [
 
 const latestCases = computed(() => caseStats.value.latest_cases || [])
 
+function unwrapResponse(value) {
+  return value?.data?.data || value?.data || value || {}
+}
+
+async function loadCaseStatsFallback() {
+  const result = await caseAPI.getList({ page: 1, page_size: 5 })
+  const payload = unwrapResponse(result)
+  return {
+    total_cases: payload.total ?? 0,
+    latest_cases: payload.items || payload.cases || [],
+  }
+}
+
 function formatNumber(value) {
   return Number(value || 0).toLocaleString()
 }
@@ -117,10 +136,26 @@ function formatDate(value) {
 }
 
 onMounted(async () => {
+  loadWarnings.value = []
   try {
     const [ov, cs] = await Promise.allSettled([adminAPI.getOverview(), caseAPI.getStatistics()])
-    overview.value = ov.status === 'fulfilled' ? ov.value : {}
-    caseStats.value = cs.status === 'fulfilled' ? cs.value : {}
+    overview.value = ov.status === 'fulfilled' ? unwrapResponse(ov.value) : {}
+
+    if (cs.status === 'fulfilled') {
+      caseStats.value = unwrapResponse(cs.value)
+    } else {
+      loadWarnings.value.push('案例统计接口暂时不可用，已尝试使用案例列表兜底')
+      try {
+        caseStats.value = await loadCaseStatsFallback()
+      } catch (e) {
+        loadWarnings.value.push('案例列表兜底也失败，请检查 collector-backend')
+        caseStats.value = {}
+      }
+    }
+
+    if (ov.status !== 'fulfilled') {
+      loadWarnings.value.push('用户、实践、场馆统计暂时不可用，请检查 practice-backend')
+    }
   } finally {
     loading.value = false
   }
@@ -132,6 +167,23 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.warning-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(234, 179, 8, 0.28);
+  background: rgba(234, 179, 8, 0.1);
+  color: rgba(255, 244, 214, 0.86);
+  font-size: 13px;
+}
+
+.warning-strip strong {
+  color: #f2ca76;
+  white-space: nowrap;
 }
 
 .metric-grid {
