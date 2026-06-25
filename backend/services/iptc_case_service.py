@@ -58,22 +58,26 @@ class IPTCCaseService:
         return query.filter(column.in_(values))
 
     @staticmethod
-    def _knowledge_points_file_count() -> int:
+    def _knowledge_points_file_names() -> set:
         data_path = Path(__file__).resolve().parents[1] / "data" / "knowledge_points.json"
         try:
             data = json.loads(data_path.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.warning(f"读取知识点文件失败: {exc}")
-            return 0
+            return set()
 
         if isinstance(data, list):
-            return len(data)
+            return {str(item.get("name")).strip() for item in data if isinstance(item, dict) and item.get("name")}
         if isinstance(data, dict):
             for key in ("knowledge_points", "items", "data"):
                 value = data.get(key)
                 if isinstance(value, list):
-                    return len(value)
-        return 0
+                    return {
+                        str(item.get("name")).strip()
+                        for item in value
+                        if isinstance(item, dict) and item.get("name")
+                    }
+        return set()
 
     @staticmethod
     def _case_has_knowledge_point(
@@ -431,15 +435,28 @@ class IPTCCaseService:
             # 案例总数
             total_cases = db.query(func.count(IPTCCase.id)).scalar()
 
-            # 知识点总数保持轻量查询，避免统计页被 ChromaDB 初始化或锁等待拖到超时
-            total_kps = db.query(func.count(IPTCKnowledgePointStats.id)).scalar() or 0
+            # 当前有效知识点以 knowledge_points.json 为准，避免历史统计表混入旧口径
+            current_kp_names = IPTCCaseService._knowledge_points_file_names()
+            total_kps = len(current_kp_names)
             if not total_kps:
-                total_kps = IPTCCaseService._knowledge_points_file_count()
+                total_kps = db.query(func.count(IPTCKnowledgePointStats.id)).scalar() or 0
 
             # 已生成案例的知识点数
-            generated_kps = db.query(func.count(IPTCKnowledgePointStats.id)).filter(
-                IPTCKnowledgePointStats.case_generated == 1
-            ).scalar()
+            if current_kp_names:
+                generated_names = set()
+                for (related_points,) in db.query(IPTCCase.related_knowledge_points).all():
+                    for kp in related_points or []:
+                        if isinstance(kp, dict):
+                            name = str(kp.get("name") or "").strip()
+                        else:
+                            name = str(kp or "").strip()
+                        if name in current_kp_names:
+                            generated_names.add(name)
+                generated_kps = len(generated_names)
+            else:
+                generated_kps = db.query(func.count(IPTCKnowledgePointStats.id)).filter(
+                    IPTCKnowledgePointStats.case_generated == 1
+                ).scalar()
 
             # 消息-知识点关联总数
             total_relations = db.query(func.count(IPTCMessageKnowledgeRelation.id)).scalar()
