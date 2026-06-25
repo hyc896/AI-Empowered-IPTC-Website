@@ -401,7 +401,10 @@ function clearSelection() {
 
 function viewCasesForKP() {
   if (!selectedNode.value) return
-  router.push(`/cases?search=${encodeURIComponent(selectedNode.value.label)}`)
+  router.push({
+    path: '/cases',
+    query: { knowledge_point_name: selectedNode.value.label },
+  })
 }
 
 function initChart() {

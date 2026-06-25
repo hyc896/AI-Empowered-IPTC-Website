@@ -152,7 +152,9 @@ const regionOptions = [
   { label: '上海', value: 'shanghai' },
 ]
 
-const search = ref(route.query.search || '')
+const initialKnowledgePointName = route.query.knowledge_point_name || null
+const initialSearch = route.query.search === initialKnowledgePointName ? '' : (route.query.search || '')
+const search = ref(initialSearch)
 const page = ref(1)
 const pageSize = 8
 const total = ref(0)
@@ -162,7 +164,7 @@ const treeLoading = ref(true)
 const treeData = ref([])
 const treeRef = ref(null)
 const selectedKpId = ref(null)
-const selectedKpName = ref(route.query.knowledge_point_name || null)
+const selectedKpName = ref(initialKnowledgePointName)
 const region = ref(['all', 'national', 'shanghai'].includes(route.query.scope) ? route.query.scope : 'all')
 const regionCounts = ref({ all: 0, national: 0, shanghai: 0 })
 
@@ -280,7 +282,7 @@ async function loadCases() {
   loading.value = true
   try {
     const params = { page: page.value, page_size: pageSize, ...scopeParams() }
-    if (search.value) params.search = search.value
+    if (search.value && search.value !== selectedKpName.value) params.search = search.value
     if (selectedKpName.value) params.knowledge_point_name = selectedKpName.value
     const res = await caseAPI.getList(params)
     const d = res.code === 200 ? res.data : res
@@ -309,7 +311,7 @@ function doSearch() {
 
 function syncRouteQuery() {
   const query = {}
-  if (search.value) query.search = search.value
+  if (search.value && search.value !== selectedKpName.value) query.search = search.value
   if (region.value !== 'all') query.scope = region.value
   if (selectedKpName.value) query.knowledge_point_name = selectedKpName.value
   router.replace({ query })
