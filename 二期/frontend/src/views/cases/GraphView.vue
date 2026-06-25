@@ -1,218 +1,311 @@
 <template>
   <div class="graph-view">
-    <!-- 顶部导航 -->
-    <div class="header">
-      <div class="header-left">
-        <el-button text style="color:rgba(255,255,255,0.6)" @click="router.push('/case-platform')">
-          ← 返回
-        </el-button>
-        <span class="title">知识图谱</span>
+    <aside class="graph-sidebar">
+      <button class="back-button" @click="router.push('/case-platform')">返回案例平台</button>
+      <div class="brand-block">
+        <span class="eyebrow">Knowledge Graph</span>
+        <h1>三本教材知识图谱</h1>
+        <p>按教材、章节、节、知识点四层结构浏览，点击知识点可查看理论说明并跳转相关案例。</p>
       </div>
-      <div class="header-center">
-        <el-segmented
-          v-if="books.length"
-          v-model="selectedBookId"
-          :options="bookOptions"
-          @change="onBookChange"
-          class="book-tabs"
-        />
-      </div>
-      <div class="header-right">
-        <span class="tip">点击节点查看详情 · 滚轮缩放</span>
-      </div>
-    </div>
 
-    <!-- 主体区域 -->
-    <div class="main">
-      <!-- 图谱区域 -->
-      <div class="chart-wrap" ref="chartWrap">
-        <div v-if="loading" class="loading-mask">
-          <el-icon class="spinning" :size="32"><Loading /></el-icon>
-          <p>加载知识图谱中...</p>
+      <div class="book-list">
+        <button
+          v-for="book in books"
+          :key="book.book_id"
+          :class="['book-card', selectedBookId === book.book_id && 'active']"
+          @click="selectBook(book.book_id)"
+        >
+          <strong>{{ book.book_name }}</strong>
+          <span>{{ book.chapter_count }} 章 · {{ book.section_count }} 节 · {{ book.kp_count }} 个知识点</span>
+        </button>
+      </div>
+
+      <div class="toolbar-card">
+        <span class="eyebrow">View</span>
+        <div class="tool-row">
+          <button @click="fitGraph">适配视图</button>
+          <button @click="reloadGraph">重新布局</button>
+        </div>
+        <label class="toggle-row">
+          <input v-model="showKnowledgeLabels" type="checkbox" @change="renderGraph" />
+          <span>显示知识点标签</span>
+        </label>
+      </div>
+    </aside>
+
+    <main class="graph-main">
+      <header class="graph-header">
+        <div>
+          <span class="eyebrow">Current Book</span>
+          <h2>{{ currentBook?.book_name || '知识图谱' }}</h2>
+        </div>
+        <div class="graph-stats">
+          <span>{{ graphStats.nodes }} 节点</span>
+          <span>{{ graphStats.edges }} 关系</span>
+        </div>
+      </header>
+
+      <section class="graph-stage">
+        <div v-if="loading" class="state-layer">
+          <el-icon class="spinning" :size="34"><Loading /></el-icon>
+          <p>正在加载知识图谱...</p>
+        </div>
+        <div v-else-if="errorMessage" class="state-layer error">
+          <h3>知识图谱暂时无法加载</h3>
+          <p>{{ errorMessage }}</p>
+          <button @click="reloadGraph">重试</button>
+        </div>
+        <div v-else-if="!graphData.nodes.length" class="state-layer">
+          <h3>当前教材暂无图谱数据</h3>
+          <p>请检查知识点数据文件是否包含 book_id、chapter、section 和 name 字段。</p>
         </div>
         <div ref="chartEl" class="chart" />
-      </div>
+      </section>
+    </main>
 
-      <!-- 右侧详情面板 -->
-      <transition name="slide-right">
-        <div v-if="selectedNode" class="detail-panel">
-          <div class="panel-header">
-            <span class="panel-type-badge" :class="selectedNode.type">{{ typeLabel(selectedNode.type) }}</span>
-            <el-button text style="color:rgba(255,255,255,0.4)" @click="selectedNode = null">✕</el-button>
-          </div>
-          <h3 class="panel-title">{{ selectedNode.label }}</h3>
-
-          <template v-if="selectedNode.type === 'knowledge_point' && kpDetail">
-            <div class="panel-section" v-if="kpDetail.theory_description">
-              <div class="section-label">理论描述</div>
-              <p>{{ kpDetail.theory_description }}</p>
-            </div>
-            <div class="panel-section" v-if="kpDetail.application_scenarios">
-              <div class="section-label">应用场景</div>
-              <p>{{ kpDetail.application_scenarios }}</p>
-            </div>
-            <div class="panel-section" v-if="kpDetail.typical_keywords">
-              <div class="section-label">典型关键词</div>
-              <p>{{ kpDetail.typical_keywords }}</p>
-            </div>
-            <el-button class="view-cases-btn" @click="viewCasesForKP">
-              查看相关案例 →
-            </el-button>
-          </template>
-
-          <template v-else-if="selectedNode.type === 'book'">
-            <p class="panel-desc">点击展开该书的章节结构</p>
-          </template>
-          <template v-else-if="selectedNode.type === 'chapter'">
-            <p class="panel-desc">展开后可查看本章各节知识点</p>
-          </template>
-          <template v-else-if="selectedNode.type === 'section'">
-            <p class="panel-desc">展开后可查看本节知识点详情</p>
-          </template>
+    <aside class="detail-panel">
+      <template v-if="selectedNode">
+        <div class="detail-head">
+          <span :class="['type-pill', selectedNode.type]">{{ typeLabel(selectedNode.type) }}</span>
+          <button class="close-button" @click="clearSelection">关闭</button>
         </div>
-      </transition>
-    </div>
+        <h3>{{ selectedNode.label }}</h3>
+        <p v-if="selectedNode.type !== 'knowledge_point'" class="node-path">
+          {{ nodeHint(selectedNode.type) }}
+        </p>
 
-    <!-- 图例 -->
-    <div class="legend">
-      <div class="legend-item" v-for="item in legendItems" :key="item.type">
-        <span class="legend-dot" :style="{ background: item.color }"></span>
-        <span>{{ item.label }}</span>
+        <template v-if="selectedNode.type === 'knowledge_point'">
+          <div class="meta-line">
+            <span>{{ kpDetail?.book_name || selectedNode.data?.book_name }}</span>
+            <span>{{ kpDetail?.chapter || selectedNode.data?.chapter }}</span>
+            <span>{{ kpDetail?.section || selectedNode.data?.section }}</span>
+          </div>
+
+          <section v-if="kpDetail?.theory_description" class="detail-section">
+            <span>理论描述</span>
+            <p>{{ kpDetail.theory_description }}</p>
+          </section>
+          <section v-if="kpDetail?.application_scenarios" class="detail-section">
+            <span>应用场景</span>
+            <p>{{ kpDetail.application_scenarios }}</p>
+          </section>
+          <section v-if="kpDetail?.typical_keywords" class="detail-section">
+            <span>典型关键词</span>
+            <p>{{ kpDetail.typical_keywords }}</p>
+          </section>
+
+          <button class="primary-action" @click="viewCasesForKP">查看相关案例</button>
+        </template>
+      </template>
+
+      <template v-else>
+        <div class="empty-detail">
+          <span class="eyebrow">Node Detail</span>
+          <h3>选择一个节点</h3>
+          <p>点击教材、章节、节或知识点查看结构说明。点击知识点后，可以继续进入案例库检索相关教学案例。</p>
+        </div>
+      </template>
+
+      <div class="legend">
+        <div v-for="item in legendItems" :key="item.type" class="legend-item">
+          <span :style="{ background: item.color }"></span>
+          {{ item.label }}
+        </div>
       </div>
-    </div>
+    </aside>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Loading } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
-import { graphAPI, caseAPI } from '@/api/index'
+import { graphAPI } from '@/api/index'
 
 const router = useRouter()
 const chartEl = ref(null)
-const chartWrap = ref(null)
 let chartInstance = null
+let resizeObserver = null
 
 const loading = ref(false)
+const errorMessage = ref('')
 const books = ref([])
 const selectedBookId = ref('')
+const graphData = ref({ nodes: [], edges: [] })
 const selectedNode = ref(null)
 const kpDetail = ref(null)
+const showKnowledgeLabels = ref(false)
 
 const NODE_COLORS = {
-  book: '#c0392b',
-  chapter: '#e67e22',
-  section: '#f1c40f',
-  knowledge_point: '#3498db'
+  book: '#c85b4a',
+  chapter: '#d8a84d',
+  section: '#5aa889',
+  knowledge_point: '#5f8fd6',
 }
 
 const legendItems = [
   { type: 'book', color: NODE_COLORS.book, label: '教材' },
   { type: 'chapter', color: NODE_COLORS.chapter, label: '章' },
   { type: 'section', color: NODE_COLORS.section, label: '节' },
-  { type: 'knowledge_point', color: NODE_COLORS.knowledge_point, label: '知识点' }
+  { type: 'knowledge_point', color: NODE_COLORS.knowledge_point, label: '知识点' },
 ]
 
-const bookOptions = computed(() =>
-  [{ label: '全部', value: '' }, ...books.value.map(b => ({
-    label: `${b.book_name} (${b.kp_count})`,
-    value: b.book_id
-  }))]
-)
+const currentBook = computed(() => books.value.find(book => book.book_id === selectedBookId.value))
+const graphStats = computed(() => ({
+  nodes: graphData.value.nodes.length,
+  edges: graphData.value.edges.length,
+}))
 
 function typeLabel(type) {
   return { book: '教材', chapter: '章', section: '节', knowledge_point: '知识点' }[type] || type
 }
 
-function buildEChartsOption(nodes, edges) {
-  const eNodes = nodes.map(n => ({
-    id: n.id,
-    name: n.label,
-    value: n.label,
-    symbolSize: n.size,
-    itemStyle: { color: NODE_COLORS[n.type] || '#888' },
-    label: {
-      show: n.type !== 'knowledge_point' || nodes.length < 100,
-      fontSize: n.type === 'book' ? 14 : n.type === 'chapter' ? 12 : 10,
-      color: '#fff',
-      formatter: params => {
-        const text = params.name
-        return text.length > 10 ? text.slice(0, 9) + '…' : text
-      }
+function nodeHint(type) {
+  return {
+    book: '该节点代表一本教材，向下连接各章结构。',
+    chapter: '该节点代表教材章节，向下连接本章各节。',
+    section: '该节点代表教材节次，向下连接具体知识点。',
+  }[type] || ''
+}
+
+function shortLabel(text = '', max = 14) {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+function nodeCategory(type) {
+  return { book: 0, chapter: 1, section: 2, knowledge_point: 3 }[type] ?? 3
+}
+
+function buildOption() {
+  const nodes = graphData.value.nodes.map(node => ({
+    id: node.id,
+    name: node.label,
+    value: node.label,
+    category: nodeCategory(node.type),
+    symbolSize: node.size,
+    itemStyle: {
+      color: NODE_COLORS[node.type] || '#8b929b',
+      borderColor: 'rgba(255,255,255,0.34)',
+      borderWidth: node.type === 'knowledge_point' ? 0 : 1,
     },
-    _raw: n
+    label: {
+      show: node.type !== 'knowledge_point' || showKnowledgeLabels.value,
+      color: '#f6efe4',
+      fontSize: node.type === 'book' ? 14 : node.type === 'chapter' ? 12 : 10,
+      formatter: () => shortLabel(node.label, node.type === 'book' ? 16 : 12),
+    },
+    _raw: node,
   }))
 
-  const eEdges = edges.map(e => ({
-    source: e.source,
-    target: e.target,
-    lineStyle: { color: 'rgba(255,255,255,0.12)', width: 1 }
+  const links = graphData.value.edges.map(edge => ({
+    source: edge.source,
+    target: edge.target,
+    lineStyle: {
+      color: 'rgba(214,177,95,0.18)',
+      width: 1,
+      curveness: 0.08,
+    },
   }))
 
   return {
     backgroundColor: 'transparent',
+    animationDurationUpdate: 650,
     tooltip: {
       trigger: 'item',
+      borderWidth: 0,
+      backgroundColor: 'rgba(12,16,22,0.94)',
+      textStyle: { color: '#f6efe4' },
       formatter: params => {
-        if (params.dataType === 'node') {
-          return `<b>${params.name}</b><br/>${typeLabel(params.data._raw?.type || '')}`
-        }
-        return ''
+        if (params.dataType !== 'node') return ''
+        const raw = params.data._raw
+        return `<b>${raw.label}</b><br/>${typeLabel(raw.type)}`
       },
-      backgroundColor: 'rgba(20,5,5,0.9)',
-      borderColor: 'rgba(192,57,43,0.4)',
-      textStyle: { color: '#fff' }
     },
+    categories: legendItems.map(item => ({ name: item.label })),
     series: [{
       type: 'graph',
       layout: 'force',
-      data: eNodes,
-      links: eEdges,
+      data: nodes,
+      links,
       roam: true,
       draggable: true,
+      focusNodeAdjacency: true,
       force: {
-        repulsion: 300,
-        gravity: 0.05,
-        edgeLength: [80, 200],
-        layoutAnimation: true
+        repulsion: graphData.value.nodes.length > 180 ? 460 : 320,
+        gravity: 0.045,
+        edgeLength: [72, 170],
+        layoutAnimation: true,
+      },
+      lineStyle: {
+        color: 'source',
+        opacity: 0.28,
       },
       emphasis: {
         focus: 'adjacency',
-        lineStyle: { width: 2 }
+        scale: true,
+        lineStyle: { width: 2.5, opacity: 0.64 },
       },
-      lineStyle: { color: 'rgba(255,255,255,0.12)', curveness: 0.1 },
-      edgeSymbol: ['none', 'none']
-    }]
+    }],
+  }
+}
+
+function renderGraph() {
+  if (!chartInstance) return
+  chartInstance.setOption(buildOption(), true)
+  requestAnimationFrame(() => chartInstance?.resize())
+}
+
+async function loadBooks() {
+  const res = await graphAPI.getBooks()
+  const data = res.code === 200 ? res.data : (res.data || res || [])
+  books.value = Array.isArray(data) ? data : []
+  if (!selectedBookId.value && books.value.length) {
+    selectedBookId.value = books.value[0].book_id
   }
 }
 
 async function loadGraph(bookId) {
   if (!chartInstance) return
   loading.value = true
+  errorMessage.value = ''
   selectedNode.value = null
   kpDetail.value = null
-
   try {
     const res = await graphAPI.getGraphData(bookId)
-    const { nodes, edges } = (res.code === 200 ? res.data : res) || { nodes: [], edges: [] }
-    chartInstance.setOption(buildEChartsOption(nodes, edges), true)
+    const data = res.code === 200 ? res.data : (res.data || { nodes: [], edges: [] })
+    graphData.value = {
+      nodes: Array.isArray(data.nodes) ? data.nodes : [],
+      edges: Array.isArray(data.edges) ? data.edges : [],
+    }
+    renderGraph()
+  } catch (error) {
+    graphData.value = { nodes: [], edges: [] }
+    errorMessage.value = error?.response?.data?.detail || error.message || '图谱接口请求失败'
   } finally {
     loading.value = false
   }
 }
 
-function onBookChange(val) {
-  selectedBookId.value = val
-  loadGraph(val)
+async function selectBook(bookId) {
+  selectedBookId.value = bookId
+  await loadGraph(bookId)
+}
+
+async function reloadGraph() {
+  await loadGraph(selectedBookId.value)
+}
+
+function fitGraph() {
+  chartInstance?.dispatchAction({ type: 'restore' })
+  chartInstance?.resize()
 }
 
 async function onNodeClick(params) {
   if (params.dataType !== 'node') return
   const raw = params.data._raw
   selectedNode.value = raw
-  kpDetail.value = null
+  kpDetail.value = raw.data || null
 
   if (raw.type === 'knowledge_point') {
     try {
@@ -224,6 +317,11 @@ async function onNodeClick(params) {
   }
 }
 
+function clearSelection() {
+  selectedNode.value = null
+  kpDetail.value = null
+}
+
 function viewCasesForKP() {
   if (!selectedNode.value) return
   router.push(`/cases?search=${encodeURIComponent(selectedNode.value.label)}`)
@@ -233,26 +331,23 @@ function initChart() {
   if (!chartEl.value) return
   chartInstance = echarts.init(chartEl.value, null, { renderer: 'canvas' })
   chartInstance.on('click', onNodeClick)
-
-  const ro = new ResizeObserver(() => chartInstance?.resize())
-  ro.observe(chartWrap.value)
+  resizeObserver = new ResizeObserver(() => chartInstance?.resize())
+  resizeObserver.observe(chartEl.value)
 }
 
 onMounted(async () => {
   await nextTick()
   initChart()
-
   try {
-    const res = await graphAPI.getBooks()
-    books.value = res.code === 200 ? res.data : (res.data || res || [])
-  } catch (e) {
-    books.value = []
+    await loadBooks()
+    await loadGraph(selectedBookId.value)
+  } catch (error) {
+    errorMessage.value = error?.response?.data?.detail || error.message || '图谱初始化失败'
   }
-
-  await loadGraph('')
 })
 
 onUnmounted(() => {
+  resizeObserver?.disconnect()
   chartInstance?.dispose()
 })
 </script>
@@ -260,149 +355,370 @@ onUnmounted(() => {
 <style scoped>
 .graph-view {
   height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: linear-gradient(160deg, #2d0505 0%, #1a0a0a 40%, #0d0505 100%);
-  color: #fff;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 340px;
+  background:
+    linear-gradient(135deg, rgba(13, 17, 22, 0.96), rgba(28, 30, 33, 0.92)),
+    url('@/assets/bg-main.webp') center/cover no-repeat fixed;
+  color: #f6efe4;
   overflow: hidden;
 }
 
-/* Header */
-.header {
-  flex-shrink: 0;
+.graph-sidebar,
+.detail-panel {
+  min-height: 0;
+  overflow-y: auto;
+  background: rgba(9, 12, 16, 0.82);
+  backdrop-filter: blur(20px);
+  border-color: rgba(214, 177, 95, 0.16);
+}
+
+.graph-sidebar {
+  padding: 22px 18px;
+  border-right: 1px solid rgba(214, 177, 95, 0.16);
+}
+
+.detail-panel {
+  padding: 22px 18px;
+  border-left: 1px solid rgba(214, 177, 95, 0.16);
+}
+
+.back-button,
+.book-card,
+.tool-row button,
+.close-button,
+.primary-action,
+.state-layer button {
+  border-radius: 8px;
+  border: 1px solid rgba(214, 177, 95, 0.24);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(246, 239, 228, 0.78);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.back-button {
+  height: 36px;
+  padding: 0 14px;
+  margin-bottom: 22px;
+}
+
+.back-button:hover,
+.tool-row button:hover,
+.close-button:hover,
+.state-layer button:hover {
+  border-color: rgba(214, 177, 95, 0.55);
+  color: #fff;
+  background: rgba(214, 177, 95, 0.08);
+}
+
+.eyebrow {
+  display: block;
+  color: #d6b15f;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.brand-block h1,
+.graph-header h2,
+.detail-panel h3,
+.empty-detail h3 {
+  margin: 4px 0 0;
+  line-height: 1.22;
+  letter-spacing: 0;
+}
+
+.brand-block h1 {
+  font-size: 25px;
+}
+
+.brand-block p,
+.empty-detail p,
+.node-path {
+  margin: 12px 0 0;
+  color: rgba(246, 239, 228, 0.56);
+  line-height: 1.75;
+  font-size: 13px;
+}
+
+.book-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 22px 0;
+}
+
+.book-card {
+  width: 100%;
+  min-height: 94px;
+  padding: 14px;
+  text-align: left;
+}
+
+.book-card strong,
+.book-card span {
+  display: block;
+}
+
+.book-card strong {
+  color: #fff;
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+.book-card span {
+  margin-top: 8px;
+  color: rgba(246, 239, 228, 0.5);
+  font-size: 12px;
+}
+
+.book-card.active {
+  background: rgba(214, 177, 95, 0.16);
+  border-color: rgba(214, 177, 95, 0.56);
+  box-shadow: inset 3px 0 0 #d6b15f;
+}
+
+.toolbar-card {
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.tool-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tool-row button,
+.state-layer button {
+  height: 34px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: rgba(246, 239, 228, 0.62);
+  font-size: 13px;
+}
+
+.graph-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-header {
+  min-height: 82px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 60px;
-  padding: 0 24px;
-  background: rgba(0,0,0,0.4);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(192,57,43,0.2);
-  gap: 16px;
+  gap: 18px;
+  padding: 18px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(12, 16, 22, 0.56);
+  backdrop-filter: blur(18px);
 }
-.header-left { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-.title { font-size: 16px; font-weight: 700; color: #ffd700; }
-.header-center { flex: 1; display: flex; justify-content: center; }
-.header-right { flex-shrink: 0; }
-.tip { font-size: 12px; color: rgba(255,255,255,0.35); }
 
-/* Book tabs */
-.book-tabs :deep(.el-segmented) {
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(192,57,43,0.2);
+.graph-header h2 {
+  font-size: 22px;
 }
-.book-tabs :deep(.el-segmented__item) {
-  color: rgba(255,255,255,0.55);
+
+.graph-stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.graph-stats span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(246, 239, 228, 0.64);
   font-size: 12px;
 }
-.book-tabs :deep(.el-segmented__item.is-selected) {
-  background: rgba(192,57,43,0.4);
-  color: #fff;
+
+.graph-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
 }
 
-/* Main */
-.main {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-  position: relative;
-}
-.chart-wrap {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-}
 .chart {
   width: 100%;
   height: 100%;
 }
-.loading-mask {
+
+.state-layer {
   position: absolute;
   inset: 0;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(13,5,5,0.7);
-  z-index: 10;
   gap: 12px;
-  color: rgba(255,255,255,0.6);
+  text-align: center;
+  padding: 32px;
+  background: rgba(13, 17, 22, 0.76);
 }
-.spinning { animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
 
-/* Detail Panel */
-.detail-panel {
-  width: 320px;
-  flex-shrink: 0;
-  background: rgba(15,5,5,0.85);
-  backdrop-filter: blur(20px);
-  border-left: 1px solid rgba(192,57,43,0.2);
-  padding: 24px 20px;
-  overflow-y: auto;
+.state-layer p {
+  margin: 0;
+  max-width: 420px;
+  color: rgba(246, 239, 228, 0.6);
+  line-height: 1.7;
+}
+
+.state-layer.error h3 {
+  margin: 0;
+  color: #fff;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.type-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(246, 239, 228, 0.62);
+}
+
+.type-pill.book { color: #f0a39a; background: rgba(200, 91, 74, 0.18); }
+.type-pill.chapter { color: #ebcb87; background: rgba(216, 168, 77, 0.16); }
+.type-pill.section { color: #a8d8c4; background: rgba(90, 168, 137, 0.16); }
+.type-pill.knowledge_point { color: #aac8f2; background: rgba(95, 143, 214, 0.16); }
+
+.close-button {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.detail-panel h3 {
+  margin-top: 16px;
+  font-size: 20px;
+}
+
+.meta-line {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 6px;
+  margin: 14px 0;
 }
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.panel-type-badge {
-  font-size: 11px;
-  padding: 2px 10px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.08);
-  color: rgba(255,255,255,0.5);
-}
-.panel-type-badge.book { background: rgba(192,57,43,0.25); color: #e57373; }
-.panel-type-badge.chapter { background: rgba(230,126,34,0.2); color: #ffb74d; }
-.panel-type-badge.section { background: rgba(241,196,15,0.15); color: #fff176; }
-.panel-type-badge.knowledge_point { background: rgba(52,152,219,0.2); color: #64b5f6; }
 
-.panel-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #fff;
-  line-height: 1.4;
+.meta-line span {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(246, 239, 228, 0.62);
+  font-size: 12px;
+}
+
+.detail-section {
+  margin-top: 18px;
+}
+
+.detail-section > span {
+  display: block;
+  color: #d6b15f;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.detail-section p {
   margin: 0;
-}
-.panel-desc { font-size: 13px; color: rgba(255,255,255,0.4); }
-.panel-section { display: flex; flex-direction: column; gap: 6px; }
-.section-label {
-  font-size: 11px;
-  color: rgba(255,215,0,0.6);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-.panel-section p { font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.6; margin: 0; }
-.view-cases-btn {
-  margin-top: 8px;
-  background: rgba(192,57,43,0.2);
-  border: 1px solid rgba(192,57,43,0.4);
-  color: #ff8a65;
+  color: rgba(246, 239, 228, 0.7);
   font-size: 13px;
+  line-height: 1.75;
+}
+
+.primary-action {
   width: 100%;
-}
-.view-cases-btn:hover {
-  background: rgba(192,57,43,0.35);
-  color: #ffccbc;
+  height: 40px;
+  margin-top: 22px;
+  background: #d6b15f;
+  border-color: #d6b15f;
+  color: #151515;
+  font-weight: 700;
 }
 
-/* Slide transition */
-.slide-right-enter-active, .slide-right-leave-active { transition: transform 0.25s ease, opacity 0.25s; }
-.slide-right-enter-from, .slide-right-leave-to { transform: translateX(40px); opacity: 0; }
+.empty-detail {
+  padding: 16px 0 22px;
+}
 
-/* Legend */
 .legend {
-  flex-shrink: 0;
-  display: flex;
-  gap: 20px;
-  padding: 10px 24px;
-  background: rgba(0,0,0,0.3);
-  border-top: 1px solid rgba(255,255,255,0.05);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(255,255,255,0.5); }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(246, 239, 228, 0.58);
+  font-size: 12px;
+}
+
+.legend-item span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+@media (max-width: 1120px) {
+  .graph-view {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .detail-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 8;
+    width: 340px;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 820px) {
+  .graph-view {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-sidebar {
+    max-height: 42vh;
+    border-right: 0;
+    border-bottom: 1px solid rgba(214, 177, 95, 0.16);
+  }
+
+  .graph-main {
+    min-height: 58vh;
+  }
+}
 </style>
