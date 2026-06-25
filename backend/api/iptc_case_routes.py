@@ -11,6 +11,7 @@ from typing import Optional
 from backend.database.connection import get_db_session
 from backend.services.iptc_case_service import IPTCCaseService
 from backend.api.knowledge_graph_routes import load_knowledge_points
+from backend.database.entities import IPTCCase
 
 
 router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
