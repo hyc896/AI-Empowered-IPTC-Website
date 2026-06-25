@@ -150,6 +150,11 @@ services:
       - CHROMADB_PATH=/app/backend/data/chromadb_new
       - REDIS_HOST=redis
       - PLAYWRIGHT_HEADLESS=1
+      - LLM_MODEL=Pro/moonshotai/Kimi-K2.6
+      - COLLECTOR_FIELD_ENRICHER_ENABLED=0
+      - COLLECTOR_SCHEDULE_ENABLED=0
+      - COLLECTOR_TRIGGER_ON_STARTUP=0
+      - COLLECTOR_TIMEOUT_SECONDS=300
     depends_on:
       mysql:
         condition: service_healthy
@@ -182,6 +187,11 @@ services:
       - CHROMADB_PATH=/app/backend/data/chromadb_new
       - REDIS_HOST=redis
       - PLAYWRIGHT_HEADLESS=1
+      - LLM_MODEL=Pro/moonshotai/Kimi-K2.6
+      - COLLECTOR_FIELD_ENRICHER_ENABLED=0
+      - COLLECTOR_SCHEDULE_ENABLED=0
+      - COLLECTOR_TRIGGER_ON_STARTUP=0
+      - COLLECTOR_TIMEOUT_SECONDS=300
     depends_on:
       mysql:
         condition: service_healthy
@@ -214,6 +224,11 @@ services:
       - CHROMADB_PATH=/app/backend/data/chromadb_new
       - REDIS_HOST=redis
       - PLAYWRIGHT_HEADLESS=1
+      - LLM_MODEL=Pro/moonshotai/Kimi-K2.6
+      - COLLECTOR_FIELD_ENRICHER_ENABLED=0
+      - COLLECTOR_SCHEDULE_ENABLED=0
+      - COLLECTOR_TRIGGER_ON_STARTUP=0
+      - COLLECTOR_TIMEOUT_SECONDS=300
     depends_on:
       mysql:
         condition: service_healthy
