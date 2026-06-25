@@ -77,10 +77,24 @@
           </div>
         </div>
 
+        <div v-if="hasActiveFilters" class="active-filters">
+          <span class="filter-label">当前筛选</span>
+          <button v-if="selectedKpName" class="filter-chip" @click="clearKnowledge">
+            <span>知识点</span>
+            <strong>{{ selectedKpName }}</strong>
+          </button>
+          <button v-if="search" class="filter-chip" @click="clearSearch">
+            <span>搜索</span>
+            <strong>{{ search }}</strong>
+          </button>
+          <button class="reset-filters" @click="clearAllFilters">清除筛选</button>
+        </div>
+
         <div v-if="loading" class="state-panel">案例加载中...</div>
         <div v-else-if="!cases.length" class="empty-panel">
           <h3>{{ emptyTitle }}</h3>
           <p>{{ emptyText }}</p>
+          <button v-if="hasActiveFilters" class="empty-action" @click="clearAllFilters">返回全部案例</button>
         </div>
         <div v-else class="case-grid">
           <article v-for="c in cases" :key="c.id" class="case-card" @click="router.push(`/cases/${c.id}`)">
@@ -90,8 +104,12 @@
                 v-for="kp in getKnowledgeLabels(c).slice(0, 2)"
                 :key="kp"
                 class="tag knowledge-tag"
+                :title="kp"
               >
                 {{ kp }}
+              </span>
+              <span v-if="getKnowledgeLabels(c).length > 2" class="tag more-tag">
+                +{{ getKnowledgeLabels(c).length - 2 }}
               </span>
             </div>
             <h3>{{ c.title }}</h3>
@@ -144,9 +162,11 @@ const treeLoading = ref(true)
 const treeData = ref([])
 const treeRef = ref(null)
 const selectedKpId = ref(null)
-const selectedKpName = ref(null)
-const region = ref('all')
+const selectedKpName = ref(route.query.knowledge_point_name || null)
+const region = ref(['all', 'national', 'shanghai'].includes(route.query.scope) ? route.query.scope : 'all')
 const regionCounts = ref({ all: 0, national: 0, shanghai: 0 })
+
+const hasActiveFilters = computed(() => Boolean(selectedKpName.value || search.value))
 
 const currentRegionLabel = computed(() => {
   return regionOptions.find(item => item.value === region.value)?.label || '全部'
@@ -169,8 +189,8 @@ function scopeParams() {
 }
 
 function normalizeRegion(value) {
-  if (value === 'shanghai') return '上海'
-  if (value === 'national') return '全国'
+  if (value === 'shanghai' || value === '上海' || value === 'ä¸Šæµ·') return '上海'
+  if (value === 'national' || value === '全国' || value === 'å…¨å›½') return '全国'
   return value || '全国'
 }
 
@@ -277,12 +297,22 @@ async function setRegion(nextRegion) {
   selectedKpId.value = null
   selectedKpName.value = null
   treeRef.value?.setCurrentKey?.(null)
+  syncRouteQuery()
   await Promise.all([loadTree(), loadCases()])
 }
 
 function doSearch() {
   page.value = 1
+  syncRouteQuery()
   loadCases()
+}
+
+function syncRouteQuery() {
+  const query = {}
+  if (search.value) query.search = search.value
+  if (region.value !== 'all') query.scope = region.value
+  if (selectedKpName.value) query.knowledge_point_name = selectedKpName.value
+  router.replace({ query })
 }
 
 function clearKnowledge() {
@@ -290,7 +320,25 @@ function clearKnowledge() {
   selectedKpName.value = null
   treeRef.value?.setCurrentKey?.(null)
   page.value = 1
+  syncRouteQuery()
   loadCases()
+}
+
+function clearSearch() {
+  search.value = ''
+  page.value = 1
+  syncRouteQuery()
+  loadCases()
+}
+
+async function clearAllFilters() {
+  search.value = ''
+  selectedKpId.value = null
+  selectedKpName.value = null
+  treeRef.value?.setCurrentKey?.(null)
+  page.value = 1
+  syncRouteQuery()
+  await loadCases()
 }
 
 function onNodeClick(data) {
@@ -302,6 +350,7 @@ function onNodeClick(data) {
   selectedKpId.value = data.id
   selectedKpName.value = data.label
   page.value = 1
+  syncRouteQuery()
   loadCases()
 }
 
@@ -465,11 +514,26 @@ onMounted(async () => {
 
 .kp-tree :deep(.el-tree-node__content:hover) {
   background: rgba(255, 255, 255, 0.06);
+  color: rgba(247, 242, 232, 0.9);
 }
 
 .kp-tree :deep(.el-tree-node.is-current > .el-tree-node__content) {
   background: rgba(215, 180, 106, 0.16);
   color: #fff;
+}
+
+.kp-tree :deep(.el-tree-node__content:hover .tree-node),
+.kp-tree :deep(.el-tree-node__content:hover .node-label),
+.kp-tree :deep(.el-tree-node.is-current > .el-tree-node__content .tree-node),
+.kp-tree :deep(.el-tree-node.is-current > .el-tree-node__content .node-label) {
+  color: rgba(247, 242, 232, 0.96);
+}
+
+.kp-tree :deep(.el-tree-node__content:hover .kp-count),
+.kp-tree :deep(.el-tree-node.is-current > .el-tree-node__content .kp-count) {
+  color: #181817;
+  background: #d7b46a;
+  border-color: #d7b46a;
 }
 
 .kp-tree :deep(.el-tree-node__expand-icon) {
@@ -520,6 +584,73 @@ onMounted(async () => {
   color: rgba(247, 242, 232, 0.58);
 }
 
+.active-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(226, 191, 116, 0.16);
+  background: rgba(226, 191, 116, 0.07);
+}
+
+.filter-label {
+  color: rgba(247, 242, 232, 0.52);
+  font-size: 12px;
+}
+
+.filter-chip,
+.reset-filters,
+.empty-action {
+  border-radius: 8px;
+  border: 1px solid rgba(226, 191, 116, 0.22);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(247, 242, 232, 0.82);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.filter-chip {
+  min-width: 0;
+  max-width: min(520px, 100%);
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+}
+
+.filter-chip span {
+  color: #d7b46a;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.filter-chip strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.reset-filters {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.filter-chip:hover,
+.reset-filters:hover,
+.empty-action:hover {
+  border-color: rgba(226, 191, 116, 0.58);
+  background: rgba(226, 191, 116, 0.14);
+  color: #fff;
+}
+
 .case-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -549,10 +680,14 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tag {
-  max-width: 100%;
+  max-width: min(100%, 240px);
+  min-width: 0;
+  display: inline-block;
   padding: 3px 8px;
   border-radius: 999px;
   font-size: 11px;
@@ -569,9 +704,17 @@ onMounted(async () => {
 }
 
 .knowledge-tag {
+  flex: 0 1 auto;
   background: rgba(226, 191, 116, 0.12);
   color: #e8c476;
   border: 1px solid rgba(226, 191, 116, 0.18);
+}
+
+.more-tag {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(247, 242, 232, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .case-card h3 {
@@ -618,6 +761,13 @@ onMounted(async () => {
 
 .empty-panel p {
   margin: 0;
+  font-size: 13px;
+}
+
+.empty-action {
+  height: 34px;
+  margin-top: 16px;
+  padding: 0 14px;
   font-size: 13px;
 }
 
