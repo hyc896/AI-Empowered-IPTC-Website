@@ -154,7 +154,7 @@ const regionOptions = [
 
 const search = ref(route.query.search || '')
 const page = ref(1)
-const pageSize = 20
+const pageSize = 8
 const total = ref(0)
 const cases = ref([])
 const loading = ref(false)
@@ -361,7 +361,7 @@ onMounted(async () => {
 
 <style scoped>
 .cases-view {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background:
@@ -372,6 +372,7 @@ onMounted(async () => {
 }
 
 .topbar {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: auto minmax(170px, 1fr) auto 280px;
   align-items: center;
@@ -473,13 +474,16 @@ onMounted(async () => {
 .library-shell {
   flex: 1;
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: 420px minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
 }
 
 .knowledge-panel {
   min-height: 0;
+  height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 22px 16px 28px;
   border-right: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(10, 13, 18, 0.72);
@@ -503,13 +507,16 @@ onMounted(async () => {
 
 .kp-tree {
   background: transparent;
+  min-width: 0;
 }
 
 .kp-tree :deep(.el-tree-node__content) {
   height: auto;
   min-height: 32px;
-  padding: 5px 0;
+  padding: 6px 4px 6px 0;
   color: rgba(247, 242, 232, 0.74);
+  align-items: flex-start;
+  white-space: normal;
 }
 
 .kp-tree :deep(.el-tree-node__content:hover) {
@@ -545,8 +552,9 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   width: 100%;
+  min-width: 0;
   gap: 10px;
-  padding-right: 8px;
+  padding-right: 10px;
   font-size: 12px;
   line-height: 1.45;
 }
@@ -557,11 +565,15 @@ onMounted(async () => {
 
 .node-label {
   flex: 1;
+  min-width: 0;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .kp-count {
-  min-width: 22px;
+  flex: 0 0 auto;
+  min-width: 26px;
   padding: 1px 7px;
   border-radius: 999px;
   text-align: center;
@@ -572,8 +584,11 @@ onMounted(async () => {
 
 .case-panel {
   min-width: 0;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   padding: 24px;
+  display: flex;
+  flex-direction: column;
 }
 
 .result-meta {
@@ -652,13 +667,17 @@ onMounted(async () => {
 }
 
 .case-grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
   gap: 16px;
+  overflow: hidden;
 }
 
 .case-card {
-  min-height: 224px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -729,9 +748,11 @@ onMounted(async () => {
 .case-card p {
   margin: 0;
   flex: 1;
+  min-height: 0;
   color: rgba(247, 242, 232, 0.68);
   font-size: 13px;
   line-height: 1.7;
+  overflow: hidden;
 }
 
 .case-card footer {
@@ -773,6 +794,7 @@ onMounted(async () => {
 }
 
 .pagination {
+  flex: 0 0 auto;
   padding: 20px 0 4px;
   display: flex;
   justify-content: center;
