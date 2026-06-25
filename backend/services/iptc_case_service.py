@@ -23,6 +23,39 @@ class IPTCCaseService:
     """思政课案例服务"""
 
     @staticmethod
+    def normalize_region(primary_region: Optional[str] = None, scope: Optional[str] = None) -> Optional[str]:
+        """Normalize public region/scope inputs to the stored case region labels."""
+        value = (primary_region or scope or "").strip()
+        if not value or value in {"all", "全部"}:
+            return None
+        mapping = {
+            "national": "全国",
+            "china": "全国",
+            "全国": "全国",
+            "shanghai": "上海",
+            "上海": "上海",
+        }
+        return mapping.get(value, value)
+
+    @staticmethod
+    def _case_has_knowledge_point(
+        case: IPTCCase,
+        knowledge_point_name: Optional[str] = None,
+        knowledge_point_id: Optional[str] = None
+    ) -> bool:
+        if not knowledge_point_name and not knowledge_point_id:
+            return True
+        for kp in case.related_knowledge_points or []:
+            if isinstance(kp, dict):
+                if knowledge_point_name and kp.get("name") == knowledge_point_name:
+                    return True
+                if knowledge_point_id and kp.get("id") == knowledge_point_id:
+                    return True
+            elif knowledge_point_name and str(kp) == knowledge_point_name:
+                return True
+        return False
+
+    @staticmethod
     def _tokenize_text(text: str) -> List[str]:
         """
         对文本进行中文分词
@@ -135,22 +168,23 @@ class IPTCCaseService:
         try:
             query = db.query(IPTCCase)
 
-            # 知识点筛选（优先用名称匹配）
-            if knowledge_point_name:
-                query = query.filter(
-                    IPTCCase.related_knowledge_points.contains([{"name": knowledge_point_name}])
-                )
-            elif knowledge_point_id:
-                query = query.filter(
-                    IPTCCase.related_knowledge_points.contains([{"id": knowledge_point_id}])
-                )
-
             # 地域筛选
-            if primary_region:
-                query = query.filter(IPTCCase.primary_region == primary_region)
+            normalized_region = IPTCCaseService.normalize_region(primary_region)
+            if normalized_region:
+                query = query.filter(IPTCCase.primary_region == normalized_region)
 
             # 查询所有匹配的案例
             all_cases = query.order_by(desc(IPTCCase.created_at)).all()
+
+            if knowledge_point_name or knowledge_point_id:
+                all_cases = [
+                    case for case in all_cases
+                    if IPTCCaseService._case_has_knowledge_point(
+                        case,
+                        knowledge_point_name=knowledge_point_name,
+                        knowledge_point_id=knowledge_point_id
+                    )
+                ]
 
             # 关键词搜索（使用BM25算法）
             if search_keyword:
@@ -221,11 +255,17 @@ class IPTCCaseService:
                     "summary": case.summary or "",
                     "source": "IPTC系统",  # 补充source字段
                     "sourceUrl": case.source_url,  # 驼峰命名
+                    "source_url": case.source_url,
                     "publishDate": case.published_at.isoformat() if case.published_at else case.created_at.isoformat(),  # 驼峰命名
+                    "published_at": case.published_at.isoformat() if case.published_at else None,
                     "viewCount": 0,  # 补充viewCount字段（暂时为0）
                     "knowledgePoints": knowledge_points,  # 驼峰命名，字符串数组
+                    "related_knowledge_points": case.related_knowledge_points or [],
+                    "primary_region": case.primary_region or "全国",
                     "createdAt": case.created_at.isoformat(),  # 驼峰命名
+                    "created_at": case.created_at.isoformat(),
                     "updatedAt": case.updated_at.isoformat(),  # 驼峰命名
+                    "updated_at": case.updated_at.isoformat(),
                 })
 
             return {
@@ -279,10 +319,15 @@ class IPTCCaseService:
                 "sourceUrl": case.source_url,
                 "sourceMessages": source_messages,  # 新增：所有来源消息的详细信息
                 "publishDate": case.published_at.isoformat() if case.published_at else case.created_at.isoformat(),
+                "published_at": case.published_at.isoformat() if case.published_at else None,
                 "viewCount": 0,
                 "knowledgePoints": knowledge_points,
+                "related_knowledge_points": case.related_knowledge_points or [],
+                "primary_region": case.primary_region or "全国",
                 "createdAt": case.created_at.isoformat(),
+                "created_at": case.created_at.isoformat(),
                 "updatedAt": case.updated_at.isoformat(),
+                "updated_at": case.updated_at.isoformat(),
                 # 保留原始数据供调试
                 "tags": case.tags,
                 "relatedKnowledgePointsRaw": case.related_knowledge_points,

@@ -158,6 +158,7 @@ def get_cases(
     knowledge_point_id: Optional[str] = Query(None, description="知识点ID过滤（已废弃，请用name）"),
     search: Optional[str] = Query(None),
     primary_region: Optional[str] = Query(None),
+    scope: Optional[str] = Query(None),
     db: Session = Depends(get_db_session)
 ):
     """
@@ -177,7 +178,7 @@ def get_cases(
             page_size=page_size,
             knowledge_point_name=kp_name,
             search_keyword=search,
-            primary_region=primary_region
+            primary_region=primary_region or scope
         )
         # 返回符合前端ApiResponse格式
         return {
@@ -272,59 +273,123 @@ def delete_case(
 
 
 @router.get("/knowledge-tree")
-def get_knowledge_tree(db: Session = Depends(get_db_session)):
-    """按书→章→节→知识点层级返回，附带每个知识点的真实案例数"""
+def get_knowledge_tree(
+    primary_region: Optional[str] = Query(None),
+    scope: Optional[str] = Query(None),
+    db: Session = Depends(get_db_session)
+):
+    """按书→章→节→知识点层级返回，附带每个知识点的真实案例数。"""
     try:
-        kps = load_knowledge_points()
-        # 直接从 iptc_cases 按名称统计
-        from sqlalchemy import func, text
-        cases_all = db.query(IPTCCase.related_knowledge_points).all()
+        raw_kps = load_knowledge_points()
+        if isinstance(raw_kps, dict):
+            raw_kps = raw_kps.get("knowledge_points") or raw_kps.get("data") or raw_kps.get("items") or []
+
+        normalized_region = IPTCCaseService.normalize_region(primary_region, scope)
+        case_query = db.query(IPTCCase.related_knowledge_points)
+        if normalized_region:
+            case_query = case_query.filter(IPTCCase.primary_region == normalized_region)
+
         name_to_count = {}
-        for (kps,) in cases_all:
-            if not kps:
+        id_to_count = {}
+        for (case_kps,) in case_query.all():
+            if not case_kps:
                 continue
-            for kp in kps:
-                name = kp.get('name', '') if isinstance(kp, dict) else str(kp)
-                if name:
-                    name_to_count[name] = name_to_count.get(name, 0) + 1
+            for kp in case_kps:
+                if isinstance(kp, dict):
+                    kp_id = str(kp.get("id") or "")
+                    name = str(kp.get("name") or "")
+                    if kp_id:
+                        id_to_count[kp_id] = id_to_count.get(kp_id, 0) + 1
+                    if name:
+                        name_to_count[name] = name_to_count.get(name, 0) + 1
+                else:
+                    name = str(kp)
+                    if name:
+                        name_to_count[name] = name_to_count.get(name, 0) + 1
 
-        # 合并马克思两个book_id为一个
-        MARX_IDS = {'marx_principles_2023', 'marx_basic_principles_2023'}
+        def text_value(data, *keys, default=""):
+            for key in keys:
+                value = data.get(key)
+                if value not in (None, ""):
+                    return str(value)
+            return default
+
+        def stable_id(prefix: str, value: str, fallback: int) -> str:
+            cleaned = "".join(ch if ch.isalnum() else "_" for ch in value).strip("_")
+            return f"{prefix}_{cleaned or fallback}"
+
+        MARX_IDS = {"marx_principles_2023", "marx_basic_principles_2023"}
         books = {}
-        chapters = {}
-        sections = {}
 
-        for idx, kp in enumerate(kps):
-            raw_book_id = kp.get('book_id', '')
-            book_id = 'marx_basic_principles_2023' if raw_book_id in MARX_IDS else raw_book_id
-            book_name = '马克思主义基本原理（2023年版）' if raw_book_id in MARX_IDS else kp.get('book_name', '')
+        for idx, kp in enumerate(raw_kps):
+            if not isinstance(kp, dict):
+                kp = {"name": str(kp)}
+
+            kp_name = text_value(kp, "name", "knowledge_point_name", "title")
+            if not kp_name:
+                continue
+
+            raw_book_id = text_value(kp, "book_id")
+            raw_book_name = text_value(kp, "book_name", "book", default="思政知识点")
+            if raw_book_id in MARX_IDS:
+                book_id = "marx_basic_principles_2023"
+                book_name = "马克思主义基本原理（2023年版）"
+            else:
+                book_name = raw_book_name
+                book_id = raw_book_id or stable_id("book", book_name, 1)
+
+            chapter_label = text_value(kp, "chapter", "chapter_name", "chapter_title", default="全部知识点")
+            chapter_id = text_value(kp, "chapter_id") or stable_id(f"{book_id}_chapter", chapter_label, idx)
+
+            section_label = text_value(kp, "section", "section_name", "section_title", "part", default="未分组知识点")
+            section_id = text_value(kp, "section_id") or stable_id(f"{chapter_id}_section", section_label, idx)
+
+            kp_id = text_value(kp, "id", "knowledge_point_id", "point_id") or f"kp_{idx}"
+            case_count = id_to_count.get(kp_id, name_to_count.get(kp_name, 0))
 
             if book_id not in books:
-                books[book_id] = {'book_id': book_id, 'book_name': book_name, 'chapters': {}}
+                books[book_id] = {"book_id": book_id, "book_name": book_name, "chapters": {}}
 
-            chap_id = kp.get('chapter_id', '')
-            if chap_id and chap_id not in books[book_id]['chapters']:
-                books[book_id]['chapters'][chap_id] = {'id': chap_id, 'label': kp.get('chapter', ''), 'sections': {}}
+            book = books[book_id]
+            if chapter_id not in book["chapters"]:
+                book["chapters"][chapter_id] = {"id": chapter_id, "label": chapter_label, "sections": {}}
 
-            sec_id = kp.get('section_id', '')
-            if chap_id and sec_id and sec_id not in books[book_id]['chapters'].get(chap_id, {}).get('sections', {}):
-                books[book_id]['chapters'][chap_id]['sections'][sec_id] = {
-                    'id': sec_id, 'label': kp.get('section', ''), 'knowledge_points': []
+            chapter = book["chapters"][chapter_id]
+            if section_id not in chapter["sections"]:
+                chapter["sections"][section_id] = {
+                    "id": section_id,
+                    "label": section_label,
+                    "knowledge_points": [],
+                    "case_count": 0,
                 }
 
-            kp_name = kp.get('name', '')
-            kp_entry = {'id': f'kp_{idx}', 'name': kp_name, 'case_count': name_to_count.get(kp_name, 0)}
-            if chap_id and sec_id:
-                books[book_id]['chapters'][chap_id]['sections'][sec_id]['knowledge_points'].append(kp_entry)
+            section = chapter["sections"][section_id]
+            section["knowledge_points"].append({
+                "id": kp_id,
+                "name": kp_name,
+                "case_count": case_count,
+            })
+            section["case_count"] += case_count
 
         result = []
         for b in books.values():
             chapters_list = []
-            for ch in b['chapters'].values():
-                sections_list = [s for s in ch['sections'].values()]
-                chapters_list.append({'id': ch['id'], 'label': ch['label'], 'sections': sections_list})
-            result.append({'book_id': b['book_id'], 'book_name': b['book_name'], 'chapters': chapters_list})
+            for ch in b["chapters"].values():
+                sections_list = list(ch["sections"].values())
+                chapter_count = sum(s.get("case_count", 0) for s in sections_list)
+                chapters_list.append({
+                    "id": ch["id"],
+                    "label": ch["label"],
+                    "case_count": chapter_count,
+                    "sections": sections_list,
+                })
+            result.append({
+                "book_id": b["book_id"],
+                "book_name": b["book_name"],
+                "case_count": sum(ch.get("case_count", 0) for ch in chapters_list),
+                "chapters": chapters_list,
+            })
 
-        return {'code': 200, 'message': 'success', 'data': result}
+        return {"code": 200, "message": "success", "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取知识点树失败: {str(e)}")
