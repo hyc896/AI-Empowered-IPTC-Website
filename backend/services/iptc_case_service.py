@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 class IPTCCaseService:
     """思政课案例服务"""
 
+    REGION_ALIASES = {
+        "全国": ["全国", "å…¨å›½", "鍏ㄥ浗", "national", "china"],
+        "上海": ["上海", "ä¸Šæµ·", "涓婃捣", "shanghai"],
+    }
+
     @staticmethod
     def normalize_region(primary_region: Optional[str] = None, scope: Optional[str] = None) -> Optional[str]:
         """Normalize public region/scope inputs to the stored case region labels."""
@@ -36,6 +41,20 @@ class IPTCCaseService:
             "上海": "上海",
         }
         return mapping.get(value, value)
+
+    @staticmethod
+    def region_filter_values(primary_region: Optional[str] = None, scope: Optional[str] = None) -> List[str]:
+        normalized = IPTCCaseService.normalize_region(primary_region, scope)
+        if not normalized:
+            return []
+        return IPTCCaseService.REGION_ALIASES.get(normalized, [normalized])
+
+    @staticmethod
+    def apply_region_filter(query, column, primary_region: Optional[str] = None, scope: Optional[str] = None):
+        values = IPTCCaseService.region_filter_values(primary_region, scope)
+        if not values:
+            return query
+        return query.filter(column.in_(values))
 
     @staticmethod
     def _case_has_knowledge_point(
@@ -169,9 +188,7 @@ class IPTCCaseService:
             query = db.query(IPTCCase)
 
             # 地域筛选
-            normalized_region = IPTCCaseService.normalize_region(primary_region)
-            if normalized_region:
-                query = query.filter(IPTCCase.primary_region == normalized_region)
+            query = IPTCCaseService.apply_region_filter(query, IPTCCase.primary_region, primary_region)
 
             # 查询所有匹配的案例
             all_cases = query.order_by(desc(IPTCCase.created_at)).all()

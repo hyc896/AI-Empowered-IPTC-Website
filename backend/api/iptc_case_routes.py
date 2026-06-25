@@ -284,10 +284,13 @@ def get_knowledge_tree(
         if isinstance(raw_kps, dict):
             raw_kps = raw_kps.get("knowledge_points") or raw_kps.get("data") or raw_kps.get("items") or []
 
-        normalized_region = IPTCCaseService.normalize_region(primary_region, scope)
         case_query = db.query(IPTCCase.related_knowledge_points)
-        if normalized_region:
-            case_query = case_query.filter(IPTCCase.primary_region == normalized_region)
+        case_query = IPTCCaseService.apply_region_filter(
+            case_query,
+            IPTCCase.primary_region,
+            primary_region,
+            scope,
+        )
 
         name_to_count = {}
         id_to_count = {}
