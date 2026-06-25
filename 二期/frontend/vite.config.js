@@ -12,6 +12,14 @@ export default defineConfig({
   server: {
     port: 5715,
     proxy: {
+      '/api/v1/iptc': {
+        target: 'http://localhost:11528',
+        changeOrigin: true
+      },
+      '/api/v1/knowledge-graph': {
+        target: 'http://localhost:11528',
+        changeOrigin: true
+      },
       '/api': {
         target: 'http://localhost:8001',
         changeOrigin: true

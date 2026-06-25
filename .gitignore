@@ -51,6 +51,15 @@ nul
 # User uploaded files
 二期/backend/data/
 
+# Phase 1 generated/runtime data
+一期/.env
+一期/logs/
+一期/backend/logs/
+一期/data/chromadb*/
+一期/backend/data/chromadb*/
+一期/backend/data/uploads/
+一期/backend/Graph/GraphRAG-Visualizer/frontend/node_modules/
+
 # Large PDF files (exceed GitHub 100MB limit)
 文件/马克思主义基本原理 (2023年版)【马工程重点教材】.pdf
 文件/思想道德与法治 (2023年版).pdf

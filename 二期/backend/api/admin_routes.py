@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -9,7 +11,7 @@ from database.entities import User, UserRole, PracticePlan, PracticeSubmission, 
 from api.auth_routes import get_current_user
 
 router = APIRouter()
-COLLECTOR_URL = "http://collector-backend:11528"
+COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://collector-backend:11528").rstrip("/")
 
 
 def require_admin(current_user: User = Depends(get_current_user)):

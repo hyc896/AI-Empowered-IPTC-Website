@@ -70,6 +70,7 @@ services:
       - ./二期/.env.production
     environment:
       - TZ=Asia/Shanghai
+      - COLLECTOR_URL=http://collector-backend:11528
     depends_on:
       mysql:
         condition: service_healthy
@@ -94,6 +95,7 @@ services:
       - ./二期/.env.production
     environment:
       - TZ=Asia/Shanghai
+      - COLLECTOR_URL=http://collector-backend:11528
     depends_on:
       mysql:
         condition: service_healthy
@@ -133,8 +135,8 @@ services:
     ports:
       - "11528:11528"
     volumes:
-      - chromadb_data:/app/backend/data/chromadb
-      - prompts_data:/app/backend/data/prompts
+      - chromadb_data:/app/backend/data/chromadb_new
+      - ./一期/backend/data/prompts:/app/backend/data/prompts:ro
       - ./一期/config.yaml:/app/config.yaml:ro
     environment:
       - TZ=Asia/Shanghai
@@ -142,9 +144,12 @@ services:
       - MYSQL_PORT=3306
       - MYSQL_DATABASE=iptc_main
       - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-iptc_prod_2025}
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - CHROMADB_MODE=local
-      - CHROMADB_PATH=/app/backend/data/chromadb
+      - CHROMADB_PATH=/app/backend/data/chromadb_new
       - REDIS_HOST=redis
+      - PLAYWRIGHT_HEADLESS=1
     depends_on:
       mysql:
         condition: service_healthy
@@ -162,8 +167,8 @@ services:
       dockerfile: Dockerfile
     command: celery -A backend.tasks worker -Q collector,default --loglevel=info --pool=solo --concurrency=1
     volumes:
-      - chromadb_data:/app/backend/data/chromadb
-      - prompts_data:/app/backend/data/prompts
+      - chromadb_data:/app/backend/data/chromadb_new
+      - ./一期/backend/data/prompts:/app/backend/data/prompts:ro
       - ./一期/config.yaml:/app/config.yaml:ro
     environment:
       - TZ=Asia/Shanghai
@@ -171,9 +176,12 @@ services:
       - MYSQL_PORT=3306
       - MYSQL_DATABASE=iptc_main
       - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-iptc_prod_2025}
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - CHROMADB_MODE=local
-      - CHROMADB_PATH=/app/backend/data/chromadb
+      - CHROMADB_PATH=/app/backend/data/chromadb_new
       - REDIS_HOST=redis
+      - PLAYWRIGHT_HEADLESS=1
     depends_on:
       mysql:
         condition: service_healthy
@@ -191,8 +199,8 @@ services:
       dockerfile: Dockerfile
     command: celery -A backend.tasks beat --loglevel=info --scheduler celery.beat:Scheduler
     volumes:
-      - chromadb_data:/app/backend/data/chromadb
-      - prompts_data:/app/backend/data/prompts
+      - chromadb_data:/app/backend/data/chromadb_new
+      - ./一期/backend/data/prompts:/app/backend/data/prompts:ro
       - ./一期/config.yaml:/app/config.yaml:ro
     environment:
       - TZ=Asia/Shanghai
@@ -200,9 +208,12 @@ services:
       - MYSQL_PORT=3306
       - MYSQL_DATABASE=iptc_main
       - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-iptc_prod_2025}
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - CHROMADB_MODE=local
-      - CHROMADB_PATH=/app/backend/data/chromadb
+      - CHROMADB_PATH=/app/backend/data/chromadb_new
       - REDIS_HOST=redis
+      - PLAYWRIGHT_HEADLESS=1
     depends_on:
       mysql:
         condition: service_healthy
@@ -219,5 +230,4 @@ volumes:
   redis_data:
   uploads_data:
   chromadb_data:
-  prompts_data:
   frontend_dist:
