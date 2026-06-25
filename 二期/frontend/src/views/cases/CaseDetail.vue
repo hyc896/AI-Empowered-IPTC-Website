@@ -141,7 +141,12 @@ onMounted(async () => {
 .detail-wrap {
   max-width: 860px;
   margin: 0 auto;
-  padding: 48px 20px 80px;
+  padding: 48px 40px 80px;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(16px);
+  border-radius: 12px;
+  margin-top: 32px;
+  margin-bottom: 32px;
 }
 
 .kp-tags { margin-bottom: 16px; }
