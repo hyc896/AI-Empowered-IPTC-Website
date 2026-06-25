@@ -5,6 +5,8 @@
 """
 
 import logging
+import json
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy import desc, func
@@ -14,7 +16,6 @@ from rank_bm25 import BM25Okapi
 
 from backend.database.entities import IPTCCase, IPTCKnowledgePointStats, IPTCMessageKnowledgeRelation
 from backend.database.orm_registry import get_orm_registry
-from backend.storage import get_chromadb_storage
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,24 @@ class IPTCCaseService:
         if not values:
             return query
         return query.filter(column.in_(values))
+
+    @staticmethod
+    def _knowledge_points_file_count() -> int:
+        data_path = Path(__file__).resolve().parents[1] / "data" / "knowledge_points.json"
+        try:
+            data = json.loads(data_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(f"读取知识点文件失败: {exc}")
+            return 0
+
+        if isinstance(data, list):
+            return len(data)
+        if isinstance(data, dict):
+            for key in ("knowledge_points", "items", "data"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return len(value)
+        return 0
 
     @staticmethod
     def _case_has_knowledge_point(
@@ -412,17 +431,10 @@ class IPTCCaseService:
             # 案例总数
             total_cases = db.query(func.count(IPTCCase.id)).scalar()
 
-            # 知识点总数（从ChromaDB查询）
-            try:
-                chroma_storage = get_chromadb_storage()
-                if chroma_storage and chroma_storage.is_initialized():
-                    total_kps = chroma_storage.get_collection_count('iptc_knowledge_points')
-                else:
-                    # 降级到MySQL查询
-                    total_kps = db.query(func.count(IPTCKnowledgePointStats.id)).scalar()
-            except Exception as e:
-                logger.warning(f"从ChromaDB查询知识点数量失败，降级到MySQL: {e}")
-                total_kps = db.query(func.count(IPTCKnowledgePointStats.id)).scalar()
+            # 知识点总数保持轻量查询，避免统计页被 ChromaDB 初始化或锁等待拖到超时
+            total_kps = db.query(func.count(IPTCKnowledgePointStats.id)).scalar() or 0
+            if not total_kps:
+                total_kps = IPTCCaseService._knowledge_points_file_count()
 
             # 已生成案例的知识点数
             generated_kps = db.query(func.count(IPTCKnowledgePointStats.id)).filter(
@@ -446,7 +458,7 @@ class IPTCCaseService:
                     {
                         "id": case.id,
                         "title": case.title,
-                        "created_at": case.created_at.isoformat(),
+                        "created_at": case.created_at.isoformat() if case.created_at else None,
                     }
                     for case in latest_cases
                 ]
