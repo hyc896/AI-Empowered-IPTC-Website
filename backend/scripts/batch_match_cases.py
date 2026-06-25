@@ -660,7 +660,9 @@ class BatchMatchCasesService:
         # 3. 构建模板参数
         template_params = {
             'related_knowledge_points': f"- {knowledge_point_name}",
-            'teaching_application': teaching_application
+            'teaching_application': teaching_application,
+            'book_name': book_name,
+            'case_date': datetime.now().strftime('%Y-%m-%d'),
         }
 
         # 为每条新闻构建参数（最多7条）
@@ -679,8 +681,8 @@ class BatchMatchCasesService:
             template_params[f'url_{i}'] = ''
             template_params[f'news_content_{i}'] = ''
 
-        # 4. 填充模板
-        prompt = prompt_template.format(**template_params)
+        # 4. 填充模板。未知占位符置空，避免提示词版本变化导致整批生成中断。
+        prompt = prompt_template.format_map(defaultdict(str, template_params))
 
         # 4. 调用LLM生成案例
         self.logger.info(f"  [LLM] 开始生成案例，知识点: {knowledge_point_name}")
