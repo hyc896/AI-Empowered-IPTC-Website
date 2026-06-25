@@ -49,8 +49,9 @@ class BatchMatchCasesService:
         'mp_shanghai_observer_messages',
         'mp_thepaper_shanghai_messages',
     }
-    SHANGHAI_LOCAL_KEYWORDS = {
-        '上海', '沪上', '申城', '浦东', '浦东新区', '黄浦', '徐汇', '长宁', '静安', '普陀',
+    SHANGHAI_BROAD_KEYWORDS = {'上海', '沪上', '申城'}
+    SHANGHAI_STRONG_KEYWORDS = {
+        '浦东', '浦东新区', '黄浦', '徐汇', '长宁', '静安', '普陀',
         '虹口', '杨浦', '闵行', '宝山', '嘉定', '金山', '松江', '青浦', '奉贤', '崇明',
         '人民广场', '外滩', '豫园', '张园', '前滩', '陆家嘴', '虹桥', '临港', '五角场',
         '老成都北路', '辅德里', '中共一大', '中共二大', '一大会址', '二大会址',
@@ -82,19 +83,24 @@ class BatchMatchCasesService:
     def _source_scope_for_table(self, table_name: str) -> str:
         return 'shanghai' if table_name in self.SHANGHAI_SOURCE_TABLES else 'national'
 
-    def _message_text_for_scope(self, row: Any) -> str:
-        parts = [
+    def _message_text_for_scope(self, row: Any) -> Dict[str, str]:
+        primary_parts = [
             getattr(row, 'title', '') or '',
             getattr(row, 'summary', '') or '',
-            getattr(row, 'content', '') or '',
             getattr(row, 'region', '') or '',
         ]
-        return '\n'.join(str(part) for part in parts if part)
+        return {
+            "primary": '\n'.join(str(part) for part in primary_parts if part),
+        }
 
     def _shanghai_local_relevance(self, row: Any) -> Dict[str, Any]:
-        text = self._message_text_for_scope(row)
-        compact_text = re.sub(r'\s+', '', text)
-        hits = [keyword for keyword in self.SHANGHAI_LOCAL_KEYWORDS if keyword in compact_text]
+        texts = self._message_text_for_scope(row)
+        primary_text = re.sub(r'\s+', '', texts["primary"])
+        primary_hits = [
+            keyword for keyword in sorted(self.SHANGHAI_STRONG_KEYWORDS | self.SHANGHAI_BROAD_KEYWORDS)
+            if keyword in primary_text
+        ]
+        hits = primary_hits
         if hits:
             return {
                 "is_local": True,
@@ -102,7 +108,7 @@ class BatchMatchCasesService:
             }
         return {
             "is_local": False,
-            "reason": "来自上海源，但正文/标题/地区字段未命中上海本地关键词"
+            "reason": "来自上海源，但标题/摘要/地区字段未命中上海本地关键词"
         }
 
     def _row_allowed_for_scope(self, row: Any, table_name: str, scope: str) -> bool:
