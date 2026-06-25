@@ -6,16 +6,16 @@
         <span>逐光管理后台</span>
       </div>
       <nav class="nav">
-        <router-link to="/admin" :class="['nav-item', $route.path === '/admin' && 'active']">
+        <router-link to="/admin" class="nav-item" exact-active-class="active">
           <span class="nav-icon">▣</span>系统概览
         </router-link>
-        <router-link to="/admin/sources" :class="['nav-item', $route.path === '/admin/sources' && 'active']">
+        <router-link to="/admin/sources" class="nav-item" active-class="active">
           <span class="nav-icon">◈</span>消息采集
         </router-link>
-        <router-link to="/admin/users" :class="['nav-item', $route.path === '/admin/users' && 'active']">
+        <router-link to="/admin/users" class="nav-item" active-class="active">
           <span class="nav-icon">◎</span>用户管理
         </router-link>
-        <router-link to="/admin/practices" :class="['nav-item', $route.path === '/admin/practices' && 'active']">
+        <router-link to="/admin/practices" class="nav-item" active-class="active">
           <span class="nav-icon">◆</span>实践项目
         </router-link>
       </nav>

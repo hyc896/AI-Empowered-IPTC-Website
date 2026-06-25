@@ -46,9 +46,9 @@
           <span :class="['status-dot', s.is_active ? 'on' : 'off']"></span>
           <span class="status-txt">{{ s.is_active ? '启用' : '停用' }}</span>
         </div>
-        <button class="action-btn sm" :class="{loading: triggering === (s.name || s.source_name)}"
-          @click="trigger(s.name || s.source_name)">
-          {{ triggering === (s.name || s.source_name) ? '采集中...' : '手动采集' }}
+        <button class="action-btn sm" :class="{loading: triggering === (s.source_name || s.name)}"
+          @click="trigger(s.source_name || s.name)">
+          {{ triggering === (s.source_name || s.name) ? '采集中...' : '手动采集' }}
         </button>
       </div>
     </div>
@@ -129,16 +129,17 @@ async function doTriggerGen() {
   padding: 8px 18px;
   border-radius: 8px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  border: 1px solid rgba(255,215,0,0.3);
-  background: rgba(255,215,0,0.1);
-  color: #ffd700;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(0,0,0,0.6);
+  color: #fff;
   transition: all 0.15s;
 }
-.action-btn:hover { background: rgba(255,215,0,0.2); border-color: rgba(255,215,0,0.5); }
-.action-btn.primary { background: rgba(255,215,0,0.2); border-color: #ffd700; }
-.action-btn.sm { padding: 5px 12px; font-size: 12px; }
+.action-btn:hover { background: rgba(0,0,0,0.85); border-color: rgba(255,255,255,0.4); }
+.action-btn.primary { background: rgba(0,0,0,0.8); border-color: rgba(255,215,0,0.5); color: #ffd700; }
+.action-btn.primary:hover { background: rgba(0,0,0,0.95); border-color: #ffd700; }
+.action-btn.sm { padding: 5px 12px; font-size: 12px; font-weight: 600; }
 .action-btn.loading { opacity: 0.6; cursor: default; }
 
 .result-bar { margin-bottom: 16px; padding: 10px 16px; border-radius: 8px; font-size: 13px; }
