@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import os
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import httpx
@@ -12,6 +14,20 @@ from api.auth_routes import get_current_user
 
 router = APIRouter()
 COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://collector-backend:11528").rstrip("/")
+
+
+class PipelineTriggerPayload(BaseModel):
+    scope: str = "all"
+    message_ids: Optional[List[str]] = None
+    knowledge_point_ids: Optional[List[str]] = None
+    case_ids: Optional[List[str]] = None
+    limit: Optional[int] = None
+
+
+def payload_dict(payload: PipelineTriggerPayload) -> dict:
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump(exclude_none=True)
+    return payload.dict(exclude_none=True)
 
 
 def require_admin(current_user: User = Depends(get_current_user)):
@@ -62,20 +78,22 @@ async def trigger_collector(source_name: str, _=Depends(require_admin)):
 
 
 @router.post("/trigger-matching")
-async def trigger_matching(_=Depends(require_admin)):
+async def trigger_matching(payload: Optional[PipelineTriggerPayload] = None, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=30) as client:
         try:
-            r = await client.post(f"{COLLECTOR_URL}/api/v1/iptc/trigger-matching")
+            body = payload_dict(payload or PipelineTriggerPayload())
+            r = await client.post(f"{COLLECTOR_URL}/api/v1/iptc/trigger-matching", json=body)
             return r.json()
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"触发失败: {e}")
 
 
 @router.post("/trigger-case-generation")
-async def trigger_case_generation(_=Depends(require_admin)):
+async def trigger_case_generation(payload: Optional[PipelineTriggerPayload] = None, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=30) as client:
         try:
-            r = await client.post(f"{COLLECTOR_URL}/api/v1/iptc/trigger-case-generation")
+            body = payload_dict(payload or PipelineTriggerPayload())
+            r = await client.post(f"{COLLECTOR_URL}/api/v1/iptc/trigger-case-generation", json=body)
             return r.json()
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"触发失败: {e}")

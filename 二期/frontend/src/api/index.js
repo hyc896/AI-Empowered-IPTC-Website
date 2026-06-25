@@ -213,8 +213,20 @@ export const caseAPI = {
   getKnowledgeTree() {
     return collectorRequest.get('/iptc/knowledge-tree')
   },
+  getKnowledgeTreeByParams(params) {
+    return collectorRequest.get('/iptc/knowledge-tree', { params })
+  },
   getStatistics() {
     return collectorRequest.get('/iptc/statistics')
+  },
+  getMessageCandidates(params) {
+    return collectorRequest.get('/iptc/candidates/messages', { params })
+  },
+  getMatchCandidates(params) {
+    return collectorRequest.get('/iptc/candidates/matches', { params })
+  },
+  getCaseCandidates(params) {
+    return collectorRequest.get('/iptc/candidates/cases', { params })
   }
 }
 
@@ -249,11 +261,11 @@ export const adminAPI = {
   triggerCollector(name) {
     return request.post(`/admin/collectors/${name}/trigger`)
   },
-  triggerMatching() {
-    return request.post('/admin/trigger-matching')
+  triggerMatching(data = {}) {
+    return request.post('/admin/trigger-matching', data)
   },
-  triggerCaseGeneration() {
-    return request.post('/admin/trigger-case-generation')
+  triggerCaseGeneration(data = {}) {
+    return request.post('/admin/trigger-case-generation', data)
   },
   getUsers(params) {
     return request.get('/admin/users', { params })
