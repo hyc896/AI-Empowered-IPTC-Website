@@ -74,7 +74,6 @@ task_time_limits = celery_config.get('task_time_limits', {})
 task_queues = (
     Queue('default', Exchange('default'), routing_key='default', priority=5),
     Queue('collector', Exchange('collector'), routing_key='collector', priority=3),
-    Queue('report', Exchange('report'), routing_key='report', priority=9),
 )
 
 # 默认队列
@@ -117,6 +116,5 @@ task_send_sent_event = True
 # 启动时自动导入的模块（包含所有任务定义）
 imports = (
     'backend.tasks.collector_tasks',
-    'backend.tasks.ai_report_tasks',
-    'backend.tasks.sync_tasks',
+    'backend.tasks.case_tasks',
 )
