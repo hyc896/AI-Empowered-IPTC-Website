@@ -207,7 +207,7 @@ class BatchMatchCasesService:
             self.logger.error(f"[初始化] 失败: {e}")
             raise
 
-    def run_batch_match(self, limit: int = None, dry_run: bool = False):
+    def run_batch_match(self, limit: int = None, dry_run: bool = False, generate_cases: bool = True):
         """
         执行批量撞库任务
 
@@ -248,19 +248,22 @@ class BatchMatchCasesService:
             matches = self._match_knowledge_points(messages)
             self.logger.info(f"匹配到 {len(matches)} 条消息-知识点关联")
 
+            generated_cases = []
             if not dry_run:
                 # Step 3: 保存关联关系到数据库
                 self._save_relations(matches)
 
-                # Step 4: 统计知识点关联数
-                kp_stats = self._calculate_kp_statistics()
-                self.logger.info(f"统计到 {len(kp_stats)} 个知识点有关联消息")
+                if generate_cases:
+                    # Step 4: 统计知识点关联数
+                    kp_stats = self._calculate_kp_statistics()
+                    self.logger.info(f"统计到 {len(kp_stats)} 个知识点有关联消息")
 
-                # Step 5: 触发案例生成
-                generated_cases = self._generate_cases(kp_stats)
+                    # Step 5: 触发案例生成
+                    generated_cases = self._generate_cases(kp_stats)
+                else:
+                    self.logger.info("[模式] 仅执行撞库匹配，跳过案例生成")
             else:
                 self.logger.info("[试运行] 跳过数据库写入和案例生成")
-                generated_cases = []
 
             self.logger.info("="*60)
             self.logger.info(f"✅ 批量撞库任务完成")
@@ -271,6 +274,7 @@ class BatchMatchCasesService:
 
             return {
                 "status": "success",
+                "mode": "full_pipeline" if generate_cases else "matching_only",
                 "total_messages": len(messages),
                 "matched_pairs": len(matches),
                 "generated_cases": len(generated_cases)
@@ -280,6 +284,48 @@ class BatchMatchCasesService:
             self.logger.error(f"[错误] 批量撞库任务失败: {e}", exc_info=True)
             return {
                 "status": "error",
+                "error": str(e)
+            }
+
+    def run_case_generation(self, dry_run: bool = False):
+        """
+        仅基于已保存的消息-知识点关联生成案例。
+        不重新采集、不重新做向量撞库，适合在修复提示词或模型配置后单独重跑。
+        """
+        self.logger.info("="*60)
+        self.logger.info("开始案例生成任务（仅生成，不重新撞库）")
+        if dry_run:
+            self.logger.info("[模式] 试运行（不写入数据库）")
+        self.logger.info("="*60)
+
+        try:
+            kp_stats = self._calculate_kp_statistics()
+            self.logger.info(f"统计到 {len(kp_stats)} 个知识点有关联消息")
+
+            if dry_run:
+                generated_cases = []
+                self.logger.info("[试运行] 跳过案例保存")
+            else:
+                generated_cases = self._generate_cases(kp_stats)
+
+            self.logger.info("="*60)
+            self.logger.info("案例生成任务完成")
+            self.logger.info(f"   - 候选知识点: {len(kp_stats)} 个")
+            self.logger.info(f"   - 生成案例: {len(generated_cases)} 个")
+            self.logger.info("="*60)
+
+            return {
+                "status": "success",
+                "mode": "case_generation_only",
+                "candidate_knowledge_points": len(kp_stats),
+                "generated_cases": len(generated_cases)
+            }
+
+        except Exception as e:
+            self.logger.error(f"[错误] 案例生成任务失败: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "mode": "case_generation_only",
                 "error": str(e)
             }
 
@@ -720,9 +766,9 @@ class BatchMatchCasesService:
             # 备用：取前500字
             summary = case_content[:500]
 
-        # 6. 判断地域标签
-        source_tables = {msg.get('source_table', '') for msg in related_messages}
-        primary_region = '上海' if source_tables & self.SHANGHAI_SOURCE_TABLES else '全国'
+        # 6. 判断地域标签：混合来源默认归全国，只有全部消息来自上海源才归上海。
+        source_tables = {msg.get('source_table', '') for msg in related_messages if msg.get('source_table')}
+        primary_region = '上海' if source_tables and source_tables <= self.SHANGHAI_SOURCE_TABLES else '全国'
 
         # 7. 构造案例对象
         case = {

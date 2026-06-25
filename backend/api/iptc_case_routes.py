@@ -20,8 +20,8 @@ router = APIRouter(prefix="/api/v1/iptc", tags=["IPTC案例"])
 @router.post("/trigger-matching")
 def trigger_matching():
     try:
-        from backend.tasks.case_tasks import run_batch_match_cases
-        task = run_batch_match_cases.apply_async(queue="default")
+        from backend.tasks.case_tasks import run_matching_only
+        task = run_matching_only.apply_async(queue="default")
         return {"task_id": task.id, "message": "撞库匹配任务已触发"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
@@ -30,9 +30,19 @@ def trigger_matching():
 @router.post("/trigger-case-generation")
 def trigger_case_generation():
     try:
+        from backend.tasks.case_tasks import run_case_generation_only
+        task = run_case_generation_only.apply_async(queue="default")
+        return {"task_id": task.id, "message": "案例生成任务已触发"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
+
+
+@router.post("/trigger-full-pipeline")
+def trigger_full_pipeline():
+    try:
         from backend.tasks.case_tasks import run_batch_match_cases
         task = run_batch_match_cases.apply_async(queue="default")
-        return {"task_id": task.id, "message": "案例生成任务已触发"}
+        return {"task_id": task.id, "message": "全流程撞库与案例生成任务已触发"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"触发失败: {str(e)}")
 

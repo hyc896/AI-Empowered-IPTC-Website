@@ -13,6 +13,26 @@ from backend.tasks import app, run_async_task
 logger = logging.getLogger(__name__)
 
 
+def _run_case_service_task(task_label: str, service_method: str, **kwargs) -> Dict[str, Any]:
+    start_time = datetime.now()
+    logger.info(f"[{task_label}] started")
+
+    try:
+        from backend.scripts.batch_match_cases import BatchMatchCasesService
+        service = BatchMatchCasesService()
+        result = getattr(service, service_method)(**kwargs)
+
+        duration = (datetime.now() - start_time).total_seconds()
+        logger.info(f"[{task_label}] finished in {duration:.1f}s, status={result.get('status')}")
+        result['duration_seconds'] = duration
+        return result
+
+    except Exception as e:
+        duration = (datetime.now() - start_time).total_seconds()
+        logger.error(f"[{task_label}] failed: {e}", exc_info=True)
+        return {'status': 'error', 'error': str(e), 'duration_seconds': duration}
+
+
 @app.task(
     name='backend.tasks.case_tasks.run_batch_match_cases',
     bind=True,
@@ -25,28 +45,42 @@ def run_batch_match_cases(self) -> Dict[str, Any]:
     """
     批量撞库案例生成任务（每周一 03:00 执行）
     """
-    start_time = datetime.now()
-    logger.info("【案例生成】开始批量撞库任务")
+    result = _run_case_service_task("full_pipeline", "run_batch_match", generate_cases=True)
+    if result.get('status') == 'error' and self.request.retries < self.max_retries:
+        raise self.retry(exc=Exception(result.get('error')))
+    return result
 
-    try:
-        from backend.scripts.batch_match_cases import BatchMatchCasesService
-        service = BatchMatchCasesService()
-        result = service.run_batch_match()
 
-        duration = (datetime.now() - start_time).total_seconds()
-        logger.info(f"【案例生成】完成，耗时 {duration:.1f}s，结果: {result.get('status')}")
-        result['duration_seconds'] = duration
-        return result
+@app.task(
+    name='backend.tasks.case_tasks.run_matching_only',
+    bind=True,
+    max_retries=1,
+    default_retry_delay=1800,
+    time_limit=10800,
+    soft_time_limit=10200,
+)
+def run_matching_only(self) -> Dict[str, Any]:
+    """Run message-to-knowledge matching only; do not generate cases."""
+    result = _run_case_service_task("matching_only", "run_batch_match", generate_cases=False)
+    if result.get('status') == 'error' and self.request.retries < self.max_retries:
+        raise self.retry(exc=Exception(result.get('error')))
+    return result
 
-    except Exception as e:
-        duration = (datetime.now() - start_time).total_seconds()
-        logger.error(f"【案例生成】失败: {e}", exc_info=True)
 
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e)
-
-        return {'status': 'error', 'error': str(e), 'duration_seconds': duration}
-
+@app.task(
+    name='backend.tasks.case_tasks.run_case_generation_only',
+    bind=True,
+    max_retries=1,
+    default_retry_delay=1800,
+    time_limit=10800,
+    soft_time_limit=10200,
+)
+def run_case_generation_only(self) -> Dict[str, Any]:
+    """Generate cases from existing relations only; do not rerun matching."""
+    result = _run_case_service_task("case_generation_only", "run_case_generation")
+    if result.get('status') == 'error' and self.request.retries < self.max_retries:
+        raise self.retry(exc=Exception(result.get('error')))
+    return result
 
 @app.task(
     name='backend.tasks.case_tasks.run_venue_sync_from_cases',
