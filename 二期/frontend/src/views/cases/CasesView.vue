@@ -262,19 +262,21 @@ async function loadTree() {
 }
 
 async function loadRegionCounts() {
-  try {
-    const [allRes, nationalRes, shanghaiRes] = await Promise.all([
-      caseAPI.getList({ page: 1, page_size: 1 }),
-      caseAPI.getList({ page: 1, page_size: 1, scope: 'national' }),
-      caseAPI.getList({ page: 1, page_size: 1, scope: 'shanghai' }),
-    ])
-    regionCounts.value = {
-      all: allRes?.data?.total ?? allRes?.total ?? 0,
-      national: nationalRes?.data?.total ?? nationalRes?.total ?? 0,
-      shanghai: shanghaiRes?.data?.total ?? shanghaiRes?.total ?? 0,
-    }
-  } catch (e) {
-    regionCounts.value = { all: 0, national: 0, shanghai: 0 }
+  const extractTotal = (res, fallback = 0) => {
+    const payload = res?.value || res
+    return payload?.data?.total ?? payload?.data?.data?.total ?? payload?.total ?? fallback
+  }
+
+  const [allRes, nationalRes, shanghaiRes] = await Promise.allSettled([
+    caseAPI.getList({ page: 1, page_size: 1 }),
+    caseAPI.getList({ page: 1, page_size: 1, scope: 'national' }),
+    caseAPI.getList({ page: 1, page_size: 1, scope: 'shanghai' }),
+  ])
+
+  regionCounts.value = {
+    all: allRes.status === 'fulfilled' ? extractTotal(allRes, total.value) : total.value,
+    national: nationalRes.status === 'fulfilled' ? extractTotal(nationalRes, 0) : 0,
+    shanghai: shanghaiRes.status === 'fulfilled' ? extractTotal(shanghaiRes, 0) : 0,
   }
 }
 
@@ -358,6 +360,9 @@ function onNodeClick(data) {
 
 onMounted(async () => {
   await Promise.all([loadRegionCounts(), loadTree(), loadCases()])
+  if (!regionCounts.value.all && total.value) {
+    regionCounts.value.all = total.value
+  }
 })
 </script>
 
