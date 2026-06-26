@@ -233,6 +233,13 @@ export const caseAPI = {
   }
 }
 
+// 一期采集器任务API
+export const collectorAPI = {
+  getTaskStatus(sourceName, taskId) {
+    return collectorRequest.get(`/collectors/${encodeURIComponent(sourceName)}/task/${taskId}`)
+  }
+}
+
 // 一期知识图谱API
 export const graphAPI = {
   getBooks() {

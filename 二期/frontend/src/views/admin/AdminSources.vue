@@ -58,6 +58,17 @@
       </span>
     </div>
 
+    <div v-if="activeCollectorTask" class="task-status-card collector-task-card">
+      <div>
+        <span class="eyebrow">Collector Task</span>
+        <strong>{{ activeCollectorTitle }}</strong>
+        <p>{{ activeCollectorDetail }}</p>
+      </div>
+      <span :class="['task-state', activeCollectorTask.state?.toLowerCase()]">
+        {{ activeCollectorTask.state || 'PENDING' }}
+      </span>
+    </div>
+
     <section class="dashboard-grid">
       <article class="panel source-panel">
         <div class="panel-title">
@@ -99,10 +110,10 @@
             </span>
             <button
               class="row-button"
-              :disabled="triggering === source.name || !source.is_active"
+              :disabled="!!triggering || collectorBusy || !source.is_active"
               @click="trigger(source.name)"
             >
-              {{ triggering === source.name ? '提交中' : '手动采集' }}
+              {{ collectorButtonLabel(source) }}
             </button>
           </div>
         </div>
@@ -144,7 +155,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { adminAPI, caseAPI } from '@/api/index'
+import { adminAPI, caseAPI, collectorAPI } from '@/api/index'
 
 const scopeOptions = [
   { label: '全部', value: 'all' },
@@ -167,6 +178,8 @@ const candidateTabs = [
 
 const PIPELINE_TASK_STORAGE_KEY = 'iptc_active_pipeline_task'
 const PIPELINE_TASK_MAX_AGE_MS = 12 * 60 * 60 * 1000
+const COLLECTOR_TASK_STORAGE_KEY = 'iptc_active_collector_task'
+const COLLECTOR_TASK_MAX_AGE_MS = 6 * 60 * 60 * 1000
 
 const sources = ref([])
 const sourcesLoading = ref(true)
@@ -177,6 +190,8 @@ const triggeringMatch = ref(false)
 const triggeringGen = ref(false)
 const activePipelineTask = ref(null)
 const taskPoller = ref(null)
+const activeCollectorTask = ref(null)
+const collectorTaskPoller = ref(null)
 const workflowScope = ref('all')
 const sourceFilter = ref('all')
 const candidateTab = ref('messages')
@@ -188,6 +203,11 @@ const terminalTaskStates = new Set(['SUCCESS', 'FAILURE', 'REVOKED'])
 
 const pipelineBusy = computed(() => {
   const task = activePipelineTask.value
+  return Boolean(task?.task_id && !terminalTaskStates.has(task.state))
+})
+
+const collectorBusy = computed(() => {
+  const task = activeCollectorTask.value
   return Boolean(task?.task_id && !terminalTaskStates.has(task.state))
 })
 
@@ -212,6 +232,19 @@ const activePipelineDetail = computed(() => {
   const task = activePipelineTask.value
   if (!task) return ''
   const info = task.info || (pipelineBusy.value ? '任务正在后台执行，完成前不能再次提交撞库或生成。' : '任务已结束。')
+  return `${info} 任务ID：${task.task_id}`
+})
+
+const activeCollectorTitle = computed(() => {
+  const task = activeCollectorTask.value
+  if (!task) return ''
+  return `采集任务 · ${task.source_name}`
+})
+
+const activeCollectorDetail = computed(() => {
+  const task = activeCollectorTask.value
+  if (!task) return ''
+  const info = task.info || (collectorBusy.value ? '采集任务正在后台执行，完成前不能提交新的手动采集。' : '采集任务已结束。')
   return `${info} 任务ID：${task.task_id}`
 })
 
@@ -345,6 +378,13 @@ function clearTaskPoller() {
   }
 }
 
+function clearCollectorTaskPoller() {
+  if (collectorTaskPoller.value) {
+    clearInterval(collectorTaskPoller.value)
+    collectorTaskPoller.value = null
+  }
+}
+
 function persistPipelineTask(task) {
   if (!task?.task_id) return
   localStorage.setItem(PIPELINE_TASK_STORAGE_KEY, JSON.stringify(task))
@@ -352,6 +392,15 @@ function persistPipelineTask(task) {
 
 function clearPersistedPipelineTask() {
   localStorage.removeItem(PIPELINE_TASK_STORAGE_KEY)
+}
+
+function persistCollectorTask(task) {
+  if (!task?.task_id) return
+  localStorage.setItem(COLLECTOR_TASK_STORAGE_KEY, JSON.stringify(task))
+}
+
+function clearPersistedCollectorTask() {
+  localStorage.removeItem(COLLECTOR_TASK_STORAGE_KEY)
 }
 
 function restorePipelineTask() {
@@ -372,8 +421,34 @@ function restorePipelineTask() {
   }
 }
 
+function restoreCollectorTask() {
+  const raw = localStorage.getItem(COLLECTOR_TASK_STORAGE_KEY)
+  if (!raw) return
+  try {
+    const task = JSON.parse(raw)
+    const startedAt = Date.parse(task.started_at || '')
+    if (!task.task_id || !task.source_name || (startedAt && Date.now() - startedAt > COLLECTOR_TASK_MAX_AGE_MS)) {
+      clearPersistedCollectorTask()
+      return
+    }
+    activeCollectorTask.value = task
+    pollCollectorTask()
+    collectorTaskPoller.value = setInterval(pollCollectorTask, 5000)
+  } catch {
+    clearPersistedCollectorTask()
+  }
+}
+
 function taskKindLabel(kind) {
   return kind === 'matching' ? '撞库匹配' : '案例生成'
+}
+
+function collectorButtonLabel(source) {
+  if (triggering.value === source.name) return '提交中'
+  if (triggering.value) return '等待提交完成'
+  if (!collectorBusy.value) return '手动采集'
+  if (activeCollectorTask.value?.source_name === source.name) return '采集中'
+  return '等待采集空闲'
 }
 
 function rememberPipelineTask(kind, scope, response = {}) {
@@ -393,6 +468,23 @@ function rememberPipelineTask(kind, scope, response = {}) {
   persistPipelineTask(activePipelineTask.value)
   pollPipelineTask()
   taskPoller.value = setInterval(pollPipelineTask, 5000)
+}
+
+function rememberCollectorTask(sourceName, response = {}) {
+  const taskId = response.task_id || response.data?.task_id
+  if (!taskId) return
+  clearCollectorTaskPoller()
+  activeCollectorTask.value = {
+    source_name: sourceName,
+    task_id: taskId,
+    state: 'PENDING',
+    result: null,
+    info: '采集任务已提交，等待后台执行',
+    started_at: new Date().toISOString(),
+  }
+  persistCollectorTask(activeCollectorTask.value)
+  pollCollectorTask()
+  collectorTaskPoller.value = setInterval(pollCollectorTask, 5000)
 }
 
 async function pollPipelineTask() {
@@ -423,10 +515,52 @@ async function pollPipelineTask() {
   }
 }
 
+async function pollCollectorTask() {
+  const currentTask = activeCollectorTask.value
+  if (!currentTask?.task_id || !currentTask.source_name) return
+
+  const startedAt = Date.parse(currentTask.started_at || '')
+  if (startedAt && Date.now() - startedAt > COLLECTOR_TASK_MAX_AGE_MS) {
+    clearCollectorTaskPoller()
+    clearPersistedCollectorTask()
+    activeCollectorTask.value = null
+    showResult('error', '采集任务状态超时', '已解除前端采集锁，请到服务日志确认任务是否仍在运行。')
+    return
+  }
+
+  try {
+    const response = await collectorAPI.getTaskStatus(currentTask.source_name, currentTask.task_id)
+    const payload = response.data || response
+    activeCollectorTask.value = { ...currentTask, ...payload }
+    persistCollectorTask(activeCollectorTask.value)
+
+    if (terminalTaskStates.has(payload.state)) {
+      clearCollectorTaskPoller()
+      clearPersistedCollectorTask()
+      const ok = payload.state === 'SUCCESS'
+      showResult(
+        ok ? 'ok' : 'error',
+        `采集任务${ok ? '已完成' : '已结束'}`,
+        payload.info || payload.result?.message || currentTask.task_id
+      )
+      activeCollectorTask.value = null
+      await Promise.allSettled([loadSources(), loadCandidates()])
+    }
+  } catch (e) {
+    activeCollectorTask.value = {
+      ...currentTask,
+      info: `采集任务状态查询失败：${e.message || String(e)}。系统会继续保持锁定并重试。`,
+    }
+    persistCollectorTask(activeCollectorTask.value)
+  }
+}
+
 async function trigger(name) {
+  if (collectorBusy.value) return
   triggering.value = name
   try {
     const r = await adminAPI.triggerCollector(name)
+    rememberCollectorTask(name, r)
     showResult('ok', '采集任务已提交', r.task_id || r.message || name)
   } catch (e) {
     showResult('error', '采集触发失败', e.message || String(e))
@@ -489,11 +623,13 @@ function candidateReason(item) {
 
 onMounted(async () => {
   restorePipelineTask()
+  restoreCollectorTask()
   await Promise.all([loadSources(), loadCandidates()])
 })
 
 onBeforeUnmount(() => {
   clearTaskPoller()
+  clearCollectorTaskPoller()
 })
 </script>
 
