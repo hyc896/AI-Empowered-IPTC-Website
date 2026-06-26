@@ -536,7 +536,17 @@ async function pollCollectorTask() {
     return
   }
 
-  if (!currentTask.task_id) return
+  if (!currentTask.task_id) {
+    await loadSources()
+    if (sourceHasCrawledSince(currentTask)) {
+      clearCollectorTaskPoller()
+      clearPersistedCollectorTask()
+      activeCollectorTask.value = null
+      showResult('ok', '采集任务已完成', `${currentTask.source_name} 已更新最近采集时间`)
+      await loadCandidates()
+    }
+    return
+  }
 
   try {
     const response = await collectorAPI.getTaskStatus(currentTask.source_name, currentTask.task_id)
@@ -563,6 +573,14 @@ async function pollCollectorTask() {
     }
     persistCollectorTask(activeCollectorTask.value)
   }
+}
+
+function sourceHasCrawledSince(task) {
+  if (!task?.source_name || !task.started_at) return false
+  const source = sources.value.find(item => item.name === task.source_name)
+  const lastCrawledAt = Date.parse(source?.last_crawled_at || '')
+  const startedAt = Date.parse(task.started_at || '')
+  return Boolean(lastCrawledAt && startedAt && lastCrawledAt >= startedAt)
 }
 
 async function trigger(name) {
