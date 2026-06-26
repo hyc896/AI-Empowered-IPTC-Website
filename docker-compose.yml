@@ -151,6 +151,7 @@ services:
       - REDIS_HOST=redis
       - PLAYWRIGHT_HEADLESS=1
       - LLM_MODEL=Pro/moonshotai/Kimi-K2.6
+      - LLM_TIMEOUT=600
       - FAST_LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
       - FAST_LLM_TIMEOUT=20
       - COLLECTOR_FIELD_ENRICHER_ENABLED=1
@@ -192,6 +193,7 @@ services:
       - REDIS_HOST=redis
       - PLAYWRIGHT_HEADLESS=1
       - LLM_MODEL=Pro/moonshotai/Kimi-K2.6
+      - LLM_TIMEOUT=600
       - FAST_LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
       - FAST_LLM_TIMEOUT=20
       - COLLECTOR_FIELD_ENRICHER_ENABLED=1
@@ -233,6 +235,7 @@ services:
       - REDIS_HOST=redis
       - PLAYWRIGHT_HEADLESS=1
       - LLM_MODEL=Pro/moonshotai/Kimi-K2.6
+      - LLM_TIMEOUT=600
       - FAST_LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
       - FAST_LLM_TIMEOUT=20
       - COLLECTOR_FIELD_ENRICHER_ENABLED=1
