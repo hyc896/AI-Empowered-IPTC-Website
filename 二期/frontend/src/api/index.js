@@ -269,7 +269,7 @@ export const adminAPI = {
     return request.get('/admin/collectors')
   },
   triggerCollector(name) {
-    return request.post(`/admin/collectors/${name}/trigger`)
+    return request.post(`/admin/collectors/${encodeURIComponent(name)}/trigger`)
   },
   triggerMatching(data = {}) {
     return request.post('/admin/trigger-matching', data)

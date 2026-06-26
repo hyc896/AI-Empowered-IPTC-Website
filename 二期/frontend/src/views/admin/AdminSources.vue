@@ -211,7 +211,7 @@ const pipelineBusy = computed(() => {
 
 const collectorBusy = computed(() => {
   const task = activeCollectorTask.value
-  return Boolean(task?.task_id && !terminalTaskStates.has(task.state))
+  return Boolean(task?.source_name && !terminalTaskStates.has(task.state))
 })
 
 const activePipelineLabel = computed(() => {
@@ -248,7 +248,7 @@ const activeCollectorDetail = computed(() => {
   const task = activeCollectorTask.value
   if (!task) return ''
   const info = task.info || (collectorBusy.value ? '采集任务正在后台执行，完成前不能提交新的手动采集。' : '采集任务已结束。')
-  return `${info} 任务ID：${task.task_id}`
+  return `${info} 任务ID：${task.task_id || '等待返回'}`
 })
 
 const filteredSources = computed(() => {
@@ -404,7 +404,7 @@ function clearPersistedPipelineTask() {
 }
 
 function persistCollectorTask(task) {
-  if (!task?.task_id) return
+  if (!task?.source_name) return
   localStorage.setItem(COLLECTOR_TASK_STORAGE_KEY, JSON.stringify(task))
 }
 
@@ -436,7 +436,7 @@ function restoreCollectorTask() {
   try {
     const task = JSON.parse(raw)
     const startedAt = Date.parse(task.started_at || '')
-    if (!task.task_id || !task.source_name || (startedAt && Date.now() - startedAt > COLLECTOR_TASK_MAX_AGE_MS)) {
+    if (!task.source_name || (startedAt && Date.now() - startedAt > COLLECTOR_TASK_MAX_AGE_MS)) {
       clearPersistedCollectorTask()
       return
     }
@@ -480,8 +480,7 @@ function rememberPipelineTask(kind, scope, response = {}) {
 }
 
 function rememberCollectorTask(sourceName, response = {}) {
-  const taskId = response.task_id || response.data?.task_id
-  if (!taskId) return
+  const taskId = response.task_id || response.data?.task_id || response.result?.task_id || null
   clearCollectorTaskPoller()
   activeCollectorTask.value = {
     source_name: sourceName,
@@ -492,7 +491,7 @@ function rememberCollectorTask(sourceName, response = {}) {
     started_at: new Date().toISOString(),
   }
   persistCollectorTask(activeCollectorTask.value)
-  pollCollectorTask()
+  if (taskId) pollCollectorTask()
   collectorTaskPoller.value = setInterval(pollCollectorTask, 5000)
 }
 
@@ -526,7 +525,7 @@ async function pollPipelineTask() {
 
 async function pollCollectorTask() {
   const currentTask = activeCollectorTask.value
-  if (!currentTask?.task_id || !currentTask.source_name) return
+  if (!currentTask?.source_name) return
 
   const startedAt = Date.parse(currentTask.started_at || '')
   if (startedAt && Date.now() - startedAt > COLLECTOR_TASK_MAX_AGE_MS) {
@@ -536,6 +535,8 @@ async function pollCollectorTask() {
     showResult('error', '采集任务状态超时', '已解除前端采集锁，请到服务日志确认任务是否仍在运行。')
     return
   }
+
+  if (!currentTask.task_id) return
 
   try {
     const response = await collectorAPI.getTaskStatus(currentTask.source_name, currentTask.task_id)

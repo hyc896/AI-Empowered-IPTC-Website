@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 from typing import List, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -71,8 +72,17 @@ async def get_collectors(_=Depends(require_admin)):
 async def trigger_collector(source_name: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            r = await client.post(f"{COLLECTOR_URL}/api/v1/collectors/{source_name}/trigger")
+            encoded_source_name = quote(source_name, safe="")
+            r = await client.post(f"{COLLECTOR_URL}/api/v1/collectors/{encoded_source_name}/trigger")
+            r.raise_for_status()
             return r.json()
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text
+            try:
+                detail = e.response.json().get("detail") or detail
+            except Exception:
+                pass
+            raise HTTPException(status_code=e.response.status_code, detail=detail)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"触发采集失败: {e}")
 
