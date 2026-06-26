@@ -87,6 +87,25 @@ async def trigger_collector(source_name: str, _=Depends(require_admin)):
             raise HTTPException(status_code=502, detail=f"触发采集失败: {e}")
 
 
+@router.get("/collectors/{source_name}/task/{task_id}")
+async def get_collector_task_status(source_name: str, task_id: str, _=Depends(require_admin)):
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            encoded_source_name = quote(source_name, safe="")
+            r = await client.get(f"{COLLECTOR_URL}/api/v1/collectors/{encoded_source_name}/task/{task_id}")
+            r.raise_for_status()
+            return r.json()
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text
+            try:
+                detail = e.response.json().get("detail") or detail
+            except Exception:
+                pass
+            raise HTTPException(status_code=e.response.status_code, detail=detail)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Query collector task status failed: {e}")
+
+
 @router.post("/trigger-matching")
 async def trigger_matching(payload: Optional[PipelineTriggerPayload] = None, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=30) as client:

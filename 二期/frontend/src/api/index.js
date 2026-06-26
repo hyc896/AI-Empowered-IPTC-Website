@@ -271,6 +271,9 @@ export const adminAPI = {
   triggerCollector(name) {
     return request.post(`/admin/collectors/${encodeURIComponent(name)}/trigger`)
   },
+  getCollectorTaskStatus(name, taskId) {
+    return request.get(`/admin/collectors/${encodeURIComponent(name)}/task/${taskId}`)
+  },
   triggerMatching(data = {}) {
     return request.post('/admin/trigger-matching', data)
   },

@@ -158,7 +158,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { adminAPI, caseAPI, collectorAPI } from '@/api/index'
+import { adminAPI, caseAPI } from '@/api/index'
 
 const scopeOptions = [
   { label: '全部', value: 'all' },
@@ -549,7 +549,7 @@ async function pollCollectorTask() {
   }
 
   try {
-    const response = await collectorAPI.getTaskStatus(currentTask.source_name, currentTask.task_id)
+    const response = await adminAPI.getCollectorTaskStatus(currentTask.source_name, currentTask.task_id)
     const payload = response.data || response
     activeCollectorTask.value = { ...currentTask, ...payload }
     persistCollectorTask(activeCollectorTask.value)
