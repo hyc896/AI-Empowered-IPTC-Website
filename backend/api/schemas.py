@@ -134,6 +134,7 @@ class CollectorActionResponse(BaseModel):
     """采集器操作响应模型"""
     success: bool = Field(..., description="操作是否成功")
     message: str = Field(..., description="操作结果消息")
+    task_id: Optional[str] = Field(None, description="Celery task ID")
     timestamp: datetime = Field(default_factory=datetime.now, description="操作时间")
 
 
