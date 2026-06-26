@@ -9,7 +9,7 @@ llm:
     base_url: "${LLM_BASE_URL:https://api.siliconflow.cn/v1}"
     api_key: "${LLM_API_KEY:sk-bgvkctcaxpmunpxjcgfdvhbdblhnakffetacrtlqavjeeagc}"
     model: "${LLM_MODEL:zai-org/GLM-4.6}"
-    timeout: 210
+    timeout: "${LLM_TIMEOUT:600}"
     temperature: 0.7
 
   # Embedding模型配置
