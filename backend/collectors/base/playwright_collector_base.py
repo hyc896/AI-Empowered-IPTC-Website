@@ -185,7 +185,7 @@ class PlaywrightCollectorBase(ABC):
             # 【关键】使用asyncio.wait_for添加全局超时保护
             # 防止单个采集器卡死阻塞整个Worker
             try:
-                await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     self._collect_once(),
                     timeout=COLLECTOR_TIMEOUT_SECONDS
                 )
@@ -198,6 +198,20 @@ class PlaywrightCollectorBase(ABC):
                     'collected': 0,
                     'success': False,
                     'error': error_msg
+                }
+
+            if isinstance(result, dict):
+                return {
+                    'collected': int(result.get('collected', result.get('saved', 0)) or 0),
+                    'success': bool(result.get('success', True)),
+                    'error': result.get('error')
+                }
+
+            if isinstance(result, int):
+                return {
+                    'collected': result,
+                    'success': True,
+                    'error': None
                 }
 
             return {

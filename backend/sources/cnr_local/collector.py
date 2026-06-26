@@ -89,7 +89,7 @@ class CNRLocalCollector(PlaywrightCollectorBase):
             logger.error(f"【CNR地方新闻】初始化失败: {e}")
             return False
 
-    async def _collect_once(self) -> None:
+    async def _collect_once(self) -> Dict[str, Any]:
         """单次采集（三阶段架构）"""
         try:
             existing_urls = await self._get_existing_urls()
@@ -98,7 +98,7 @@ class CNRLocalCollector(PlaywrightCollectorBase):
             articles = await self._scrape_articles(existing_urls)
             if not articles:
                 logger.info("【CNR地方新闻】无新文章")
-                return
+                return {'success': True, 'collected': 0, 'discovered': 0, 'enriched': 0, 'saved': 0}
 
             logger.info(f"【CNR地方新闻】采集到 {len(articles)} 篇新文章")
 
@@ -106,9 +106,19 @@ class CNRLocalCollector(PlaywrightCollectorBase):
             enriched_articles = await self._enrich_fields(articles)
 
             # 阶段3：存储
-            await self._store_articles(enriched_articles)
+            saved_count = await self._store_articles(enriched_articles)
 
-            logger.info(f"【CNR地方新闻】本轮采集完成，新增 {len(enriched_articles)} 篇")
+            logger.info(
+                f"【CNR地方新闻】本轮采集完成，候选 {len(articles)} 篇，"
+                f"可入库 {len(enriched_articles)} 篇，新增 {saved_count} 篇"
+            )
+            return {
+                'success': True,
+                'collected': saved_count,
+                'discovered': len(articles),
+                'enriched': len(enriched_articles),
+                'saved': saved_count
+            }
 
         except Exception as e:
             logger.error(f"【CNR地方新闻】采集失败: {e}", exc_info=True)
@@ -268,14 +278,22 @@ class CNRLocalCollector(PlaywrightCollectorBase):
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 收集成功的结果
-            for result in results:
+            # 收集结果；详情页失败时保留列表页基础信息，避免整篇丢失。
+            for article, result in zip(batch, results):
                 if isinstance(result, dict):
                     enriched.append(result)
                 elif isinstance(result, Exception):
-                    logger.error(f"【CNR地方新闻】字段补全异常: {result}")
+                    logger.warning(
+                        f"【CNR地方新闻】字段补全失败，保留基础信息入库: "
+                        f"{article.get('url', 'unknown')}, {result}"
+                    )
+                    fallback_article = dict(article)
+                    fallback_article['content'] = article.get('content') or article.get('title', '')
+                    fallback_article['summary'] = article.get('summary') or article.get('title', '')
+                    fallback_article.setdefault('published_at', None)
+                    enriched.append(fallback_article)
 
-        logger.info(f"【CNR地方新闻】字段补全完成，成功 {len(enriched)}/{len(articles)} 篇")
+        logger.info(f"【CNR地方新闻】字段补全完成，可入库 {len(enriched)}/{len(articles)} 篇")
         return enriched
 
     async def _enrich_single_article(self, article: Dict[str, Any], index: int, total: int) -> Dict[str, Any]:
@@ -397,7 +415,7 @@ class CNRLocalCollector(PlaywrightCollectorBase):
             logger.error(f"【CNR地方新闻】提取时间失败: {e}")
             return None
 
-    async def _store_articles(self, articles: List[Dict[str, Any]]) -> None:
+    async def _store_articles(self, articles: List[Dict[str, Any]]) -> int:
         """阶段3：存储到数据库和向量库"""
         saved_count = 0
         duplicate_count = 0
@@ -411,8 +429,8 @@ class CNRLocalCollector(PlaywrightCollectorBase):
                         source_id=self.source_id,
                         external_id=self._extract_external_id(article['url']),
                         title=article['title'],
-                        content=article['content'],
-                        summary=article.get('summary', ''),
+                        content=article.get('content') or article['title'],
+                        summary=article.get('summary') or article['title'],
                         provider=article['provider'],
                         published_at=article.get('published_at'),
                         url=article['url'],
@@ -437,6 +455,7 @@ class CNRLocalCollector(PlaywrightCollectorBase):
             try:
                 db.commit()
                 logger.info(f"【CNR地方新闻】存储完成 - 成功: {saved_count}, 重复: {duplicate_count}, 失败: {error_count}")
+                return saved_count
             except Exception as e:
                 db.rollback()
                 logger.error(f"【CNR地方新闻】批量提交失败: {e}")
