@@ -79,6 +79,27 @@ class BatchMatchCasesService:
         os.getenv("CASE_GENERATION_MAX_CONSECUTIVE_BUSY_ERRORS", "3")
     )
 
+    @staticmethod
+    def _clean_generated_title(title: str) -> str:
+        """Remove presentation-only Markdown wrappers from generated case titles."""
+        if not title:
+            return ""
+
+        cleaned = re.sub(r"\s+", " ", str(title)).strip()
+        cleaned = re.sub(r"^#+\s*", "", cleaned)
+        cleaned = re.sub(r"^(案例)?标题[:：]\s*", "", cleaned)
+
+        wrappers = ("**", "__", "`", "*", "_")
+        changed = True
+        while changed and cleaned:
+            changed = False
+            for wrapper in wrappers:
+                if cleaned.startswith(wrapper) and cleaned.endswith(wrapper) and len(cleaned) > len(wrapper) * 2:
+                    cleaned = cleaned[len(wrapper):-len(wrapper)].strip()
+                    changed = True
+
+        return cleaned.strip()
+
     def _normalize_scope(self, scope: str = 'all') -> str:
         scope = (scope or 'all').lower()
         if scope not in self.VALID_SCOPES:
@@ -1111,6 +1132,7 @@ class BatchMatchCasesService:
             if line and not line.startswith('【') and not line.startswith('#'):
                 title = line
                 break
+        title = self._clean_generated_title(title) or knowledge_point_name
 
         # 提取核心阅读作为摘要
         summary_match = re.search(r'【核心阅读】\s*\n\s*(.+?)(?=\n\n|【|■)', case_content, re.DOTALL)
@@ -1222,7 +1244,7 @@ class BatchMatchCasesService:
                 max_tokens=50
             )
 
-            title = title_response.choices[0].message.content.strip()
+            title = self._clean_generated_title(title_response.choices[0].message.content)
 
             # 第四步：构造最终内容
             content = f"""
@@ -1243,7 +1265,7 @@ class BatchMatchCasesService:
         except Exception as e:
             self.logger.error(f"[错误] 智能聚合失败，使用备用方案: {e}")
             # 备用方案：简单聚合
-            title = messages[0]['title']
+            title = self._clean_generated_title(messages[0]['title'])
             content_parts = []
             for i, msg in enumerate(messages, 1):
                 content_parts.append(f"""
@@ -1265,7 +1287,7 @@ class BatchMatchCasesService:
             with create_session() as db:
                 case_obj = IPTCCase(
                     id=case['id'],
-                    title=case['title'],
+                    title=self._clean_generated_title(case['title']) or case['title'],
                     content=case['content'],
                     summary=case['summary'],
                     source_url=case['source_url'],
