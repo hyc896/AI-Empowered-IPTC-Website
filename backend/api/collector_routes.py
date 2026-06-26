@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy import func
 
 # 导入Celery任务
 from backend.tasks.collector_tasks import run_collector
@@ -18,6 +19,7 @@ from backend.tasks import app as celery_app
 
 from ..database.connection import create_session
 from ..database.entities import MessageSource
+from ..database.orm_registry import get_orm_registry
 from ..api.schemas import CollectorActionResponse
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,32 @@ SHANGHAI_SOURCE_TABLES = {
     "mp_shanghai_observer_messages",
     "mp_thepaper_shanghai_messages",
 }
+
+
+def _message_stats_for_source(db, model, source_id: str) -> Dict[str, Any]:
+    """Return per-source and table-level counts for a collector message table."""
+    if not model or not hasattr(model, "source_id"):
+        return {
+            "message_count": 0,
+            "table_message_count": 0,
+            "latest_message_crawled_at": None,
+        }
+
+    latest_column = getattr(model, "crawled_at", None)
+    if latest_column is None:
+        latest_column = getattr(model, "published_at", None)
+    per_source_query = db.query(model).filter(model.source_id == source_id)
+    stats = {
+        "message_count": per_source_query.count(),
+        "table_message_count": db.query(model).count(),
+        "latest_message_crawled_at": None,
+    }
+
+    if latest_column is not None:
+        latest = db.query(func.max(latest_column)).filter(model.source_id == source_id).scalar()
+        stats["latest_message_crawled_at"] = latest.isoformat() if latest else None
+
+    return stats
 
 # 创建路由器
 router = APIRouter(
@@ -45,6 +73,7 @@ async def get_collector_list() -> List[Dict[str, Any]]:
     """
     try:
         with create_session() as db:
+            orm_registry = get_orm_registry()
             sources = db.query(MessageSource).filter(
                 MessageSource.is_active == True
             ).all()
@@ -53,12 +82,15 @@ async def get_collector_list() -> List[Dict[str, Any]]:
             for source in sources:
                 config = source.config or {}
                 mysql_table = config.get("mysql_table")
+                model = orm_registry.get_model(mysql_table) if mysql_table else None
+                message_stats = _message_stats_for_source(db, model, source.id)
                 collector_list.append({
                     "name": source.name,
                     "display_name": source.display_name or source.name,
                     "category": source.category,
                     "mysql_table": mysql_table,
                     "source_scope": "shanghai" if mysql_table in SHANGHAI_SOURCE_TABLES else "national",
+                    **message_stats,
                     "auto_collect_enabled": config.get("auto_collect_enabled", True),
                     "interval": config.get("interval", 300),
                     "last_crawled_at": source.last_crawled_at.isoformat() if source.last_crawled_at else None
