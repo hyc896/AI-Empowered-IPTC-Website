@@ -63,8 +63,10 @@ class BatchMatchCasesService:
 
     # 配置参数
     BATCH_SIZE = None                   # 批量处理消息数（None表示处理所有未处理消息）
-    SIMILARITY_THRESHOLD = 0.55         # 相似度阈值（提高到0.55以确保更高的匹配质量）
-    CASE_GENERATION_THRESHOLD = 4       # 案例生成阈值（提高到4条以确保案例质量）
+    SIMILARITY_THRESHOLD = float(os.getenv("MATCH_SIMILARITY_THRESHOLD", "0.62"))
+    CASE_GENERATION_THRESHOLD = int(os.getenv("CASE_GENERATION_THRESHOLD", "4"))
+    NATIONAL_CASE_GENERATION_THRESHOLD = int(os.getenv("NATIONAL_CASE_GENERATION_THRESHOLD", "6"))
+    SHANGHAI_CASE_GENERATION_THRESHOLD = int(os.getenv("SHANGHAI_CASE_GENERATION_THRESHOLD", "4"))
     MAX_MESSAGES_PER_CASE = 6           # 每个案例最多使用的消息数量
     MAX_MESSAGE_USAGE = 3               # 每条消息最多使用次数（增加以充分利用有限消息）
     CASE_GENERATION_REQUEST_DELAY_SECONDS = float(os.getenv("CASE_GENERATION_REQUEST_DELAY_SECONDS", "8"))
@@ -82,6 +84,14 @@ class BatchMatchCasesService:
         if scope not in self.VALID_SCOPES:
             raise ValueError(f"Unsupported scope: {scope}; expected one of {sorted(self.VALID_SCOPES)}")
         return scope
+
+    def _case_generation_threshold(self, scope: str = 'all') -> int:
+        scope = self._normalize_scope(scope)
+        if scope == 'shanghai':
+            return self.SHANGHAI_CASE_GENERATION_THRESHOLD
+        if scope == 'national':
+            return self.NATIONAL_CASE_GENERATION_THRESHOLD
+        return max(self.CASE_GENERATION_THRESHOLD, self.NATIONAL_CASE_GENERATION_THRESHOLD)
 
     def _table_in_scope(self, table_name: str, scope: str = 'all') -> bool:
         scope = self._normalize_scope(scope)
@@ -633,10 +643,11 @@ class BatchMatchCasesService:
         scope = self._normalize_scope(scope)
         stats = self._calculate_kp_statistics(scope=scope)
         candidates = []
+        threshold = self._case_generation_threshold(scope)
 
         for kp_id, stat in stats.items():
             related_messages = self._get_related_messages(kp_id, scope=scope)
-            if len(related_messages) < self.CASE_GENERATION_THRESHOLD:
+            if len(related_messages) < threshold:
                 continue
             messages = related_messages[:3]
             candidates.append({
@@ -779,6 +790,7 @@ class BatchMatchCasesService:
             with create_session() as db:
                 # 统计每个知识点的消息数（不排除已生成案例的知识点）
                 from sqlalchemy import func
+                threshold = self._case_generation_threshold(scope)
                 query = db.query(
                     IPTCMessageKnowledgeRelation.knowledge_point_id,
                     IPTCMessageKnowledgeRelation.knowledge_point_name,
@@ -795,7 +807,7 @@ class BatchMatchCasesService:
                     IPTCMessageKnowledgeRelation.knowledge_point_id,
                     IPTCMessageKnowledgeRelation.knowledge_point_name
                 ).having(
-                    func.count(IPTCMessageKnowledgeRelation.message_id) >= self.CASE_GENERATION_THRESHOLD
+                    func.count(IPTCMessageKnowledgeRelation.message_id) >= threshold
                 ).all()
 
                 for row in results:
@@ -822,6 +834,7 @@ class BatchMatchCasesService:
         """
         generated_cases = []
         consecutive_busy_errors = 0
+        threshold = self._case_generation_threshold(scope)
 
         for kp_id, stat in kp_stats.items():
             self.logger.info(f"\n[案例生成] {stat['name']} (关联消息: {stat['count']}条)")
@@ -829,10 +842,10 @@ class BatchMatchCasesService:
             try:
                 # 获取该知识点的所有关联消息
                 messages = self._get_related_messages(kp_id, scope=scope)
-                if len(messages) < self.CASE_GENERATION_THRESHOLD:
+                if len(messages) < threshold:
                     self.logger.info(
                         f"  跳过案例生成: 过滤后可用消息 {len(messages)} 条，"
-                        f"低于阈值 {self.CASE_GENERATION_THRESHOLD}"
+                        f"低于阈值 {threshold}"
                     )
                     continue
 
