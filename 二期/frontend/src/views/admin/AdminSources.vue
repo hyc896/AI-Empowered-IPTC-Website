@@ -104,7 +104,10 @@
               <small>{{ source.name }}</small>
             </div>
             <span class="scope-pill" :class="source.source_scope">{{ sourceScopeLabel(source.source_scope) }}</span>
-            <span>{{ formatNumber(source.message_count) }} 条</span>
+            <span class="message-count-cell">
+              <strong>{{ formatNumber(source.message_count) }} 条</strong>
+              <small v-if="hasSharedTableCount(source)">表总量 {{ formatNumber(source.table_message_count) }}</small>
+            </span>
             <span :class="['status-pill', source.is_active ? 'active' : 'inactive']">
               {{ source.is_active ? '启用' : '停用' }}
             </span>
@@ -279,6 +282,11 @@ function sourceScopeLabel(scope) {
   return '全国'
 }
 
+function hasSharedTableCount(source) {
+  return Number.isFinite(Number(source.table_message_count))
+    && Number(source.table_message_count) !== Number(source.message_count || 0)
+}
+
 function normalizeSource(raw = {}, statusMap = new Map()) {
   const name = raw.name || raw.source_name || raw.display_name
   const table = raw.mysql_table || raw.source_table || raw.table_name
@@ -291,6 +299,7 @@ function normalizeSource(raw = {}, statusMap = new Map()) {
     mysql_table: table,
     source_scope: scope === 'shanghai' ? 'shanghai' : 'national',
     message_count: raw.message_count ?? status.message_count ?? 0,
+    table_message_count: raw.table_message_count ?? status.table_message_count,
     is_active: raw.is_active ?? status.is_active ?? true,
     auto_collect_enabled: raw.auto_collect_enabled ?? status.auto_collect_enabled ?? true,
     last_crawled_at: raw.last_crawled_at || status.last_crawled_at,
@@ -928,6 +937,24 @@ button:disabled {
   margin-top: 3px;
   color: rgba(245, 239, 228, 0.42);
   font-size: 12px;
+}
+
+.message-count-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.message-count-cell strong {
+  color: rgba(245, 239, 228, 0.88);
+  font-size: 13px;
+}
+
+.message-count-cell small {
+  color: rgba(245, 239, 228, 0.48);
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 .scope-pill,
