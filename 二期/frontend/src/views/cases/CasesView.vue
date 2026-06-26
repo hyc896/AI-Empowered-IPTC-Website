@@ -52,7 +52,6 @@
           node-key="id"
           :props="{ label: 'label', children: 'children' }"
           highlight-current
-          default-expand-all
           class="kp-tree"
           @node-click="onNodeClick"
         >
