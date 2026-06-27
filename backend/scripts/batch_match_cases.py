@@ -856,6 +856,7 @@ class BatchMatchCasesService:
         generated_cases = []
         consecutive_busy_errors = 0
         threshold = self._case_generation_threshold(scope)
+        existing_case_regions = self._load_existing_case_regions()
 
         for kp_id, stat in kp_stats.items():
             self.logger.info(f"\n[案例生成] {stat['name']} (关联消息: {stat['count']}条)")
@@ -867,6 +868,19 @@ class BatchMatchCasesService:
                     self.logger.info(
                         f"  跳过案例生成: 过滤后可用消息 {len(messages)} 条，"
                         f"低于阈值 {threshold}"
+                    )
+                    continue
+
+                target_region = self._primary_region_for_messages(messages)
+                if self._case_exists_in_region(
+                    existing_case_regions,
+                    kp_id,
+                    stat['name'],
+                    target_region
+                ):
+                    self.logger.info(
+                        f"  跳过案例生成: 知识点已存在{target_region}案例，"
+                        "避免重复生成"
                     )
                     continue
 
@@ -884,6 +898,12 @@ class BatchMatchCasesService:
                 self._mark_case_generated(kp_id, stat['name'])
 
                 generated_cases.append(case)
+                self._remember_existing_case_region(
+                    existing_case_regions,
+                    kp_id,
+                    stat['name'],
+                    case.get('primary_region', target_region)
+                )
                 consecutive_busy_errors = 0
 
                 self.logger.info(f"  ✅ 案例生成成功: {case['title']}")
@@ -920,6 +940,83 @@ class BatchMatchCasesService:
                 continue
 
         return generated_cases
+
+    def _normalize_case_region(self, region: str) -> str:
+        """Normalize legacy/mojibake region labels into the current case pools."""
+        value = (region or '').strip()
+        if value == '上海' or '上海' in value:
+            return '上海'
+        return '全国'
+
+    def _primary_region_for_messages(self, messages: List[Dict]) -> str:
+        """A case is Shanghai-scoped only when all selected source tables are Shanghai sources."""
+        source_tables = {
+            msg.get('source_table', '')
+            for msg in messages
+            if msg.get('source_table')
+        }
+        return '上海' if source_tables and source_tables <= self.SHANGHAI_SOURCE_TABLES else '全国'
+
+    def _load_existing_case_regions(self) -> Dict[str, Set[str]]:
+        """
+        Build a map of knowledge point id/name to case regions already generated.
+
+        This keeps national and Shanghai case pools independent: a national
+        case does not block a Shanghai case for the same knowledge point.
+        """
+        existing = defaultdict(set)
+
+        try:
+            with create_session() as db:
+                cases = db.query(
+                    IPTCCase.primary_region,
+                    IPTCCase.related_knowledge_points,
+                    IPTCCase.tags
+                ).all()
+
+                for primary_region, related_points, tags in cases:
+                    region = self._normalize_case_region(primary_region)
+                    if isinstance(related_points, list):
+                        for kp in related_points:
+                            if not isinstance(kp, dict):
+                                continue
+                            kp_id = kp.get('id')
+                            kp_name = kp.get('name')
+                            if kp_id:
+                                existing[f"id:{kp_id}"].add(region)
+                            if kp_name:
+                                existing[f"name:{kp_name}"].add(region)
+                    if tags:
+                        existing[f"name:{tags}"].add(region)
+
+        except Exception as e:
+            self.logger.error(f"[错误] 加载已有案例区域索引失败: {e}")
+
+        return existing
+
+    def _case_exists_in_region(
+        self,
+        existing_case_regions: Dict[str, Set[str]],
+        kp_id: str,
+        kp_name: str,
+        region: str
+    ) -> bool:
+        normalized_region = self._normalize_case_region(region)
+        return (
+            normalized_region in existing_case_regions.get(f"id:{kp_id}", set())
+            or normalized_region in existing_case_regions.get(f"name:{kp_name}", set())
+        )
+
+    def _remember_existing_case_region(
+        self,
+        existing_case_regions: Dict[str, Set[str]],
+        kp_id: str,
+        kp_name: str,
+        region: str
+    ) -> None:
+        normalized_region = self._normalize_case_region(region)
+        existing_case_regions[f"id:{kp_id}"].add(normalized_region)
+        existing_case_regions[f"name:{kp_name}"].add(normalized_region)
 
     @staticmethod
     def _is_llm_busy_error(exc: Exception) -> bool:
@@ -1143,8 +1240,7 @@ class BatchMatchCasesService:
             summary = case_content[:500]
 
         # 6. 判断地域标签：混合来源默认归全国，只有全部消息来自上海源才归上海。
-        source_tables = {msg.get('source_table', '') for msg in related_messages if msg.get('source_table')}
-        primary_region = '上海' if source_tables and source_tables <= self.SHANGHAI_SOURCE_TABLES else '全国'
+        primary_region = self._primary_region_for_messages(related_messages)
 
         # 7. 构造案例对象
         case = {
