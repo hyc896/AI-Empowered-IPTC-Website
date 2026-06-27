@@ -78,6 +78,12 @@ class BatchMatchCasesService:
     CASE_GENERATION_MAX_CONSECUTIVE_BUSY_ERRORS = int(
         os.getenv("CASE_GENERATION_MAX_CONSECUTIVE_BUSY_ERRORS", "3")
     )
+    CASE_GENERATION_MIN_TOP_SIMILARITY = float(
+        os.getenv("CASE_GENERATION_MIN_TOP_SIMILARITY", "0.70")
+    )
+    CASE_GENERATION_MIN_AVG_SIMILARITY = float(
+        os.getenv("CASE_GENERATION_MIN_AVG_SIMILARITY", "0.66")
+    )
 
     @staticmethod
     def _clean_generated_title(title: str) -> str:
@@ -884,6 +890,11 @@ class BatchMatchCasesService:
                     )
                     continue
 
+                quality_ok, quality_reason = self._messages_pass_generation_quality(messages)
+                if not quality_ok:
+                    self.logger.info(f"  跳过案例生成: {quality_reason}")
+                    continue
+
                 # 调用LLM生成案例
                 case = self._generate_case_for_knowledge_point(
                     knowledge_point_id=kp_id,
@@ -916,6 +927,10 @@ class BatchMatchCasesService:
 
             except Exception as e:
                 self.logger.error(f"  ❌ 案例生成失败: {e}", exc_info=True)
+                if self._is_llm_fatal_error(e):
+                    self.logger.error("  模型服务返回不可恢复错误，停止本轮案例生成，避免继续消耗请求")
+                    break
+
                 if self._is_llm_busy_error(e):
                     consecutive_busy_errors += 1
                     if consecutive_busy_errors >= self.CASE_GENERATION_MAX_CONSECUTIVE_BUSY_ERRORS:
@@ -940,6 +955,35 @@ class BatchMatchCasesService:
                 continue
 
         return generated_cases
+
+    def _messages_pass_generation_quality(self, messages: List[Dict]) -> tuple[bool, str]:
+        """Gate expensive LLM generation on strong knowledge-message relevance."""
+        scores = [
+            float(msg.get('similarity') or 0)
+            for msg in messages
+            if msg.get('similarity') is not None
+        ]
+        if not scores:
+            return False, "缺少相似度分数，跳过昂贵生成"
+
+        top_score = max(scores)
+        avg_score = sum(scores) / len(scores)
+
+        if top_score < self.CASE_GENERATION_MIN_TOP_SIMILARITY:
+            return (
+                False,
+                f"最高相似度 {top_score:.3f} 低于质量门槛 "
+                f"{self.CASE_GENERATION_MIN_TOP_SIMILARITY:.3f}"
+            )
+
+        if avg_score < self.CASE_GENERATION_MIN_AVG_SIMILARITY:
+            return (
+                False,
+                f"入选消息平均相似度 {avg_score:.3f} 低于质量门槛 "
+                f"{self.CASE_GENERATION_MIN_AVG_SIMILARITY:.3f}"
+            )
+
+        return True, f"质量通过 top={top_score:.3f}, avg={avg_score:.3f}"
 
     def _normalize_case_region(self, region: str) -> str:
         """Normalize legacy/mojibake region labels into the current case pools."""
@@ -1033,6 +1077,21 @@ class BatchMatchCasesService:
             "429",
         ]
         return any(marker in message for marker in busy_markers)
+
+    @staticmethod
+    def _is_llm_fatal_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        fatal_markers = [
+            "insufficient",
+            "balance is insufficient",
+            "account balance",
+            "30001",
+            "permissiondenied",
+            "invalid api key",
+            "unauthorized",
+            "authentication",
+        ]
+        return any(marker in message for marker in fatal_markers)
 
     def _count_message_usage(self, db) -> Dict[str, int]:
         """
