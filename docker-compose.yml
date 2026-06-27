@@ -157,6 +157,8 @@ services:
       - MATCH_SIMILARITY_THRESHOLD=0.62
       - NATIONAL_CASE_GENERATION_THRESHOLD=6
       - SHANGHAI_CASE_GENERATION_THRESHOLD=4
+      - CASE_GENERATION_MIN_TOP_SIMILARITY=0.70
+      - CASE_GENERATION_MIN_AVG_SIMILARITY=0.66
       - COLLECTOR_FIELD_ENRICHER_ENABLED=1
       - COLLECTOR_FIELD_ENRICHER_TIMEOUT=12
       - COLLECTOR_FIELD_ENRICHER_RETRIES=1
@@ -178,7 +180,7 @@ services:
     build:
       context: ./一期
       dockerfile: Dockerfile
-    command: celery -A backend.tasks worker -Q collector,default --loglevel=info --pool=solo --concurrency=1
+    command: celery -A backend.tasks worker -Q celery,default,collector --loglevel=info --pool=solo --concurrency=1
     volumes:
       - chromadb_data:/app/backend/data/chromadb_new
       - ./一期/backend/data/prompts:/app/backend/data/prompts:ro
@@ -202,6 +204,8 @@ services:
       - MATCH_SIMILARITY_THRESHOLD=0.62
       - NATIONAL_CASE_GENERATION_THRESHOLD=6
       - SHANGHAI_CASE_GENERATION_THRESHOLD=4
+      - CASE_GENERATION_MIN_TOP_SIMILARITY=0.70
+      - CASE_GENERATION_MIN_AVG_SIMILARITY=0.66
       - COLLECTOR_FIELD_ENRICHER_ENABLED=1
       - COLLECTOR_FIELD_ENRICHER_TIMEOUT=12
       - COLLECTOR_FIELD_ENRICHER_RETRIES=1
@@ -247,6 +251,8 @@ services:
       - MATCH_SIMILARITY_THRESHOLD=0.62
       - NATIONAL_CASE_GENERATION_THRESHOLD=6
       - SHANGHAI_CASE_GENERATION_THRESHOLD=4
+      - CASE_GENERATION_MIN_TOP_SIMILARITY=0.70
+      - CASE_GENERATION_MIN_AVG_SIMILARITY=0.66
       - COLLECTOR_FIELD_ENRICHER_ENABLED=1
       - COLLECTOR_FIELD_ENRICHER_TIMEOUT=12
       - COLLECTOR_FIELD_ENRICHER_RETRIES=1
